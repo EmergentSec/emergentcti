@@ -1,0 +1,187 @@
+{% extends "_base.html.j2" %}
+
+{% block content %}
+<!-- Executive Summary -->
+<div class="section">
+  <h2>Executive Summary</h2>
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total Observables</div>
+      <div class="stat-value">{{ total_observable_count }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Observable Types</div>
+      <div class="stat-value">{{ type_counts | length }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Active Campaigns</div>
+      <div class="stat-value">{{ campaigns | length }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Threat Actors</div>
+      <div class="stat-value">{{ threat_actors | length }}</div>
+    </div>
+  </div>
+  <p class="text-sm text-muted">
+    Report period: {{ date_from }} to {{ date_to }}.
+    Showing top {{ top_observables | length }} indicators by confidence score.
+  </p>
+</div>
+
+<!-- Observable Distribution -->
+<div class="section">
+  <h2>Observable Distribution</h2>
+  {% if type_counts %}
+  <table>
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Count</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in type_counts %}
+      <tr>
+        <td><span class="badge badge-blue">{{ item.type }}</span></td>
+        <td>{{ item.count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No observables found for the selected period.</div>
+  {% endif %}
+</div>
+
+<!-- Top Indicators -->
+<div class="section">
+  <h2>Top Indicators</h2>
+  {% if top_observables %}
+  <table>
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Value</th>
+        <th>Confidence</th>
+        <th>TLP</th>
+        <th>Last Seen</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for obs in top_observables %}
+      <tr>
+        <td><span class="badge badge-purple">{{ obs.type.value if obs.type.value is defined else obs.type }}</span></td>
+        <td class="mono">{{ obs.value }}</td>
+        <td>
+          {% if obs.confidence_score >= 80 %}
+          <span class="badge badge-red">{{ obs.confidence_score }}</span>
+          {% elif obs.confidence_score >= 60 %}
+          <span class="badge badge-amber">{{ obs.confidence_score }}</span>
+          {% else %}
+          <span class="badge badge-gray">{{ obs.confidence_score }}</span>
+          {% endif %}
+        </td>
+        <td><span class="badge badge-green">{{ obs.tlp | upper }}</span></td>
+        <td class="text-sm text-muted">{{ obs.last_seen.strftime('%Y-%m-%d %H:%M') if obs.last_seen else 'N/A' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No indicators found for the selected period.</div>
+  {% endif %}
+</div>
+
+<!-- Threat Actor Activity -->
+<div class="section">
+  <h2>Threat Actor Activity</h2>
+  {% if threat_actors %}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Motivation</th>
+        <th>Country</th>
+        <th>Last Seen</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for actor in threat_actors %}
+      <tr>
+        <td><strong>{{ actor.name }}</strong></td>
+        <td>{{ actor.motivation or 'Unknown' }}</td>
+        <td>{{ actor.country or 'Unknown' }}</td>
+        <td class="text-sm text-muted">{{ actor.last_seen.strftime('%Y-%m-%d') if actor.last_seen else 'N/A' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No threat actors tracked.</div>
+  {% endif %}
+</div>
+
+<!-- Campaign Status -->
+<div class="section">
+  <h2>Campaign Status</h2>
+  {% if campaigns %}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Observables</th>
+        <th>Last Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for camp in campaigns %}
+      <tr>
+        <td><strong>{{ camp.name }}</strong></td>
+        <td>
+          {% if camp.status == 'active' %}
+          <span class="badge badge-green">Active</span>
+          {% elif camp.status == 'suspected' %}
+          <span class="badge badge-yellow">Suspected</span>
+          {% else %}
+          <span class="badge badge-gray">Historical</span>
+          {% endif %}
+        </td>
+        <td>{{ camp.observables | length if camp.observables else 0 }}</td>
+        <td class="text-sm text-muted">{{ camp.updated_at.strftime('%Y-%m-%d') if camp.updated_at else 'N/A' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No active campaigns.</div>
+  {% endif %}
+</div>
+
+<!-- Recent Correlations -->
+<div class="section">
+  <h2>Recent Correlation Events</h2>
+  {% if correlations %}
+  <table>
+    <thead>
+      <tr>
+        <th>Action</th>
+        <th>Source</th>
+        <th>Correlated At</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for corr in correlations %}
+      <tr>
+        <td><span class="badge badge-blue">{{ corr.action_type }}</span></td>
+        <td>{{ corr.source }}</td>
+        <td class="text-sm text-muted">{{ corr.correlated_at.strftime('%Y-%m-%d %H:%M') if corr.correlated_at else 'N/A' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No recent correlation events.</div>
+  {% endif %}
+</div>
+{% endblock %}

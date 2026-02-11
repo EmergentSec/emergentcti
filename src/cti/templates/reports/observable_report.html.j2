@@ -1,0 +1,173 @@
+{% extends "_base.html.j2" %}
+
+{% block content %}
+<!-- Observable Details -->
+<div class="section">
+  <h2>Observable Details</h2>
+  <div class="detail-row">
+    <div class="detail-label">Type</div>
+    <div class="detail-value"><span class="badge badge-purple">{{ observable.type.value if observable.type.value is defined else observable.type }}</span></div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Value</div>
+    <div class="detail-value mono">{{ observable.value }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Confidence Score</div>
+    <div class="detail-value">
+      {% if observable.confidence_score >= 80 %}
+      <span class="badge badge-red">{{ observable.confidence_score }}/100</span>
+      {% elif observable.confidence_score >= 60 %}
+      <span class="badge badge-amber">{{ observable.confidence_score }}/100</span>
+      {% else %}
+      <span class="badge badge-gray">{{ observable.confidence_score }}/100</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">TLP</div>
+    <div class="detail-value"><span class="badge badge-green">TLP:{{ observable.tlp | upper }}</span></div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Category</div>
+    <div class="detail-value">{{ observable.category or 'Uncategorized' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Description</div>
+    <div class="detail-value">{{ observable.description or 'No description' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">First Seen</div>
+    <div class="detail-value">{{ observable.first_seen.strftime('%Y-%m-%d %H:%M UTC') if observable.first_seen else 'N/A' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Last Seen</div>
+    <div class="detail-value">{{ observable.last_seen.strftime('%Y-%m-%d %H:%M UTC') if observable.last_seen else 'N/A' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Tags</div>
+    <div class="detail-value">
+      {% for tag in observable.tags %}
+      <span class="badge badge-blue">{{ tag.name if tag.name is defined else tag }}</span>
+      {% else %}
+      <span class="text-muted">No tags</span>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Sources</div>
+    <div class="detail-value">
+      {% for source in observable.sources %}
+      <span class="badge badge-gray">{{ source.name if source.name is defined else source }}</span>
+      {% else %}
+      <span class="text-muted">No sources</span>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Active</div>
+    <div class="detail-value">
+      {% if observable.is_active %}
+      <span class="badge badge-green">Active</span>
+      {% else %}
+      <span class="badge badge-red">Inactive</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Enrichment Results -->
+<div class="section">
+  <h2>Enrichment Results</h2>
+  {% if enrichments %}
+  <table>
+    <thead>
+      <tr>
+        <th>Provider</th>
+        <th>Status</th>
+        <th>Summary</th>
+        <th>Date</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for enrich in enrichments %}
+      <tr>
+        <td><strong>{{ enrich.provider_name }}</strong></td>
+        <td>
+          {% if enrich.status.value == 'success' %}
+          <span class="badge badge-green">Success</span>
+          {% elif enrich.status.value == 'failure' %}
+          <span class="badge badge-red">Failed</span>
+          {% elif enrich.status.value == 'running' %}
+          <span class="badge badge-blue">Running</span>
+          {% else %}
+          <span class="badge badge-yellow">Pending</span>
+          {% endif %}
+        </td>
+        <td class="text-sm">{{ enrich.summary or 'No summary' }}</td>
+        <td class="text-sm text-muted">{{ enrich.created_at.strftime('%Y-%m-%d %H:%M') if enrich.created_at else 'N/A' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No enrichment runs for this observable.</div>
+  {% endif %}
+</div>
+
+<!-- Relationships -->
+<div class="section">
+  <h2>Relationships</h2>
+  {% if relationships %}
+  <table>
+    <thead>
+      <tr>
+        <th>Source</th>
+        <th>Relationship</th>
+        <th>Target</th>
+        <th>Confidence</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rel in relationships %}
+      <tr>
+        <td class="mono text-sm">{{ rel.source.value if rel.source else rel.source_id }}</td>
+        <td><span class="badge badge-purple">{{ rel.relationship_type }}</span></td>
+        <td class="mono text-sm">{{ rel.target.value if rel.target else rel.target_id }}</td>
+        <td>{{ rel.confidence }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No relationships found.</div>
+  {% endif %}
+</div>
+
+<!-- Correlation History -->
+<div class="section">
+  <h2>Correlation History</h2>
+  {% if correlations %}
+  <table>
+    <thead>
+      <tr>
+        <th>Action</th>
+        <th>Source</th>
+        <th>Correlated At</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for corr in correlations %}
+      <tr>
+        <td><span class="badge badge-blue">{{ corr.action_type }}</span></td>
+        <td>{{ corr.source }}</td>
+        <td class="text-sm text-muted">{{ corr.correlated_at.strftime('%Y-%m-%d %H:%M') if corr.correlated_at else 'N/A' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No correlation events for this observable.</div>
+  {% endif %}
+</div>
+{% endblock %}

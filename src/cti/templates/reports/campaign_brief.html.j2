@@ -1,0 +1,199 @@
+{% extends "_base.html.j2" %}
+
+{% block content %}
+<!-- Campaign Overview -->
+<div class="section">
+  <h2>Campaign Overview</h2>
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">Status</div>
+      <div class="stat-value">
+        {% if campaign.status == 'active' %}
+        <span class="badge badge-green" style="font-size: 1rem;">Active</span>
+        {% elif campaign.status == 'suspected' %}
+        <span class="badge badge-yellow" style="font-size: 1rem;">Suspected</span>
+        {% else %}
+        <span class="badge badge-gray" style="font-size: 1rem;">Historical</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Linked Observables</div>
+      <div class="stat-value">{{ observables | length }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Threat Actors</div>
+      <div class="stat-value">{{ linked_actors | length }}{% if threat_actor %} + primary{% endif %}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">TLP</div>
+      <div class="stat-value"><span class="badge badge-green" style="font-size: 1rem;">{{ campaign.tlp | upper }}</span></div>
+    </div>
+  </div>
+
+  <div class="detail-row">
+    <div class="detail-label">Name</div>
+    <div class="detail-value"><strong>{{ campaign.name }}</strong></div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Description</div>
+    <div class="detail-value">{{ campaign.description or 'No description provided' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Objective</div>
+    <div class="detail-value">{{ campaign.objective or 'Unknown' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">First Seen</div>
+    <div class="detail-value">{{ campaign.first_seen.strftime('%Y-%m-%d %H:%M UTC') if campaign.first_seen else 'N/A' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Last Seen</div>
+    <div class="detail-value">{{ campaign.last_seen.strftime('%Y-%m-%d %H:%M UTC') if campaign.last_seen else 'N/A' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Created</div>
+    <div class="detail-value">{{ campaign.created_at.strftime('%Y-%m-%d %H:%M UTC') if campaign.created_at else 'N/A' }}</div>
+  </div>
+</div>
+
+<!-- Threat Actors -->
+<div class="section">
+  <h2>Threat Actors</h2>
+  {% if threat_actor %}
+  <h3>Primary Threat Actor</h3>
+  <div class="detail-row">
+    <div class="detail-label">Name</div>
+    <div class="detail-value"><strong>{{ threat_actor.name }}</strong></div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Motivation</div>
+    <div class="detail-value">{{ threat_actor.motivation or 'Unknown' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Country</div>
+    <div class="detail-value">{{ threat_actor.country or 'Unknown' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Sophistication</div>
+    <div class="detail-value">{{ threat_actor.sophistication or 'Unknown' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Description</div>
+    <div class="detail-value">{{ threat_actor.description or 'No description' }}</div>
+  </div>
+  {% endif %}
+
+  {% if linked_actors %}
+  <h3>Related Threat Actors (via Observables)</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Motivation</th>
+        <th>Country</th>
+        <th>Last Seen</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for actor in linked_actors %}
+      <tr>
+        <td><strong>{{ actor.name }}</strong></td>
+        <td>{{ actor.motivation or 'Unknown' }}</td>
+        <td>{{ actor.country or 'Unknown' }}</td>
+        <td class="text-sm text-muted">{{ actor.last_seen.strftime('%Y-%m-%d') if actor.last_seen else 'N/A' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if not threat_actor and not linked_actors %}
+  <div class="empty-state">No threat actors associated with this campaign.</div>
+  {% endif %}
+</div>
+
+<!-- Linked Observables -->
+<div class="section">
+  <h2>Linked Observables</h2>
+  {% if observables %}
+  <table>
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Value</th>
+        <th>Confidence</th>
+        <th>TLP</th>
+        <th>Last Seen</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for obs in observables %}
+      <tr>
+        <td><span class="badge badge-purple">{{ obs.type.value if obs.type.value is defined else obs.type }}</span></td>
+        <td class="mono">{{ obs.value }}</td>
+        <td>
+          {% if obs.confidence_score >= 80 %}
+          <span class="badge badge-red">{{ obs.confidence_score }}</span>
+          {% elif obs.confidence_score >= 60 %}
+          <span class="badge badge-amber">{{ obs.confidence_score }}</span>
+          {% else %}
+          <span class="badge badge-gray">{{ obs.confidence_score }}</span>
+          {% endif %}
+        </td>
+        <td><span class="badge badge-green">{{ obs.tlp | upper }}</span></td>
+        <td class="text-sm text-muted">{{ obs.last_seen.strftime('%Y-%m-%d %H:%M') if obs.last_seen else 'N/A' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No observables linked to this campaign.</div>
+  {% endif %}
+</div>
+
+<!-- Timeline -->
+<div class="section">
+  <h2>Timeline</h2>
+  <div class="detail-row">
+    <div class="detail-label">Campaign First Seen</div>
+    <div class="detail-value">{{ campaign.first_seen.strftime('%Y-%m-%d %H:%M UTC') if campaign.first_seen else 'Not determined' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Campaign Last Seen</div>
+    <div class="detail-value">{{ campaign.last_seen.strftime('%Y-%m-%d %H:%M UTC') if campaign.last_seen else 'Not determined' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Record Created</div>
+    <div class="detail-value">{{ campaign.created_at.strftime('%Y-%m-%d %H:%M UTC') if campaign.created_at else 'N/A' }}</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Last Updated</div>
+    <div class="detail-value">{{ campaign.updated_at.strftime('%Y-%m-%d %H:%M UTC') if campaign.updated_at else 'N/A' }}</div>
+  </div>
+  {% if observables %}
+  <div class="detail-row">
+    <div class="detail-label">Earliest Observable</div>
+    <div class="detail-value">
+      {% set earliest = observables | selectattr('first_seen') | sort(attribute='first_seen') | first %}
+      {% if earliest and earliest.first_seen %}
+      {{ earliest.first_seen.strftime('%Y-%m-%d %H:%M UTC') }} ({{ earliest.value }})
+      {% else %}
+      N/A
+      {% endif %}
+    </div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Latest Observable</div>
+    <div class="detail-value">
+      {% set latest = observables | selectattr('last_seen') | sort(attribute='last_seen', reverse=True) | first %}
+      {% if latest and latest.last_seen %}
+      {{ latest.last_seen.strftime('%Y-%m-%d %H:%M UTC') }} ({{ latest.value }})
+      {% else %}
+      N/A
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

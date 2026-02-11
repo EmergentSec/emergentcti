@@ -1,0 +1,15 @@
+.venv
+__pycache__
+.git
+.github
+frontend/node_modules
+frontend/dist
+.env
+.env.*
+.coverage
+htmlcov
+.pytest_cache
+.mypy_cache
+*.md
+!README.md
+tests/

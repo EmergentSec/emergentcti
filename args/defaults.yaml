@@ -1,0 +1,20 @@
+# EmergentCTI Platform -- Behavior Settings
+confidence:
+  schema_default: 50
+  decay_rate_per_week: 5
+  decay_floor: 10
+  stale_threshold_days: 30
+  enrichment_weight_provider: 0.6
+  enrichment_weight_existing: 0.4
+
+feeds:
+  max_retries: 3
+  retry_delay_seconds: 60
+  scheduler_check_interval_seconds: 60
+
+enrichment:
+  auto_enrich_cooldown_hours: 24
+  rate_limit_between_dispatches_seconds: 1
+
+lifecycle:
+  check_interval_seconds: 3600

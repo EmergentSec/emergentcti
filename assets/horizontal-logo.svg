@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 360" role="img" aria-label="EmergentCTI horizontal logo">
+  <style>
+    :root{
+      --ecti-bg:transparent; /* set to #0B0B0B if you want a pill background */
+      --ecti-fg:#0B0B0B;
+      --ecti-muted:#4C4C4C;
+      --ecti-red:#85191A;
+    }
+
+    .bg{fill:var(--ecti-bg);}
+    .hex{stroke:var(--ecti-fg);stroke-width:18;fill:none;stroke-linejoin:round;}
+    .line{stroke:var(--ecti-red);stroke-width:16;fill:none;stroke-linecap:round;stroke-linejoin:round;}
+    .node{fill:var(--ecti-red);stroke:var(--ecti-fg);stroke-width:8;}
+
+    .name{
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-weight: 700;
+      font-size: 124px;
+      letter-spacing: -1px;
+      fill: var(--ecti-fg);
+    }
+    .cti{fill:var(--ecti-red);}
+    .tag{
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-weight: 500;
+      font-size: 34px;
+      letter-spacing: 6px;
+      fill: var(--ecti-muted);
+    }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="1400" height="360" rx="48"></rect>
+
+  <!-- Icon -->
+  <g transform="translate(72,60) scale(0.46)">
+    <path class="hex" d="M426 256
+             L341 403.22
+             L171 403.22
+             L86 256
+             L171 108.78
+             L341 108.78
+             Z"></path>
+
+    <path class="line" d="M190 190 L256 256 L322 190"></path>
+    <path class="line" d="M190 322 L256 256 L322 322"></path>
+    <path class="line" d="M190 190 L190 322"></path>
+    <path class="line" d="M322 190 L322 322"></path>
+    <path class="line" d="M190 190 L322 322"></path>
+    <path class="line" d="M322 190 L190 322"></path>
+
+    <circle class="node" cx="190" cy="190" r="16"></circle>
+    <circle class="node" cx="322" cy="190" r="16"></circle>
+    <circle class="node" cx="190" cy="322" r="16"></circle>
+    <circle class="node" cx="322" cy="322" r="16"></circle>
+  </g>
+
+  <!-- Wordmark -->
+  <text class="name" x="380" y="195">
+    Emergent<tspan class="cti">CTI</tspan>
+  </text>
+
+  <!-- Optional descriptor -->
+  <text class="tag" x="386" y="270">CYBER THREAT INTELLIGENCE</text>
+</svg>

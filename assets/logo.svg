@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="EmergentCTI logo">
+  <style>
+    :root{
+      --ecti-bg:#0B0B0B;   /* set to transparent if you don't want the tile */
+      --ecti-fg:#FFFFFF;   /* hex + node strokes */
+      --ecti-red:#85191A;  /* accent */
+    }
+    .bg{fill:var(--ecti-bg);}
+    .hex{stroke:var(--ecti-fg);stroke-width:18;fill:none;stroke-linejoin:round;}
+    .line{stroke:var(--ecti-red);stroke-width:16;fill:none;stroke-linecap:round;stroke-linejoin:round;}
+    .node{fill:var(--ecti-red);stroke:var(--ecti-fg);stroke-width:8;}
+  </style>
+
+  <rect class="bg" x="0" y="0" width="512" height="512" rx="64"></rect>
+
+  <!-- Regular flat-top hexagon -->
+  <path class="hex" d="M426 256
+           L341 403.22
+           L171 403.22
+           L86 256
+           L171 108.78
+           L341 108.78
+           Z"></path>
+
+  <!-- Simple centered network (no center dot) -->
+  <path class="line" d="M190 190 L256 256 L322 190"></path>
+  <path class="line" d="M190 322 L256 256 L322 322"></path>
+  <path class="line" d="M190 190 L190 322"></path>
+  <path class="line" d="M322 190 L322 322"></path>
+  <path class="line" d="M190 190 L322 322"></path>
+  <path class="line" d="M322 190 L190 322"></path>
+
+  <circle class="node" cx="190" cy="190" r="16"></circle>
+  <circle class="node" cx="322" cy="190" r="16"></circle>
+  <circle class="node" cx="190" cy="322" r="16"></circle>
+  <circle class="node" cx="322" cy="322" r="16"></circle>
+</svg>
