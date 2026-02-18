@@ -64,6 +64,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("Could not seed ATT&CK data", exc_info=True)
 
+    # Seed default feed configurations
+    try:
+        from cti.core.database import async_session_factory as feed_session_factory
+        from cti.services.feed_service import seed_default_feeds
+
+        async with feed_session_factory() as session:
+            count = await seed_default_feeds(session)
+            if count:
+                logger.info("Seeded %d default feed configurations", count)
+            await session.commit()
+    except Exception:
+        logger.warning("Could not seed default feed configurations", exc_info=True)
+
     yield
 
     # Shutdown

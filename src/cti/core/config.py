@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     FEED_DEFAULT_TIMEOUT: int = 30
     FEED_MAX_RETRIES: int = 3
     FEED_ENCRYPTION_KEY: SecretStr = SecretStr("change-me")
+    ABUSEIPDB_API_KEY: str = ""
 
     # SSO - Azure AD (Microsoft 365)
     SSO_AZURE_AD_ENABLED: bool = False

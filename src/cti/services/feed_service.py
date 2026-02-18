@@ -23,6 +23,7 @@ async def create_feed(db: AsyncSession, data: FeedCreate) -> Feed:
         schedule_cron=data.schedule_cron,
         enabled=data.enabled,
         auth_config_encrypted=auth_encrypted,
+        default_ttl_days=data.default_ttl_days,
     )
     db.add(feed)
     await db.flush()
@@ -133,3 +134,61 @@ async def bulk_delete_feeds(db: AsyncSession, ids: list[uuid.UUID]) -> int:
     )
     await db.flush()
     return result.rowcount
+
+
+async def seed_default_feeds(db: AsyncSession) -> int:
+    """Seed default feed configurations if they don't already exist.
+
+    Returns the number of feeds created.
+    """
+    import logging
+    import os
+
+    from cti.feeds.defaults import DEFAULT_FEEDS
+
+    logger = logging.getLogger(__name__)
+    created = 0
+
+    for feed_def in DEFAULT_FEEDS:
+        result = await db.execute(select(Feed).where(Feed.name == feed_def["name"]))
+        if result.scalar_one_or_none() is not None:
+            continue
+
+        auth_encrypted = None
+        enabled = feed_def.get("enabled", True)
+
+        api_key_env = feed_def.get("requires_api_key_env")
+        if api_key_env:
+            api_key = os.environ.get(api_key_env, "")
+            if api_key:
+                auth_config = {
+                    **feed_def["auth_config_template"],
+                    "api_key": api_key,
+                }
+                auth_encrypted = encrypt_config(json.dumps(auth_config))
+            else:
+                enabled = False
+                logger.warning(
+                    "Feed '%s' created disabled — set %s to enable",
+                    feed_def["name"],
+                    api_key_env,
+                )
+
+        feed = Feed(
+            name=feed_def["name"],
+            description=feed_def.get("description"),
+            feed_type=feed_def["feed_type"],
+            url=feed_def.get("url"),
+            config=feed_def.get("config"),
+            schedule_cron=feed_def.get("schedule_cron"),
+            enabled=enabled,
+            auth_config_encrypted=auth_encrypted,
+            default_ttl_days=feed_def.get("default_ttl_days"),
+        )
+        db.add(feed)
+        created += 1
+
+    if created:
+        await db.flush()
+
+    return created

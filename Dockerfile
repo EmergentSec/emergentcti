@@ -4,6 +4,8 @@ FROM python:3.12-slim AS builder
 
 COPY --from=uv /uv /usr/local/bin/uv
 
+ENV UV_HTTP_TIMEOUT=120
+
 WORKDIR /app
 
 COPY pyproject.toml uv.lock* README.md ./

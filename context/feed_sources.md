@@ -136,23 +136,22 @@ EmergentCTI ships with 6 pre-configured threat intelligence feeds spanning diffe
 | Property | Value |
 |----------|-------|
 | **Name** | URLhaus |
-| **Feed Type** | `api` |
-| **Connector** | `APIFeedConnector` |
-| **URL** | `https://urlhaus-api.abuse.ch/v1/urls/recent/` |
+| **Feed Type** | `file` |
+| **Connector** | `FileFeedConnector` |
+| **URL** | `https://urlhaus.abuse.ch/downloads/text_recent/` |
 | **Schedule** | `0 */3 * * *` (every 3 hours) |
 | **Default Confidence** | 75 |
-| **Observable Types** | `url`, `domain-name` |
+| **Observable Types** | `url` |
 | **Default Category** | `malware` |
-| **Auth** | None (public API) |
+| **Auth** | None (public feed) |
 | **Default TTL** | 14 days |
 
-**Description:** abuse.ch project tracking malware distribution URLs. Community-submitted URLs with moderate curation. Includes threat tags (e.g., emotet, qakbot, cobalt strike) and hosting information.
+**Description:** abuse.ch project tracking malware distribution URLs. Community-submitted URLs with moderate curation.
 
 **Data quality notes:**
-- JSON API response with structured data
-- Includes `threat` field for malware family tagging
+- Plain text format, one URL per line (comment lines start with `#`)
 - URLs may be offline but still historically relevant
-- Both URLs and extracted domain names are ingested
+- Switched from API endpoint (`urlhaus-api.abuse.ch`) which returned 401
 
 ---
 

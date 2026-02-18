@@ -11,6 +11,7 @@ x-common-env: &common-env
   ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
   ENVIRONMENT: ${ENVIRONMENT:-production}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
 
 services:
   postgres:
