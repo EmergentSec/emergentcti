@@ -39,8 +39,8 @@ def _extract_field(item: dict, field_path: str) -> Any:
 class APIFeedConnector(BaseFeedConnector):
     """Connector for REST API feeds (JSON responses).
 
-    Supports AbuseIPDB, AlienVault OTX, ThreatFox, GreyNoise, urlscan.io,
-    PhishTank, and any other JSON API that follows similar patterns.
+    Supports AbuseIPDB, ThreatFox, urlscan.io, PhishTank, and any other
+    JSON API that follows similar patterns.
     """
 
     async def fetch(self) -> str | bytes | dict | list:
@@ -48,11 +48,12 @@ class APIFeedConnector(BaseFeedConnector):
         timeout = self.config.get("timeout", 30)
         method = self.config.get("method", "GET").upper()
 
-        headers = dict(self.config.get("headers", {}))
+        headers = {"User-Agent": "EmergentCTI/0.1", **self.config.get("headers", {})}
         params = dict(self.config.get("params", {}))
 
-        # Apply authentication
+        # Apply authentication (headers + possible URL rewrite)
         self._apply_auth(headers)
+        url = self._resolve_url()
 
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=True
@@ -60,14 +61,15 @@ class APIFeedConnector(BaseFeedConnector):
             pagination = self.config.get("pagination")
             if pagination:
                 return await self._fetch_paginated(
-                    client, method, headers, params, pagination
+                    client, method, url, headers, params, pagination
                 )
-            return await self._fetch_single(client, method, headers, params)
+            return await self._fetch_single(client, method, url, headers, params)
 
     async def _fetch_single(
         self,
         client: httpx.AsyncClient,
         method: str,
+        url: str,
         headers: dict,
         params: dict,
     ) -> dict | list:
@@ -75,10 +77,10 @@ class APIFeedConnector(BaseFeedConnector):
         if method == "POST":
             body = self.config.get("request_body", {})
             response = await client.post(
-                self.url, json=body, headers=headers, params=params
+                url, json=body, headers=headers, params=params
             )
         else:
-            response = await client.get(self.url, headers=headers, params=params)
+            response = await client.get(url, headers=headers, params=params)
 
         response.raise_for_status()
         return response.json()
@@ -87,6 +89,7 @@ class APIFeedConnector(BaseFeedConnector):
         self,
         client: httpx.AsyncClient,
         method: str,
+        url: str,
         headers: dict,
         params: dict,
         pagination: dict,
@@ -113,11 +116,11 @@ class APIFeedConnector(BaseFeedConnector):
             if method == "POST":
                 body = self.config.get("request_body", {})
                 response = await client.post(
-                    self.url, json=body, headers=headers, params=page_params
+                    url, json=body, headers=headers, params=page_params
                 )
             else:
                 response = await client.get(
-                    self.url, headers=headers, params=page_params
+                    url, headers=headers, params=page_params
                 )
 
             response.raise_for_status()
@@ -166,6 +169,16 @@ class APIFeedConnector(BaseFeedConnector):
         if not isinstance(items, list):
             items = [items]
 
+        # Flatten nested arrays (e.g. pulses → indicators)
+        flatten_path = self.config.get("flatten_path")
+        if flatten_path and isinstance(items, list):
+            flat: list = []
+            for item in items:
+                nested = _resolve_path(item, flatten_path) if isinstance(item, dict) else None
+                if isinstance(nested, list):
+                    flat.extend(nested)
+            items = flat
+
         field_map: dict = self.config.get("field_map", {})
         type_map: dict = self.config.get("type_map", {})
         default_type_raw: str | None = self.config.get("default_type")
@@ -191,6 +204,13 @@ class APIFeedConnector(BaseFeedConnector):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _resolve_url(self) -> str:
+        """Replace ``{api_key}`` placeholder in URL if using url_template auth."""
+        if self.auth_config.get("auth_type") == "url_template":
+            api_key = self.auth_config.get("api_key_value", "")
+            return self.url.replace("{api_key}", api_key)
+        return self.url
 
     def _apply_auth(self, headers: dict) -> None:
         """Apply authentication to the request headers."""

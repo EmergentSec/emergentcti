@@ -48,8 +48,6 @@ class Settings(BaseSettings):
 
     # ── Feed API keys (optional) ─────────────────────────────────────────
     ABUSEIPDB_API_KEY: str = ""
-    OTX_API_KEY: str = ""
-    GREYNOISE_API_KEY: str = ""
     URLSCAN_API_KEY: str = ""
 
     # ── Computed database URLs ───────────────────────────────────────────

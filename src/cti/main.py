@@ -56,12 +56,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_redis(settings.REDIS_URL)
     logger.info("Redis connected")
 
-    # 2. Seed default feeds
+    # 2. Seed default feeds and sync preconfigured feed configs
     async with async_session_factory() as db:
         count = await feed_service.seed_default_feeds(db)
         await db.commit()
         if count:
             logger.info("Seeded %d default feeds", count)
+    async with async_session_factory() as db:
+        await feed_service.update_preconfigured_feeds(db)
+        await db.commit()
 
     # 3. Seed initial API key
     initial_key = await seed_initial_api_key()

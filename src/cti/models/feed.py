@@ -44,6 +44,8 @@ class Feed(UUIDMixin, TimestampMixin, Base):
         back_populates="feed",
         lazy="selectin",
         order_by="FeedRun.started_at.desc()",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:

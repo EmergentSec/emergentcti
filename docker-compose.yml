@@ -41,6 +41,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    dns:
+      - "8.8.8.8"
+      - "1.1.1.1"
     command: >-
       sh -c "alembic upgrade head &&
       gunicorn cti.main:app -w 1 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 --access-logfile - --timeout 120"
@@ -55,9 +58,9 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
-      OTX_API_KEY: ${OTX_API_KEY:-}
-      GREYNOISE_API_KEY: ${GREYNOISE_API_KEY:-}
       URLSCAN_API_KEY: ${URLSCAN_API_KEY:-}
+      THREATFOX_API_KEY: ${THREATFOX_API_KEY:-}
+      PHISHTANK_API_KEY: ${PHISHTANK_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

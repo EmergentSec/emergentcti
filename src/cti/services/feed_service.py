@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import UTC, datetime
 
@@ -155,6 +156,22 @@ async def seed_default_feeds(db: AsyncSession) -> int:
             enabled=False,  # user must explicitly enable
             is_preconfigured=True,
         )
+
+        # Wire up API key from environment if available
+        env_var = feed_def.get("requires_api_key")
+        template = feed_def.get("auth_config_template")
+        if env_var and template:
+            api_key_value = os.environ.get(env_var, "")
+            if api_key_value:
+                auth_config = dict(template)
+                auth_config["api_key_value"] = api_key_value
+                if template.get("auth_type") == "bearer":
+                    auth_config["token"] = api_key_value
+                feed.auth_config_encrypted = encrypt_config(auth_config)
+                logger.info(
+                    "Feed %s: API key populated from %s", feed_def["name"], env_var
+                )
+
         db.add(feed)
         count += 1
 
@@ -163,6 +180,84 @@ async def seed_default_feeds(db: AsyncSession) -> int:
         logger.info("Seeded %d default feeds", count)
 
     return count
+
+
+async def update_preconfigured_feeds(db: AsyncSession) -> int:
+    """Sync URL, config, feed_type, and auth hints from defaults for existing preconfigured feeds.
+
+    Does NOT overwrite user-set fields: enabled, schedule_cron,
+    default_confidence, auth_config_encrypted.
+
+    Returns the number of feeds updated.
+    """
+    defaults_by_name = {d["name"]: d for d in DEFAULT_FEEDS}
+
+    result = await db.execute(
+        select(Feed).where(Feed.is_preconfigured.is_(True))
+    )
+    feeds = list(result.scalars().all())
+
+    updated = 0
+    for feed in feeds:
+        feed_def = defaults_by_name.get(feed.name)
+        if not feed_def:
+            continue
+
+        changed = False
+
+        # Sync URL
+        new_url = feed_def.get("url")
+        if new_url and feed.url != new_url:
+            feed.url = new_url
+            changed = True
+
+        # Sync config
+        new_config = feed_def.get("config")
+        if new_config and feed.config != new_config:
+            feed.config = new_config
+            changed = True
+
+        # Sync feed_type
+        new_feed_type = feed_def.get("feed_type")
+        if new_feed_type and feed.feed_type != new_feed_type:
+            feed.feed_type = new_feed_type
+            changed = True
+
+        # Wire up API key from env if feed doesn't already have auth
+        env_var = feed_def.get("requires_api_key")
+        template = feed_def.get("auth_config_template")
+        if env_var and template and not feed.auth_config_encrypted:
+            api_key_value = os.environ.get(env_var, "")
+            if api_key_value:
+                auth_config = dict(template)
+                auth_config["api_key_value"] = api_key_value
+                if template.get("auth_type") == "bearer":
+                    auth_config["token"] = api_key_value
+                feed.auth_config_encrypted = encrypt_config(auth_config)
+                changed = True
+                logger.info(
+                    "Feed %s: API key populated from %s", feed.name, env_var
+                )
+
+        if changed:
+            updated += 1
+
+    # Remove deprecated preconfigured feeds no longer in DEFAULT_FEEDS
+    default_names = set(defaults_by_name.keys())
+    for feed in feeds:
+        if feed.name not in default_names:
+            if not feed.enabled:
+                await db.delete(feed)
+                logger.info("Removed deprecated preconfigured feed: %s", feed.name)
+            else:
+                feed.is_preconfigured = False
+                logger.info("Deprecated feed %s is enabled; converting to custom feed", feed.name)
+
+    if updated:
+        await db.flush()
+        logger.info("Updated %d preconfigured feeds from defaults", updated)
+
+    return updated
 
 
 async def list_enabled_feeds_with_schedule(db: AsyncSession) -> list[Feed]:

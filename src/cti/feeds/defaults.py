@@ -36,37 +36,7 @@ DEFAULT_FEEDS: list[dict] = [
         },
     },
     # ------------------------------------------------------------------
-    # 2. AlienVault OTX
-    # ------------------------------------------------------------------
-    {
-        "name": "AlienVault OTX",
-        "feed_type": FeedType.API,
-        "url": "https://otx.alienvault.com/api/v1/indicators/export",
-        "config": {
-            "results_path": "results",
-            "field_map": {
-                "value": "indicator",
-                "type": "type",
-            },
-            "type_map": {
-                "IPv4": "ip-addr",
-                "domain": "domain-name",
-                "URL": "url",
-                "FileHash-MD5": "file-hash",
-                "FileHash-SHA256": "file-hash",
-                "email": "email-addr",
-            },
-        },
-        "schedule_cron": "0 2 * * *",
-        "default_confidence": 60,
-        "requires_api_key": "OTX_API_KEY",
-        "auth_config_template": {
-            "auth_type": "api_key",
-            "api_key_header": "X-OTX-API-KEY",
-        },
-    },
-    # ------------------------------------------------------------------
-    # 3. ThreatFox (abuse.ch)
+    # 2. ThreatFox (abuse.ch)
     # ------------------------------------------------------------------
     {
         "name": "ThreatFox",
@@ -91,32 +61,29 @@ DEFAULT_FEEDS: list[dict] = [
         },
         "schedule_cron": "0 */4 * * *",
         "default_confidence": 70,
+        "requires_api_key": "THREATFOX_API_KEY",
+        "auth_config_template": {
+            "auth_type": "api_key",
+            "api_key_header": "Auth-Key",
+        },
     },
     # ------------------------------------------------------------------
-    # 4. GreyNoise
+    # 3. CINSscore (replaces GreyNoise – free, no auth)
     # ------------------------------------------------------------------
     {
-        "name": "GreyNoise",
-        "feed_type": FeedType.API,
-        "url": "https://api.greynoise.io/v3/community/",
+        "name": "CINSscore",
+        "feed_type": FeedType.FILE,
+        "url": "https://cinsscore.com/list/ci-badguys.txt",
         "config": {
-            "results_path": "data",
-            "field_map": {
-                "value": "ip",
-                "native_confidence": "score",
-            },
+            "format": "text",
             "default_type": "ip-addr",
+            "comment_char": "#",
         },
         "schedule_cron": "0 3 * * *",
         "default_confidence": 65,
-        "requires_api_key": "GREYNOISE_API_KEY",
-        "auth_config_template": {
-            "auth_type": "api_key",
-            "api_key_header": "key",
-        },
     },
     # ------------------------------------------------------------------
-    # 5. urlscan.io
+    # 4. urlscan.io
     # ------------------------------------------------------------------
     {
         "name": "urlscan.io",
@@ -137,7 +104,7 @@ DEFAULT_FEEDS: list[dict] = [
         },
     },
     # ------------------------------------------------------------------
-    # 6. URLhaus (abuse.ch)
+    # 5. URLhaus (abuse.ch)
     # ------------------------------------------------------------------
     {
         "name": "URLhaus",
@@ -152,7 +119,7 @@ DEFAULT_FEEDS: list[dict] = [
         "default_confidence": 75,
     },
     # ------------------------------------------------------------------
-    # 7. Emerging Threats
+    # 6. Emerging Threats
     # ------------------------------------------------------------------
     {
         "name": "Emerging Threats",
@@ -167,7 +134,7 @@ DEFAULT_FEEDS: list[dict] = [
         "default_confidence": 70,
     },
     # ------------------------------------------------------------------
-    # 8. Tor Exit Nodes
+    # 7. Tor Exit Nodes
     # ------------------------------------------------------------------
     {
         "name": "Tor Exit Nodes",
@@ -182,7 +149,7 @@ DEFAULT_FEEDS: list[dict] = [
         "default_confidence": 30,
     },
     # ------------------------------------------------------------------
-    # 9. Blocklist.de
+    # 8. Blocklist.de
     # ------------------------------------------------------------------
     {
         "name": "Blocklist.de",
@@ -197,7 +164,7 @@ DEFAULT_FEEDS: list[dict] = [
         "default_confidence": 60,
     },
     # ------------------------------------------------------------------
-    # 10. OpenPhish
+    # 9. OpenPhish
     # ------------------------------------------------------------------
     {
         "name": "OpenPhish",
@@ -212,7 +179,7 @@ DEFAULT_FEEDS: list[dict] = [
         "default_confidence": 80,
     },
     # ------------------------------------------------------------------
-    # 11. Feodo Tracker
+    # 10. Feodo Tracker
     # ------------------------------------------------------------------
     {
         "name": "Feodo Tracker",
@@ -227,12 +194,12 @@ DEFAULT_FEEDS: list[dict] = [
         "default_confidence": 85,
     },
     # ------------------------------------------------------------------
-    # 12. PhishTank
+    # 11. PhishTank
     # ------------------------------------------------------------------
     {
         "name": "PhishTank",
         "feed_type": FeedType.API,
-        "url": "https://data.phishtank.com/data/online-valid.json",
+        "url": "https://data.phishtank.com/data/{api_key}/online-valid.json",
         "config": {
             "field_map": {
                 "value": "url",
@@ -241,5 +208,40 @@ DEFAULT_FEEDS: list[dict] = [
         },
         "schedule_cron": "0 */4 * * *",
         "default_confidence": 90,
+        "requires_api_key": "PHISHTANK_API_KEY",
+        "auth_config_template": {
+            "auth_type": "url_template",
+        },
+    },
+    # ------------------------------------------------------------------
+    # 12. DShield
+    # ------------------------------------------------------------------
+    {
+        "name": "DShield",
+        "feed_type": FeedType.FILE,
+        "url": "https://www.dshield.org/ipsascii.html?limit=10000",
+        "config": {
+            "format": "text",
+            "default_type": "ip-addr",
+            "comment_char": "#",
+            "field_index": 0,
+        },
+        "schedule_cron": "0 */6 * * *",
+        "default_confidence": 65,
+    },
+    # ------------------------------------------------------------------
+    # 13. BinaryDefense
+    # ------------------------------------------------------------------
+    {
+        "name": "BinaryDefense",
+        "feed_type": FeedType.FILE,
+        "url": "https://www.binarydefense.com/banlist.txt",
+        "config": {
+            "format": "text",
+            "default_type": "ip-addr",
+            "comment_char": "#",
+        },
+        "schedule_cron": "0 */8 * * *",
+        "default_confidence": 70,
     },
 ]

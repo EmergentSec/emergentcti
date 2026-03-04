@@ -48,7 +48,7 @@ class FileFeedConnector(BaseFeedConnector):
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=True
         ) as client:
-            headers = self.config.get("headers", {})
+            headers = {"User-Agent": "EmergentCTI/0.1", **self.config.get("headers", {})}
             response = await client.get(self.url, headers=headers)
             response.raise_for_status()
             return response.text
@@ -78,6 +78,14 @@ class FileFeedConnector(BaseFeedConnector):
                 continue
             if comment_char and line.startswith(comment_char):
                 continue
+
+            field_index = self.config.get("field_index")
+            if field_index is not None:
+                parts = line.split()
+                if field_index >= len(parts):
+                    continue
+                line = parts[field_index]
+
             if not _is_valid_value(line):
                 continue
 

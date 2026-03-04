@@ -11,11 +11,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cti.core.redis import invalidate_blocklist_cache
 from cti.core.security import decrypt_config
 from cti.feeds import get_connector
+from cti.feeds.defaults import DEFAULT_FEEDS
 from sqlalchemy import select
 
 from cti.models.feed import FeedRun, FeedRunStatus
 from cti.services import feed_service
 from cti.services import observable_service
+
+# Build a lookup of feeds that require API keys
+_FEEDS_REQUIRING_KEY: dict[str, str] = {
+    d["name"]: d["requires_api_key"]
+    for d in DEFAULT_FEEDS
+    if d.get("requires_api_key")
+}
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +43,15 @@ async def run_feed(
         raise ValueError(f"Feed not found: {feed_id}")
     if not feed.url:
         raise ValueError(f"Feed has no URL: {feed.name}")
+
+    # Pre-run validation: fail fast if an API key is required but missing
+    required_env_var = _FEEDS_REQUIRING_KEY.get(feed.name)
+    if required_env_var and not feed.auth_config_encrypted:
+        raise ValueError(
+            f"Feed '{feed.name}' requires an API key ({required_env_var}) "
+            f"but none is configured. Set {required_env_var} in your .env file "
+            f"and restart, or configure auth via the API."
+        )
 
     if run_id:
         result = await db.execute(select(FeedRun).where(FeedRun.id == run_id))

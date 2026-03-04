@@ -19,7 +19,7 @@ Access the web UI at http://localhost:8080
 
 ## Features
 
-- **Feed Aggregation** — Ingest from 12 pre-configured feeds (AbuseIPDB, OTX, abuse.ch, GreyNoise, etc.) plus custom feeds
+- **Feed Aggregation** — Ingest from 13 pre-configured feeds (AbuseIPDB, abuse.ch, CINSscore, DShield, etc.) plus custom feeds
 - **REST API** — Simple query and export API (no GraphQL)
 - **Blocklist Export** — Plain text exports for direct FW integration (pfSense, PAN EDLs, etc.)
 - **Confidence Scoring** — Dual-mode scoring with native feed scores and time decay
