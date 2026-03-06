@@ -1,7 +1,9 @@
 import { Fragment, useState } from 'react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table'
 import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import { ObservableExpandedRow } from './ObservableExpandedRow'
+import { useDeleteObservable } from '@/hooks/useObservables'
 import { cn, typeColors, typeLabels, confidenceColor, formatRelativeTime } from '@/lib/utils'
 import type { Observable } from '@/types/observable'
 
@@ -32,6 +34,7 @@ function ConfidenceMeter({ score }: { score: number }) {
 
 export function ObservableTable({ observables }: ObservableTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const deleteObservable = useDeleteObservable()
 
   const toggleExpanded = (id: string) => {
     setExpandedId((prev) => (prev === id ? null : id))
@@ -47,6 +50,7 @@ export function ObservableTable({ observables }: ObservableTableProps) {
           <TableHead className="w-32">Confidence</TableHead>
           <TableHead className="w-44 text-right">Sources</TableHead>
           <TableHead className="w-28 text-right">Last Seen</TableHead>
+          <TableHead className="w-20 text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -120,10 +124,24 @@ export function ObservableTable({ observables }: ObservableTableProps) {
                 <TableCell className="text-right text-sm text-muted-foreground whitespace-nowrap">
                   {formatRelativeTime(obs.last_seen)}
                 </TableCell>
+                <TableCell className="text-right">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (!window.confirm(`Delete observable "${obs.value}"?`)) return
+                      deleteObservable.mutate(obs.id)
+                    }}
+                    disabled={deleteObservable.isPending}
+                  >
+                    Delete
+                  </Button>
+                </TableCell>
               </TableRow>
               {isExpanded && (
                 <TableRow>
-                  <TableCell colSpan={6} className="p-0 border-t border-border bg-muted/20">
+                  <TableCell colSpan={7} className="p-0 border-t border-border bg-muted/20">
                     <ObservableExpandedRow sources={obs.sources} />
                   </TableCell>
                 </TableRow>

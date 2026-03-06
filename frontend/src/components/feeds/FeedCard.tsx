@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
 import { FeedRunHistory } from './FeedRunHistory'
-import { useUpdateFeed, useTriggerFeed } from '@/hooks/useFeeds'
+import { useUpdateFeed, useTriggerFeed, useDeleteFeed } from '@/hooks/useFeeds'
 import { useToast } from '@/contexts/ToastContext'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import type { Feed } from '@/types/feed'
@@ -37,6 +37,7 @@ export function FeedCard({ feed }: FeedCardProps) {
   const [expanded, setExpanded] = useState(false)
   const updateFeed = useUpdateFeed()
   const triggerFeedMut = useTriggerFeed()
+  const deleteFeed = useDeleteFeed()
   const { toast } = useToast()
 
   const handleToggle = (enabled: boolean) => {
@@ -51,6 +52,19 @@ export function FeedCard({ feed }: FeedCardProps) {
         },
       }
     )
+  }
+
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!window.confirm(`Delete feed "${feed.name}"? This cannot be undone.`)) return
+    deleteFeed.mutate(feed.id, {
+      onSuccess: () => {
+        toast(`${feed.name} deleted`, 'success')
+      },
+      onError: () => {
+        toast(`Failed to delete ${feed.name}`, 'error')
+      },
+    })
   }
 
   const handleTrigger = (e: React.MouseEvent) => {
@@ -135,6 +149,16 @@ export function FeedCard({ feed }: FeedCardProps) {
           >
             {expanded ? 'Hide Details' : 'Show Details'}
           </Button>
+          {!feed.is_preconfigured && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDelete}
+              disabled={deleteFeed.isPending}
+            >
+              Delete
+            </Button>
+          )}
         </div>
 
         {/* Expanded detail */}
