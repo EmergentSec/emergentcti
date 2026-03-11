@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 # Maximum rows per INSERT batch to avoid excessive memory usage.
 _BATCH_SIZE = 500
+
+# Deadlock retry parameters.
+_MAX_RETRIES = 3
+_BASE_DELAY = 0.5  # seconds
 
 
 async def get_observables(
@@ -216,123 +222,143 @@ async def bulk_upsert_from_feed(
         seen: dict[tuple[ObservableType, str], RawObservable] = {}
         for raw in batch:
             seen[(raw.type, raw.value)] = raw
-        batch = list(seen.values())
+        # Sort by (type, value) to ensure all concurrent transactions acquire
+        # row locks in the same order, preventing deadlocks on the
+        # ON CONFLICT DO UPDATE upsert.
+        batch = sorted(seen.values(), key=lambda r: (r.type, r.value))
 
-        # ── Step 1: upsert observables ────────────────────────────────
-        obs_rows: list[dict] = []
-        for raw in batch:
-            obs_rows.append(
-                {
-                    "id": uuid.uuid4(),
-                    "type": raw.type,
-                    "value": raw.value,
-                    "confidence_score": compute_source_confidence(raw, feed),
-                    "first_seen": raw.first_seen or now,
-                    "last_seen": raw.last_seen or now,
-                }
-            )
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                savepoint = await db.begin_nested()
 
-        stmt = pg_insert(Observable).values(obs_rows)
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_observable_type_value",
-            set_={
-                "last_seen": func.greatest(Observable.__table__.c.last_seen, stmt.excluded.last_seen),
-                "updated_at": func.now(),
-            },
-        )
-        # Use RETURNING to get back the id and xmax (xmax == 0 means INSERT, else UPDATE).
-        stmt = stmt.returning(Observable.__table__.c.id, Observable.__table__.c.type)
+                # ── Step 1: upsert observables ────────────────────────────
+                obs_rows: list[dict] = []
+                for raw in batch:
+                    obs_rows.append(
+                        {
+                            "id": uuid.uuid4(),
+                            "type": raw.type,
+                            "value": raw.value,
+                            "confidence_score": compute_source_confidence(raw, feed),
+                            "first_seen": raw.first_seen or now,
+                            "last_seen": raw.last_seen or now,
+                        }
+                    )
 
-        result = await db.execute(stmt)
-        returned_rows = result.all()
-
-        # Build a lookup: (type, value) -> observable_id
-        # We need to re-query because RETURNING doesn't tell us value easily
-        # in the same order. Instead, let's query back the IDs.
-        type_value_pairs = [(r.type, r.value) for r in batch]
-        id_lookup: dict[tuple[ObservableType, str], uuid.UUID] = {}
-
-        # Query back the observable IDs for the batch
-        lookup_stmt = select(Observable.id, Observable.type, Observable.value).where(
-            and_(
-                Observable.type.in_([tv[0] for tv in type_value_pairs]),
-                Observable.value.in_([tv[1] for tv in type_value_pairs]),
-            )
-        )
-        lookup_result = await db.execute(lookup_stmt)
-        for row in lookup_result.all():
-            id_lookup[(row.type, row.value)] = row.id
-
-        batch_ingested = len(returned_rows)
-        total_ingested += batch_ingested
-
-        # Count new inserts: we check xmax via a simpler heuristic --
-        # the number of returned rows from the INSERT.  We track new rows
-        # by comparing to existing observable count before.
-        # Actually, use a cleaner approach: count rows that were *not* in the
-        # DB before by checking first_seen == now (within tolerance).
-        new_in_batch = await db.execute(
-            select(func.count(Observable.id)).where(
-                and_(
-                    Observable.type.in_([tv[0] for tv in type_value_pairs]),
-                    Observable.value.in_([tv[1] for tv in type_value_pairs]),
-                    Observable.first_seen >= now - timedelta(seconds=5),
+                stmt = pg_insert(Observable).values(obs_rows)
+                stmt = stmt.on_conflict_do_update(
+                    constraint="uq_observable_type_value",
+                    set_={
+                        "last_seen": func.greatest(Observable.__table__.c.last_seen, stmt.excluded.last_seen),
+                        "updated_at": func.now(),
+                    },
                 )
-            )
-        )
-        new_count += new_in_batch.scalar_one()
+                # Use RETURNING to get back the id and xmax (xmax == 0 means INSERT, else UPDATE).
+                stmt = stmt.returning(Observable.__table__.c.id, Observable.__table__.c.type)
 
-        # ── Step 2: upsert observable_sources ─────────────────────────
-        source_rows: list[dict] = []
-        for raw in batch:
-            key = (raw.type, raw.value)
-            obs_id = id_lookup.get(key)
-            if obs_id is None:
-                continue
-            source_conf = compute_source_confidence(raw, feed)
-            source_rows.append(
-                {
-                    "id": uuid.uuid4(),
-                    "observable_id": obs_id,
-                    "feed_id": feed.id,
-                    "source_confidence": source_conf,
-                    "first_seen_by_feed": raw.first_seen or now,
-                    "last_seen_by_feed": raw.last_seen or now,
-                }
-            )
+                result = await db.execute(stmt)
+                returned_rows = result.all()
 
-        if source_rows:
-            src_stmt = pg_insert(ObservableSource).values(source_rows)
-            src_stmt = src_stmt.on_conflict_do_update(
-                constraint="uq_observable_source",
-                set_={
-                    "source_confidence": func.greatest(
-                        ObservableSource.__table__.c.source_confidence,
-                        src_stmt.excluded.source_confidence,
-                    ),
-                    "last_seen_by_feed": func.greatest(
-                        ObservableSource.__table__.c.last_seen_by_feed,
-                        src_stmt.excluded.last_seen_by_feed,
-                    ),
-                },
-            )
-            await db.execute(src_stmt)
+                # Build a lookup: (type, value) -> observable_id
+                # We need to re-query because RETURNING doesn't tell us value easily
+                # in the same order. Instead, let's query back the IDs.
+                type_value_pairs = [(r.type, r.value) for r in batch]
+                id_lookup: dict[tuple[ObservableType, str], uuid.UUID] = {}
 
-        # ── Step 3: recompute effective confidence for affected observables
-        affected_ids = list(id_lookup.values())
-        if affected_ids:
-            # For each affected observable, set confidence_score = MAX(source_confidence)
-            max_conf_sub = (
-                select(func.max(ObservableSource.source_confidence))
-                .where(ObservableSource.observable_id == Observable.id)
-                .correlate(Observable)
-                .scalar_subquery()
-            )
-            await db.execute(
-                Observable.__table__.update()
-                .where(Observable.__table__.c.id.in_(affected_ids))
-                .values(confidence_score=func.coalesce(max_conf_sub, 50))
-            )
+                # Query back the observable IDs for the batch
+                lookup_stmt = select(Observable.id, Observable.type, Observable.value).where(
+                    and_(
+                        Observable.type.in_([tv[0] for tv in type_value_pairs]),
+                        Observable.value.in_([tv[1] for tv in type_value_pairs]),
+                    )
+                )
+                lookup_result = await db.execute(lookup_stmt)
+                for row in lookup_result.all():
+                    id_lookup[(row.type, row.value)] = row.id
+
+                batch_ingested = len(returned_rows)
+
+                # Count new inserts by checking first_seen == now (within tolerance).
+                new_in_batch = await db.execute(
+                    select(func.count(Observable.id)).where(
+                        and_(
+                            Observable.type.in_([tv[0] for tv in type_value_pairs]),
+                            Observable.value.in_([tv[1] for tv in type_value_pairs]),
+                            Observable.first_seen >= now - timedelta(seconds=5),
+                        )
+                    )
+                )
+                new_in_batch_count = new_in_batch.scalar_one()
+
+                # ── Step 2: upsert observable_sources ─────────────────────
+                source_rows: list[dict] = []
+                for raw in batch:
+                    key = (raw.type, raw.value)
+                    obs_id = id_lookup.get(key)
+                    if obs_id is None:
+                        continue
+                    source_conf = compute_source_confidence(raw, feed)
+                    source_rows.append(
+                        {
+                            "id": uuid.uuid4(),
+                            "observable_id": obs_id,
+                            "feed_id": feed.id,
+                            "source_confidence": source_conf,
+                            "first_seen_by_feed": raw.first_seen or now,
+                            "last_seen_by_feed": raw.last_seen or now,
+                        }
+                    )
+
+                if source_rows:
+                    # Sort to match lock ordering and prevent deadlocks.
+                    source_rows.sort(key=lambda r: (str(r["observable_id"]), str(r["feed_id"])))
+                    src_stmt = pg_insert(ObservableSource).values(source_rows)
+                    src_stmt = src_stmt.on_conflict_do_update(
+                        constraint="uq_observable_source",
+                        set_={
+                            "source_confidence": func.greatest(
+                                ObservableSource.__table__.c.source_confidence,
+                                src_stmt.excluded.source_confidence,
+                            ),
+                            "last_seen_by_feed": func.greatest(
+                                ObservableSource.__table__.c.last_seen_by_feed,
+                                src_stmt.excluded.last_seen_by_feed,
+                            ),
+                        },
+                    )
+                    await db.execute(src_stmt)
+
+                # ── Step 3: recompute effective confidence for affected observables
+                affected_ids = list(id_lookup.values())
+                if affected_ids:
+                    max_conf_sub = (
+                        select(func.max(ObservableSource.source_confidence))
+                        .where(ObservableSource.observable_id == Observable.id)
+                        .correlate(Observable)
+                        .scalar_subquery()
+                    )
+                    await db.execute(
+                        Observable.__table__.update()
+                        .where(Observable.__table__.c.id.in_(affected_ids))
+                        .values(confidence_score=func.coalesce(max_conf_sub, 50))
+                    )
+
+                await savepoint.commit()
+                total_ingested += batch_ingested
+                new_count += new_in_batch_count
+                break
+
+            except OperationalError as e:
+                await savepoint.rollback()
+                if "deadlock" in str(e).lower() and attempt < _MAX_RETRIES:
+                    delay = _BASE_DELAY * (2 ** attempt)
+                    logger.warning(
+                        "Deadlock on batch %d, attempt %d/%d — retrying in %.1fs",
+                        batch_start, attempt + 1, _MAX_RETRIES, delay,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise
 
     logger.info(
         "Bulk upsert complete: %d ingested, %d new", total_ingested, new_count
