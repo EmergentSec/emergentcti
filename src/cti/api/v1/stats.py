@@ -12,7 +12,7 @@ from cti.core.database import get_db
 from cti.core.dependencies import verify_api_key
 from cti.core.redis import cache_get, cache_set
 from cti.models.api_key import ApiKey
-from cti.models.feed import Feed, FeedRun
+from cti.models.feed import Feed, FeedRun, FeedRunStatus
 from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
 
@@ -50,14 +50,15 @@ async def get_stats(
     )
     feeds_enabled = enabled_feeds_result.scalar_one()
 
-    # Last 24h ingested
+    # Last 24h ingested (only genuinely new observables)
     cutoff_24h = datetime.now(UTC) - timedelta(hours=24)
-    ingested_24h_result = await db.execute(
-        select(func.count(ObservableSource.id)).where(
-            ObservableSource.last_seen_by_feed >= cutoff_24h
+    new_24h_result = await db.execute(
+        select(func.coalesce(func.sum(FeedRun.observables_new), 0)).where(
+            FeedRun.completed_at >= cutoff_24h,
+            FeedRun.status == FeedRunStatus.SUCCESS,
         )
     )
-    last_24h_ingested = ingested_24h_result.scalar_one()
+    last_24h_ingested = new_24h_result.scalar_one()
 
     # Feed health (latest run per feed)
     feeds_result = await db.execute(

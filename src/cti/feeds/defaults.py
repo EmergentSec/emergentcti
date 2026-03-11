@@ -134,22 +134,7 @@ DEFAULT_FEEDS: list[dict] = [
         "default_confidence": 70,
     },
     # ------------------------------------------------------------------
-    # 7. Tor Exit Nodes
-    # ------------------------------------------------------------------
-    {
-        "name": "Tor Exit Nodes",
-        "feed_type": FeedType.FILE,
-        "url": "https://check.torproject.org/torbulkexitlist",
-        "config": {
-            "format": "text",
-            "default_type": "ip-addr",
-            "comment_char": "#",
-        },
-        "schedule_cron": "0 */12 * * *",
-        "default_confidence": 30,
-    },
-    # ------------------------------------------------------------------
-    # 8. Blocklist.de
+    # 7. Blocklist.de
     # ------------------------------------------------------------------
     {
         "name": "Blocklist.de",
