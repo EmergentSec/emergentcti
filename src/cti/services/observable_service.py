@@ -7,7 +7,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -203,6 +203,12 @@ async def bulk_upsert_from_feed(
 ) -> tuple[int, int]:
     """Bulk upsert observables from a feed run.
 
+    Each batch is committed independently so that row locks are released
+    between batches.  This prevents deadlocks when multiple feeds ingest
+    concurrently with overlapping observables.  Because every statement is
+    an idempotent upsert, partial completion is safe — a retry will simply
+    re-process already-committed rows as no-op updates.
+
     Returns:
         ``(total_ingested, new_count)`` -- *total_ingested* is the number of
         rows processed and *new_count* is the number of genuinely new
@@ -229,8 +235,6 @@ async def bulk_upsert_from_feed(
 
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                savepoint = await db.begin_nested()
-
                 # ── Step 1: upsert observables ────────────────────────────
                 obs_rows: list[dict] = []
                 for raw in batch:
@@ -253,24 +257,21 @@ async def bulk_upsert_from_feed(
                         "updated_at": func.now(),
                     },
                 )
-                # Use RETURNING to get back the id and xmax (xmax == 0 means INSERT, else UPDATE).
                 stmt = stmt.returning(Observable.__table__.c.id, Observable.__table__.c.type)
 
                 result = await db.execute(stmt)
                 returned_rows = result.all()
 
-                # Build a lookup: (type, value) -> observable_id
-                # We need to re-query because RETURNING doesn't tell us value easily
-                # in the same order. Instead, let's query back the IDs.
+                # Build a lookup: (type, value) -> observable_id using
+                # tuple comparison to avoid the cartesian-product bug that
+                # separate IN clauses would produce.
                 type_value_pairs = [(r.type, r.value) for r in batch]
                 id_lookup: dict[tuple[ObservableType, str], uuid.UUID] = {}
 
-                # Query back the observable IDs for the batch
-                lookup_stmt = select(Observable.id, Observable.type, Observable.value).where(
-                    and_(
-                        Observable.type.in_([tv[0] for tv in type_value_pairs]),
-                        Observable.value.in_([tv[1] for tv in type_value_pairs]),
-                    )
+                lookup_stmt = select(
+                    Observable.id, Observable.type, Observable.value
+                ).where(
+                    tuple_(Observable.type, Observable.value).in_(type_value_pairs)
                 )
                 lookup_result = await db.execute(lookup_stmt)
                 for row in lookup_result.all():
@@ -282,8 +283,7 @@ async def bulk_upsert_from_feed(
                 new_in_batch = await db.execute(
                     select(func.count(Observable.id)).where(
                         and_(
-                            Observable.type.in_([tv[0] for tv in type_value_pairs]),
-                            Observable.value.in_([tv[1] for tv in type_value_pairs]),
+                            tuple_(Observable.type, Observable.value).in_(type_value_pairs),
                             Observable.first_seen >= now - timedelta(seconds=5),
                         )
                     )
@@ -343,13 +343,15 @@ async def bulk_upsert_from_feed(
                         .values(confidence_score=func.coalesce(max_conf_sub, 50))
                     )
 
-                await savepoint.commit()
+                # Commit per-batch to release row locks so concurrent feeds
+                # don't accumulate competing lock sets across batches.
+                await db.commit()
                 total_ingested += batch_ingested
                 new_count += new_in_batch_count
                 break
 
             except OperationalError as e:
-                await savepoint.rollback()
+                await db.rollback()
                 if "deadlock" in str(e).lower() and attempt < _MAX_RETRIES:
                     delay = _BASE_DELAY * (2 ** attempt)
                     logger.warning(
