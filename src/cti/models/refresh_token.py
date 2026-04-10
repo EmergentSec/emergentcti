@@ -6,13 +6,12 @@ from datetime import datetime
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
 
-from cti.models.base import Base
+from cti.models.base import Base, UUIDMixin
 
 
-class RefreshToken(Base):
+class RefreshToken(UUIDMixin, Base):
     __tablename__ = "refresh_tokens"
 
-    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid,
         sa.ForeignKey("users.id", ondelete="CASCADE"),
@@ -20,9 +19,9 @@ class RefreshToken(Base):
         index=True,
     )
     token_hash: Mapped[str] = mapped_column(sa.String(128), unique=True, index=True, nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(sa.DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime, nullable=False, server_default=sa.func.now()
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
     )
     revoked: Mapped[bool] = mapped_column(sa.Boolean, default=False)
 

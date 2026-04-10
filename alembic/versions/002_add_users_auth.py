@@ -25,29 +25,28 @@ def upgrade() -> None:
     # users
     op.create_table(
         "users",
-        sa.Column("id", sa.Uuid(), nullable=False, default=sa.text("gen_random_uuid()")),
+        sa.Column("id", sa.Uuid(), nullable=False, server_default=sa.text("gen_random_uuid()")),
         sa.Column("username", sa.String(64), nullable=False),
         sa.Column("email", sa.String(256), nullable=True),
-        sa.Column("password_hash", sa.String(128), nullable=False),
+        sa.Column("password_hash", sa.String(256), nullable=False),
         sa.Column("role", userrole, nullable=False, server_default="user"),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
-        sa.Column("last_login_at", sa.DateTime(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("username", name="uq_users_username"),
         sa.UniqueConstraint("email", name="uq_users_email"),
     )
-    op.create_index("ix_users_username", "users", ["username"])
 
     # refresh_tokens
     op.create_table(
         "refresh_tokens",
-        sa.Column("id", sa.Uuid(), nullable=False, default=sa.text("gen_random_uuid()")),
+        sa.Column("id", sa.Uuid(), nullable=False, server_default=sa.text("gen_random_uuid()")),
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("token_hash", sa.String(128), nullable=False),
-        sa.Column("expires_at", sa.DateTime(), nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("revoked", sa.Boolean(), nullable=False, server_default="false"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("token_hash", name="uq_refresh_tokens_token_hash"),

@@ -3,8 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-import sqlalchemy as sa
-from sqlalchemy import Boolean, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, ForeignKey, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from cti.models.base import Base, UUIDMixin
@@ -21,7 +20,7 @@ class ApiKey(UUIDMixin, Base):
     last_used_at: Mapped[datetime | None] = mapped_column(default=None)
     description: Mapped[str | None] = mapped_column(Text, default=None)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
-        sa.Uuid,
+        Uuid,
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         default=None,
