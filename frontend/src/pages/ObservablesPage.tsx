@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useObservables, useCreateObservable } from '@/hooks/useObservables'
+import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -24,6 +25,7 @@ export default function ObservablesPage() {
   const { data, isLoading, error } = useObservables(filters)
   const createObservable = useCreateObservable()
   const { toast } = useToast()
+  const { isAdmin } = useAuth()
 
   const handleCreate = (data: ObservableCreate) => {
     createObservable.mutate(data, {
@@ -48,9 +50,11 @@ export default function ObservablesPage() {
             <div className="flex-1">
               <ObservableFilters filters={filters} onChange={setFilters} />
             </div>
-            <Button onClick={() => setShowCreateDialog(true)}>
-              Add Observable
-            </Button>
+            {isAdmin && (
+              <Button onClick={() => setShowCreateDialog(true)}>
+                Add Observable
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
