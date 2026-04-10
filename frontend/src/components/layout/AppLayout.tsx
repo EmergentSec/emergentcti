@@ -3,16 +3,16 @@ import { Sidebar } from './Sidebar'
 import { Header } from './Header'
 
 interface AppLayoutProps {
-  apiKeyPrefix?: string
+  username?: string
   onLogout?: () => void
 }
 
-export function AppLayout({ apiKeyPrefix, onLogout }: AppLayoutProps) {
+export function AppLayout({ username, onLogout }: AppLayoutProps) {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <Sidebar />
       <div className="pl-60">
-        <Header apiKeyPrefix={apiKeyPrefix} onLogout={onLogout} />
+        <Header username={username} onLogout={onLogout} />
         <main className="p-6">
           <Outlet />
         </main>

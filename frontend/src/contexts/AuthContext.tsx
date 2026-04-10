@@ -1,13 +1,14 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { validateApiKey } from '@/api/auth'
+import { login as apiLogin, logout as apiLogout, getMe } from '@/api/auth'
+import type { AuthUser, LoginRequest } from '@/types/auth'
 
 interface AuthContextType {
+  user: AuthUser | null
   isAuthenticated: boolean
-  apiKey: string | null
-  apiKeyPrefix: string | null
+  isAdmin: boolean
   isLoading: boolean
-  login: (key: string) => Promise<boolean>
+  login: (credentials: LoginRequest) => Promise<boolean>
   logout: () => void
 }
 
@@ -19,51 +20,53 @@ export function useAuth(): AuthContextType {
   return ctx
 }
 
-function extractPrefix(key: string): string {
-  // Show first 8 chars as prefix (e.g. "cti_abc1...")
-  return key.length > 8 ? key.substring(0, 8) : key
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [apiKey, setApiKey] = useState<string | null>(() => localStorage.getItem('api_key'))
+  const [user, setUser] = useState<AuthUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const navigate = useNavigate()
   const location = useLocation()
 
-  const isAuthenticated = apiKey !== null
+  const isAuthenticated = user !== null
+  const isAdmin = user?.role === 'admin'
 
-  const apiKeyPrefix = apiKey ? extractPrefix(apiKey) : null
-
-  const login = useCallback(async (key: string): Promise<boolean> => {
-    const valid = await validateApiKey(key)
-    if (valid) {
-      localStorage.setItem('api_key', key)
-      setApiKey(key)
-      navigate('/')
-      return true
-    }
-    return false
-  }, [navigate])
-
-  const logout = useCallback(() => {
-    localStorage.removeItem('api_key')
-    setApiKey(null)
-    navigate('/login')
-  }, [navigate])
-
+  // On mount: check if we have a valid session by calling /auth/me
   useEffect(() => {
-    // Mark loading as done once we've checked localStorage
-    setIsLoading(false)
+    getMe()
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setIsLoading(false))
   }, [])
 
+  // Redirect to login if not authenticated
   useEffect(() => {
     if (!isLoading && !isAuthenticated && location.pathname !== '/login') {
       navigate('/login')
     }
   }, [isAuthenticated, isLoading, location.pathname, navigate])
 
+  const login = useCallback(async (credentials: LoginRequest): Promise<boolean> => {
+    try {
+      const userData = await apiLogin(credentials)
+      setUser(userData)
+      navigate('/')
+      return true
+    } catch {
+      return false
+    }
+  }, [navigate])
+
+  const logout = useCallback(async () => {
+    try {
+      await apiLogout()
+    } catch {
+      // Best effort
+    }
+    setUser(null)
+    navigate('/login')
+  }, [navigate])
+
   return (
-    <AuthContext.Provider value={{ isAuthenticated, apiKey, apiKeyPrefix, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, isAdmin, isLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
   )

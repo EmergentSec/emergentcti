@@ -1,3 +1,15 @@
+export interface AuthUser {
+  id: string
+  username: string
+  role: 'admin' | 'user'
+}
+
+export interface LoginRequest {
+  username: string
+  password: string
+}
+
+// Keep ApiKey types as they're used in settings
 export interface ApiKey {
   id: string
   name: string
@@ -14,5 +26,5 @@ export interface ApiKeyCreate {
 }
 
 export interface ApiKeyCreateResponse extends ApiKey {
-  key: string // Full key, only shown at creation time
+  key: string
 }

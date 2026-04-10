@@ -22,8 +22,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AuthedLayout() {
-  const { apiKeyPrefix, logout } = useAuth()
-  return <AppLayout apiKeyPrefix={apiKeyPrefix ?? undefined} onLogout={logout} />
+  const { user, logout } = useAuth()
+  return <AppLayout username={user?.username} onLogout={logout} />
 }
 
 export default function App() {

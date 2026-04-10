@@ -11,12 +11,12 @@ const pageTitles: Record<string, string> = {
 };
 
 interface HeaderProps {
-  apiKeyPrefix?: string;
+  username?: string;
   onLogout?: () => void;
   className?: string;
 }
 
-export function Header({ apiKeyPrefix, onLogout, className }: HeaderProps) {
+export function Header({ username, onLogout, className }: HeaderProps) {
   const location = useLocation();
   const title = pageTitles[location.pathname] || 'EmergentCTI';
 
@@ -30,9 +30,9 @@ export function Header({ apiKeyPrefix, onLogout, className }: HeaderProps) {
       <h1 className="text-lg font-semibold text-foreground">{title}</h1>
 
       <div className="flex items-center gap-3">
-        {apiKeyPrefix && (
-          <Badge variant="outline" className="font-mono text-xs">
-            Key: {apiKeyPrefix}...
+        {username && (
+          <Badge variant="outline" className="text-xs">
+            {username}
           </Badge>
         )}
         {onLogout && (
