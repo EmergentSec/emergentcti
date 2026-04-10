@@ -29,7 +29,12 @@ router = APIRouter()
 
 
 def _get_client_ip(request: Request) -> str:
-    return request.headers.get("X-Forwarded-For", request.client.host).split(",")[0].strip()
+    settings = get_settings()
+    if settings.TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return request.client.host
 
 
 def _set_access_cookie(response: Response, token: str, secure: bool) -> None:
@@ -50,7 +55,7 @@ def _set_refresh_cookie(response: Response, token: str, secure: bool) -> None:
         httponly=True,
         secure=secure,
         samesite="lax",
-        path="/api/v1/auth/refresh",
+        path="/api/v1/auth/",
     )
 
 
@@ -144,6 +149,14 @@ async def refresh(
             detail="User not found or inactive",
         )
 
+    # Rotate: revoke old refresh token, issue new one
+    db_token.revoked = True
+    new_refresh = await create_refresh_token(
+        db=db,
+        user_id=user.id,
+        expire_days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS,
+    )
+
     secret = settings.JWT_SECRET_KEY.get_secret_value()
     access_token = create_access_token(
         user_id=user.id,
@@ -151,9 +164,11 @@ async def refresh(
         secret=secret,
         expire_minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES,
     )
+    await db.commit()
 
     secure = settings.ENVIRONMENT != "development"
     _set_access_cookie(response, access_token, secure)
+    _set_refresh_cookie(response, new_refresh, secure)
 
     return {"message": "Token refreshed"}
 
@@ -175,7 +190,7 @@ async def logout(
     secure = settings.ENVIRONMENT != "development"
     response.set_cookie(key="access_token", value="", max_age=0, path="/api",
                         httponly=True, samesite="lax", secure=secure)
-    response.set_cookie(key="refresh_token", value="", max_age=0, path="/api/v1/auth/refresh",
+    response.set_cookie(key="refresh_token", value="", max_age=0, path="/api/v1/auth/",
                         httponly=True, samesite="lax", secure=secure)
 
     return {"message": "Logged out"}
