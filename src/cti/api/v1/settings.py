@@ -138,6 +138,11 @@ async def create_user(
     existing = await db.execute(select(User).where(User.username == data.username))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already taken")
+    # Check email uniqueness if provided
+    if data.email:
+        existing_email = await db.execute(select(User).where(User.email == data.email))
+        if existing_email.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Email already in use")
     password_hash = await hash_password(data.password)
     user = User(
         username=data.username,
@@ -163,14 +168,24 @@ async def update_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     # Cannot deactivate yourself
-    if data.is_active is False and isinstance(_auth, User) and str(user.id) == str(_auth.id):
+    if data.is_active is False and isinstance(_auth, User) and user.id == _auth.id:
         raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
+
+    if data.role is not None and data.role != UserRole.admin:
+        if isinstance(_auth, User) and user.id == _auth.id:
+            raise HTTPException(status_code=400, detail="Cannot change your own role")
 
     if data.role is not None:
         user.role = data.role
     if data.is_active is not None:
         user.is_active = data.is_active
     if data.email is not None:
+        if data.email:  # non-empty string
+            existing_email = await db.execute(
+                select(User).where(User.email == data.email, User.id != user_id)
+            )
+            if existing_email.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail="Email already in use")
         user.email = data.email
 
     await db.flush()
@@ -189,7 +204,7 @@ async def delete_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     # Cannot delete yourself
-    if isinstance(_auth, User) and str(user.id) == str(_auth.id):
+    if isinstance(_auth, User) and user.id == _auth.id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
 
     await revoke_all_user_tokens(db, user.id)
@@ -209,8 +224,11 @@ async def change_user_password(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # API keys are treated as admin-equivalent for backwards compatibility.
+    # Any valid API key can change any user's password without providing
+    # the current password.
     is_admin = isinstance(_auth, ApiKey) or (isinstance(_auth, User) and _auth.role == UserRole.admin)
-    is_self = isinstance(_auth, User) and str(_auth.id) == str(user_id)
+    is_self = isinstance(_auth, User) and _auth.id == user_id
 
     if not is_admin and not is_self:
         raise HTTPException(status_code=403, detail="Cannot change another user's password")
@@ -222,4 +240,7 @@ async def change_user_password(
             raise HTTPException(status_code=400, detail="Current password is incorrect")
 
     user.password_hash = await hash_password(data.new_password)
+    # Revoke existing sessions if an admin is forcing a password change
+    if is_admin and not is_self:
+        await revoke_all_user_tokens(db, user.id)
     await db.flush()
