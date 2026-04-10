@@ -16,3 +16,4 @@ frontend/dist/
 uv.lock
 .claude/
 CLAUDE.md
+.worktrees/
