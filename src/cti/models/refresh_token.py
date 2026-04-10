@@ -18,7 +18,7 @@ class RefreshToken(UUIDMixin, Base):
         nullable=False,
         index=True,
     )
-    token_hash: Mapped[str] = mapped_column(sa.String(128), unique=True, index=True, nullable=False)
+    token_hash: Mapped[str] = mapped_column(sa.String(128), unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
