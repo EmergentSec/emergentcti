@@ -10,9 +10,8 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.database import get_db
-from cti.core.dependencies import verify_api_key
+from cti.core.dependencies import AuthSubject, get_current_auth
 from cti.core.redis import cache_get, cache_set
-from cti.models.api_key import ApiKey
 from cti.models.observable import ObservableType
 from cti.schemas.export import ExportObservable, JsonExportResponse
 from cti.services import observable_service
@@ -24,7 +23,7 @@ router = APIRouter()
 async def get_blocklist(
     obs_type: ObservableType,
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(get_current_auth),
     confidence_min: int = Query(default=70, ge=0, le=100),
     max_age_days: int | None = Query(default=None, ge=1),
     feed_id: uuid.UUID | None = None,
@@ -66,7 +65,7 @@ async def get_blocklist(
 @router.get("/json")
 async def export_json(
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(get_current_auth),
     type: ObservableType | None = None,
     confidence_min: int = Query(default=0, ge=0, le=100),
     max_age_days: int | None = Query(default=None, ge=1),
@@ -111,7 +110,7 @@ async def export_json(
 @router.get("/text", response_class=PlainTextResponse)
 async def export_text(
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(get_current_auth),
     confidence_min: int = Query(default=0, ge=0, le=100),
     max_age_days: int | None = Query(default=None, ge=1),
 ) -> PlainTextResponse:
