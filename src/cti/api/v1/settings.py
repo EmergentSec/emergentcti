@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.config import get_settings
@@ -19,6 +19,24 @@ from cti.schemas.user import PasswordChange, UserCreate, UserResponse, UserUpdat
 from cti.services.auth_service import hash_password, revoke_all_user_tokens, verify_password
 
 router = APIRouter()
+
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+
+async def _ensure_not_last_admin(db: AsyncSession, user: User) -> None:
+    """Reject the operation if it would leave zero active admins."""
+    if user.role != UserRole.admin or not user.is_active:
+        return
+    count = await db.scalar(
+        select(func.count()).select_from(User).where(
+            User.role == UserRole.admin,
+            User.is_active.is_(True),
+            User.id != user.id,
+        )
+    )
+    if count == 0:
+        raise HTTPException(status_code=400, detail="Cannot remove the last active admin")
 
 
 # ── API Key Management ────────────────────────────────────────────────
@@ -175,6 +193,12 @@ async def update_user(
         if isinstance(_auth, User) and user.id == _auth.id:
             raise HTTPException(status_code=400, detail="Cannot change your own role")
 
+    # Last-admin protection: block demotion or deactivation of the last active admin
+    if data.role is not None and data.role != UserRole.admin:
+        await _ensure_not_last_admin(db, user)
+    if data.is_active is False:
+        await _ensure_not_last_admin(db, user)
+
     if data.role is not None:
         user.role = data.role
     if data.is_active is not None:
@@ -207,6 +231,7 @@ async def delete_user(
     if isinstance(_auth, User) and user.id == _auth.id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
 
+    await _ensure_not_last_admin(db, user)
     await revoke_all_user_tokens(db, user.id)
     await db.delete(user)
     await db.flush()
@@ -240,7 +265,6 @@ async def change_user_password(
             raise HTTPException(status_code=400, detail="Current password is incorrect")
 
     user.password_hash = await hash_password(data.new_password)
-    # Revoke existing sessions if an admin is forcing a password change
-    if is_admin and not is_self:
-        await revoke_all_user_tokens(db, user.id)
+    # Always revoke sessions — forces re-login with the new password
+    await revoke_all_user_tokens(db, user.id)
     await db.flush()
