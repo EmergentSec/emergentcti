@@ -25,6 +25,12 @@ api.interceptors.response.use(
 
     // Only attempt refresh on 401, and only once per request
     if (error.response?.status === 401 && !originalRequest._retry) {
+      // Don't retry the refresh endpoint itself — would cause infinite loop
+      if (originalRequest.url?.includes('/auth/refresh')) {
+        window.location.href = '/login'
+        return Promise.reject(error)
+      }
+
       if (isRefreshing) {
         // Queue this request until refresh completes
         return new Promise<void>((resolve, reject) => {

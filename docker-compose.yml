@@ -63,6 +63,8 @@ services:
       PHISHTANK_API_KEY: ${PHISHTANK_API_KEY:-}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # If empty, a random secret is generated on each startup (sessions lost on container restart).
+      # Set this to a stable value in .env for persistent sessions.
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
     depends_on:
       postgres:

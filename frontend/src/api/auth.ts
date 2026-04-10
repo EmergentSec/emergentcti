@@ -20,6 +20,3 @@ export async function getMe(): Promise<AuthUser> {
   }
 }
 
-export async function refreshToken(): Promise<void> {
-  await api.post('/auth/refresh')
-}

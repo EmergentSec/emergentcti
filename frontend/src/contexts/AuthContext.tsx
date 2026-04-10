@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { login as apiLogin, logout as apiLogout, getMe } from '@/api/auth'
 import type { AuthUser, LoginRequest } from '@/types/auth'
 
@@ -9,7 +9,7 @@ interface AuthContextType {
   isAdmin: boolean
   isLoading: boolean
   login: (credentials: LoginRequest) => Promise<boolean>
-  logout: () => void
+  logout: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -24,7 +24,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const navigate = useNavigate()
-  const location = useLocation()
 
   const isAuthenticated = user !== null
   const isAdmin = user?.role === 'admin'
@@ -36,13 +35,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch(() => setUser(null))
       .finally(() => setIsLoading(false))
   }, [])
-
-  // Redirect to login if not authenticated
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated && location.pathname !== '/login') {
-      navigate('/login')
-    }
-  }, [isAuthenticated, isLoading, location.pathname, navigate])
 
   const login = useCallback(async (credentials: LoginRequest): Promise<boolean> => {
     try {
