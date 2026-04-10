@@ -41,11 +41,7 @@ export function useDeleteUser() {
 }
 
 export function useChangePassword() {
-  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: PasswordChange }) => changePassword(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-    },
   })
 }

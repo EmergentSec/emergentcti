@@ -38,6 +38,9 @@ export function UserManager() {
   // Delete confirmation dialog state
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
 
+  // Per-row pending state for toggle to avoid disabling all rows
+  const [pendingToggleId, setPendingToggleId] = useState<string | null>(null)
+
   const isSelf = (user: User) => currentUser?.id === user.id
 
   const handleCreate = (e: React.FormEvent) => {
@@ -71,13 +74,16 @@ export function UserManager() {
   }
 
   const handleToggleActive = (user: User) => {
+    setPendingToggleId(user.id)
     updateUser.mutate(
       { id: user.id, data: { is_active: !user.is_active } },
       {
         onSuccess: () => {
+          setPendingToggleId(null)
           toast(`${user.username} ${!user.is_active ? 'activated' : 'deactivated'}`, 'success')
         },
         onError: (err) => {
+          setPendingToggleId(null)
           toast(err instanceof Error ? err.message : 'Failed to update user', 'error')
         },
       }
@@ -186,7 +192,7 @@ export function UserManager() {
                         variant="outline"
                         size="sm"
                         onClick={() => handleToggleActive(user)}
-                        disabled={isSelf(user) || updateUser.isPending}
+                        disabled={isSelf(user) || pendingToggleId === user.id}
                         title={isSelf(user) ? 'Cannot deactivate your own account' : undefined}
                       >
                         {user.is_active ? 'Deactivate' : 'Activate'}
@@ -296,7 +302,7 @@ export function UserManager() {
               value={newPasswordValue}
               onChange={(e) => setNewPasswordValue(e.target.value)}
               placeholder="Enter a new password"
-              autoFocus={passwordTarget !== null && !isSelf(passwordTarget!)}
+              autoFocus={passwordTarget !== null && !isSelf(passwordTarget)}
               required
             />
             <div className="flex justify-end gap-2">
