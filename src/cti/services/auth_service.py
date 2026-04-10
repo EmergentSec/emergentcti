@@ -56,7 +56,10 @@ def decode_access_token(token: str, secret: str) -> dict:
 
     Raises jwt.ExpiredSignatureError or jwt.InvalidTokenError on failure.
     """
-    return jwt.decode(token, secret, algorithms=["HS256"])
+    payload = jwt.decode(token, secret, algorithms=["HS256"])
+    if payload.get("type") != "access":
+        raise jwt.InvalidTokenError("Wrong token type")
+    return payload
 
 
 # ── Refresh token helpers ─────────────────────────────────────────────────
@@ -150,10 +153,10 @@ async def record_failed_login(ip: str) -> None:
     """Increment Redis counter for IP. Key: 'login_fail:{ip}', TTL: 900 seconds."""
     redis = get_redis()
     key = _rate_limit_key(ip)
-    pipe = redis.pipeline()
-    await pipe.incr(key)
-    await pipe.expire(key, _RATE_LIMIT_TTL_SECONDS)
-    await pipe.execute()
+    async with redis.pipeline() as pipe:
+        pipe.incr(key)                            # synchronous — buffers command
+        pipe.expire(key, _RATE_LIMIT_TTL_SECONDS)  # synchronous — buffers command
+        await pipe.execute()                      # single async round-trip
 
 
 async def clear_login_rate_limit(ip: str) -> None:

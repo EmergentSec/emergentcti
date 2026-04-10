@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import uuid
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=128)
 
 
 class TokenResponse(BaseModel):

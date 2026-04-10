@@ -12,7 +12,7 @@ from cti.models.user import UserRole
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=8, max_length=128)
     role: UserRole = UserRole.user
     email: str | None = None
 
@@ -36,5 +36,5 @@ class UserUpdate(BaseModel):
 
 
 class PasswordChange(BaseModel):
-    new_password: str = Field(min_length=8)
+    new_password: str = Field(min_length=8, max_length=128)
     current_password: str | None = None  # required for non-admin self-change
