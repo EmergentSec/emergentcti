@@ -8,8 +8,9 @@ import secrets
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from pydantic import SecretStr
 from sqlalchemy import func, select
 
@@ -73,6 +74,9 @@ async def seed_initial_admin_user() -> None:
         db.add(user)
         await db.commit()
         logger.info("Initial admin user created: %s", settings.ADMIN_USERNAME)
+        logger.warning(
+            "Consider removing ADMIN_PASSWORD from your environment after initial setup."
+        )
 
 
 @asynccontextmanager
@@ -90,11 +94,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 2. Validate/generate JWT_SECRET_KEY
     if not settings.JWT_SECRET_KEY.get_secret_value():
+        if settings.ENVIRONMENT != "development":
+            raise RuntimeError(
+                "JWT_SECRET_KEY is required in non-development environments. "
+                'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+            )
         new_secret = secrets.token_urlsafe(32)
         object.__setattr__(settings, "JWT_SECRET_KEY", SecretStr(new_secret))
         logger.warning(
             "JWT_SECRET_KEY not set — generated a random secret. "
-            "Sessions will NOT persist across restarts. Set JWT_SECRET_KEY in your environment."
+            "Sessions will NOT persist across restarts."
         )
 
     # 3. Seed default feeds and sync preconfigured feed configs
@@ -142,6 +151,9 @@ def create_app() -> FastAPI:
         description="Lightweight CTI IOC Feed Aggregation Platform",
         version="0.1.0",
         lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
 
     app.add_middleware(
@@ -153,6 +165,21 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(api_router)
+
+    # Authenticated API documentation routes
+    from cti.core.dependencies import AuthSubject, get_current_auth
+
+    @app.get("/openapi.json", include_in_schema=False)
+    async def openapi_schema(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: ARG001
+        return app.openapi()
+
+    @app.get("/docs", include_in_schema=False)
+    async def docs_ui(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: ARG001
+        return get_swagger_ui_html(openapi_url="/openapi.json", title="EmergentCTI — Docs")
+
+    @app.get("/redoc", include_in_schema=False)
+    async def redoc_ui(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: ARG001
+        return get_redoc_html(openapi_url="/openapi.json", title="EmergentCTI — Docs")
 
     return app
 

@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: SecretStr = SecretStr("")
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    TRUST_PROXY_HEADERS: bool = False
 
     # ── Feed API keys (optional) ─────────────────────────────────────────
     ABUSEIPDB_API_KEY: str = ""
