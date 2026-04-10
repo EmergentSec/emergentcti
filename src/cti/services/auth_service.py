@@ -154,9 +154,9 @@ async def record_failed_login(ip: str) -> None:
     redis = get_redis()
     key = _rate_limit_key(ip)
     async with redis.pipeline() as pipe:
-        pipe.incr(key)                            # synchronous — buffers command
-        pipe.expire(key, _RATE_LIMIT_TTL_SECONDS)  # synchronous — buffers command
-        await pipe.execute()                      # single async round-trip
+        pipe.incr(key)                                          # synchronous — buffers command
+        pipe.expire(key, _RATE_LIMIT_TTL_SECONDS, nx=True)     # only set TTL on first attempt
+        await pipe.execute()                                    # single async round-trip
 
 
 async def clear_login_rate_limit(ip: str) -> None:

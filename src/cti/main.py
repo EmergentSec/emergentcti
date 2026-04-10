@@ -50,6 +50,10 @@ async def seed_initial_admin_user() -> None:
     settings = get_settings()
     admin_pass = settings.ADMIN_PASSWORD.get_secret_value()
     if not admin_pass:
+        logger.warning(
+            "ADMIN_PASSWORD not set — skipping admin user creation. "
+            "Set ADMIN_PASSWORD in .env to create an initial admin user."
+        )
         return  # skip if not configured
 
     async with async_session_factory() as db:

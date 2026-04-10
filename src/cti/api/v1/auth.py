@@ -106,7 +106,7 @@ async def login(
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
 
-    secure = settings.ENVIRONMENT == "production"
+    secure = settings.ENVIRONMENT != "development"
     _set_access_cookie(response, access_token, secure)
     _set_refresh_cookie(response, refresh_token, secure)
 
@@ -152,7 +152,7 @@ async def refresh(
         expire_minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES,
     )
 
-    secure = settings.ENVIRONMENT == "production"
+    secure = settings.ENVIRONMENT != "development"
     _set_access_cookie(response, access_token, secure)
 
     return {"message": "Token refreshed"}
@@ -170,9 +170,13 @@ async def logout(
         await revoke_refresh_token(db, raw_token)
         await db.commit()
 
-    # Clear both cookies
-    response.set_cookie(key="access_token", value="", max_age=0, path="/api")
-    response.set_cookie(key="refresh_token", value="", max_age=0, path="/api/v1/auth/refresh")
+    # Clear both cookies — attributes must match the originals so browsers honour the deletion
+    settings = get_settings()
+    secure = settings.ENVIRONMENT != "development"
+    response.set_cookie(key="access_token", value="", max_age=0, path="/api",
+                        httponly=True, samesite="lax", secure=secure)
+    response.set_cookie(key="refresh_token", value="", max_age=0, path="/api/v1/auth/refresh",
+                        httponly=True, samesite="lax", secure=secure)
 
     return {"message": "Logged out"}
 
