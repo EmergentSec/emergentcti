@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     # ── CORS ─────────────────────────────────────────────────────────────
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8080"]
 
+    # ── Auth ─────────────────────────────────────────────────────────────
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: SecretStr = SecretStr("")
+    JWT_SECRET_KEY: SecretStr = SecretStr("")
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
     # ── Feed API keys (optional) ─────────────────────────────────────────
     ABUSEIPDB_API_KEY: str = ""
     URLSCAN_API_KEY: str = ""
