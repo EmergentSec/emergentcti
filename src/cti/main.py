@@ -21,7 +21,7 @@ from cti.core.redis import close_redis, init_redis
 from cti.models.api_key import ApiKey
 from cti.models.user import User, UserRole
 from cti.services import feed_service
-from cti.services.scheduler import add_decay_job, init_scheduler, sync_feed_jobs
+from cti.services.scheduler import add_decay_job, add_token_cleanup_job, init_scheduler, sync_feed_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +132,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with async_session_factory() as db:
         await sync_feed_jobs(db)
     await add_decay_job()
+    await add_token_cleanup_job()
     sched.start()
     logger.info("Scheduler started")
 

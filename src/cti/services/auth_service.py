@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from fastapi import HTTPException, status
 from passlib.context import CryptContext
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.redis import get_redis
@@ -163,3 +163,21 @@ async def clear_login_rate_limit(ip: str) -> None:
     """Delete Redis counter on successful login."""
     redis = get_redis()
     await redis.delete(_rate_limit_key(ip))
+
+
+# ── Token maintenance ───────────────────────────────────────────────────
+
+
+async def cleanup_expired_tokens(db: AsyncSession) -> int:
+    """Delete expired and revoked refresh tokens. Returns count of deleted rows."""
+    now = datetime.now(tz=timezone.utc)
+    result = await db.execute(
+        delete(RefreshToken).where(
+            or_(
+                RefreshToken.revoked.is_(True),
+                RefreshToken.expires_at < now,
+            )
+        )
+    )
+    await db.commit()
+    return result.rowcount
