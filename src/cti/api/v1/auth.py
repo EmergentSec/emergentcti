@@ -27,6 +27,10 @@ from cti.services.auth_service import (
 
 router = APIRouter()
 
+# Precomputed bcrypt hash for timing equalization when user doesn't exist.
+# Cost factor $2b$12$ matches CryptContext default rounds. Never matches any input.
+_DUMMY_BCRYPT_HASH = "$2b$12$LJ3m4ys3Lg2VbEIDOlGNku4VR.edSKNnNR0M4PkGMGLnCMBVljX2G"
+
 
 def _get_client_ip(request: Request) -> str:
     settings = get_settings()
@@ -77,17 +81,18 @@ async def login(
     result = await db.execute(select(User).where(User.username == body.username))
     user = result.scalar_one_or_none()
 
-    if user is None or not await verify_password(body.password, user.password_hash):
+    # Always run bcrypt to prevent timing-based user enumeration
+    if user is not None:
+        password_valid = await verify_password(body.password, user.password_hash)
+    else:
+        await verify_password(body.password, _DUMMY_BCRYPT_HASH)
+        password_valid = False
+
+    if user is None or not password_valid or not user.is_active:
         await record_failed_login(client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
-        )
-
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Account is disabled",
         )
 
     # Success — clear rate limit counter
