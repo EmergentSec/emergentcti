@@ -169,17 +169,17 @@ def create_app() -> FastAPI:
     # Authenticated API documentation routes
     from cti.core.dependencies import AuthSubject, get_current_auth
 
-    @app.get("/openapi.json", include_in_schema=False)
+    @app.get("/api/openapi.json", include_in_schema=False)
     async def openapi_schema(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: ARG001
         return app.openapi()
 
-    @app.get("/docs", include_in_schema=False)
+    @app.get("/api/docs", include_in_schema=False)
     async def docs_ui(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: ARG001
-        return get_swagger_ui_html(openapi_url="/openapi.json", title="EmergentCTI — Docs")
+        return get_swagger_ui_html(openapi_url="/api/openapi.json", title="EmergentCTI — Docs")
 
-    @app.get("/redoc", include_in_schema=False)
+    @app.get("/api/redoc", include_in_schema=False)
     async def redoc_ui(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: ARG001
-        return get_redoc_html(openapi_url="/openapi.json", title="EmergentCTI — Docs")
+        return get_redoc_html(openapi_url="/api/openapi.json", title="EmergentCTI — Docs")
 
     return app
 

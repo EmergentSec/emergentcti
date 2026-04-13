@@ -41,7 +41,7 @@ def _get_client_ip(request: Request) -> str:
     return request.client.host
 
 
-def _set_access_cookie(response: Response, token: str, secure: bool) -> None:
+def _set_access_cookie(response: Response, token: str, secure: bool, max_age: int) -> None:
     response.set_cookie(
         key="access_token",
         value=token,
@@ -49,10 +49,11 @@ def _set_access_cookie(response: Response, token: str, secure: bool) -> None:
         secure=secure,
         samesite="lax",
         path="/api",
+        max_age=max_age,
     )
 
 
-def _set_refresh_cookie(response: Response, token: str, secure: bool) -> None:
+def _set_refresh_cookie(response: Response, token: str, secure: bool, max_age: int) -> None:
     response.set_cookie(
         key="refresh_token",
         value=token,
@@ -60,6 +61,7 @@ def _set_refresh_cookie(response: Response, token: str, secure: bool) -> None:
         secure=secure,
         samesite="lax",
         path="/api/v1/auth/",
+        max_age=max_age,
     )
 
 
@@ -117,8 +119,10 @@ async def login(
     await db.commit()
 
     secure = settings.ENVIRONMENT != "development"
-    _set_access_cookie(response, access_token, secure)
-    _set_refresh_cookie(response, refresh_token, secure)
+    _set_access_cookie(response, access_token, secure,
+                       max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60)
+    _set_refresh_cookie(response, refresh_token, secure,
+                        max_age=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 86400)
 
     return TokenResponse(id=user.id, username=user.username, role=user.role.value)
 
@@ -172,8 +176,10 @@ async def refresh(
     await db.commit()
 
     secure = settings.ENVIRONMENT != "development"
-    _set_access_cookie(response, access_token, secure)
-    _set_refresh_cookie(response, new_refresh, secure)
+    _set_access_cookie(response, access_token, secure,
+                       max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60)
+    _set_refresh_cookie(response, new_refresh, secure,
+                        max_age=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 86400)
 
     return {"message": "Token refreshed"}
 
