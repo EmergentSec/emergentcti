@@ -151,7 +151,7 @@ async def _run_decay_job() -> None:
 
 
 async def _run_token_cleanup_job() -> None:
-    """APScheduler callback: delete expired/revoked refresh tokens."""
+    """APScheduler callback: delete expired refresh tokens."""
     from cti.core.database import async_session_factory
     from cti.services.auth_service import cleanup_expired_tokens
 
@@ -159,6 +159,6 @@ async def _run_token_cleanup_job() -> None:
         try:
             count = await cleanup_expired_tokens(db)
             if count:
-                logger.info("Token cleanup removed %d expired/revoked tokens", count)
+                logger.info("Token cleanup removed %d expired tokens", count)
         except Exception:
             logger.error("Token cleanup job failed", exc_info=True)
