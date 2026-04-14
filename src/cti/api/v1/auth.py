@@ -37,7 +37,8 @@ def _get_client_ip(request: Request) -> str:
     if settings.TRUST_PROXY_HEADERS:
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            # Rightmost entry is appended by our trusted proxy (nginx)
+            return forwarded.split(",")[-1].strip()
     return request.client.host
 
 

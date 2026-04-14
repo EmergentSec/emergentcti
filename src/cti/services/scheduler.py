@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from urllib.parse import urlparse
 
 from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -24,13 +23,14 @@ scheduler: AsyncIOScheduler | None = None
 def init_scheduler(redis_url: str) -> AsyncIOScheduler:
     """Initialize APScheduler with a Redis-backed job store."""
     global scheduler  # noqa: PLW0603
-    parsed = urlparse(redis_url)
+    settings = get_settings()
+    password = settings.REDIS_PASSWORD.get_secret_value() or None
     jobstores = {
         "default": RedisJobStore(
-            host=parsed.hostname or "localhost",
-            port=parsed.port or 6379,
-            db=int(parsed.path.lstrip("/") or "0"),
-            password=parsed.password,
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=password,
         ),
     }
     scheduler = AsyncIOScheduler(jobstores=jobstores, timezone="UTC")
