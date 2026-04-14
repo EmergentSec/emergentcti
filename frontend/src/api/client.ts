@@ -32,7 +32,8 @@ api.interceptors.response.use(
       }
 
       if (isRefreshing) {
-        // Queue this request until refresh completes
+        // Mark as retried to prevent re-entering refresh logic on retry
+        originalRequest._retry = true
         return new Promise<void>((resolve, reject) => {
           failedQueue.push({ resolve, reject })
         })
