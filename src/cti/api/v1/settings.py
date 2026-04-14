@@ -109,7 +109,7 @@ async def revoke_api_key(
 
 @router.get("/config")
 async def get_config(
-    _auth: AuthSubject = Depends(require_admin),
+    _auth: AuthSubject = Depends(get_current_auth),
 ) -> dict:
     settings = get_settings()
     return {

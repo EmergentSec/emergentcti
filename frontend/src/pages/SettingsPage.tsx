@@ -9,7 +9,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       {isAdmin && <UserManager />}
-      <ApiKeyManager />
+      {isAdmin && <ApiKeyManager />}
       <GeneralSettings />
     </div>
   )
