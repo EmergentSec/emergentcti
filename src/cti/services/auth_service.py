@@ -4,32 +4,38 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 import jwt
 from fastapi import HTTPException, status
-from passlib.context import CryptContext
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.redis import get_redis
 from cti.models.refresh_token import RefreshToken
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+logger = logging.getLogger(__name__)
 
 # ── Password helpers ──────────────────────────────────────────────────────
 
 
 async def hash_password(plain: str) -> str:
     """Hash a password with bcrypt using asyncio.to_thread() to avoid blocking."""
-    return await asyncio.to_thread(_pwd_context.hash, plain)
+    hashed = await asyncio.to_thread(
+        bcrypt.hashpw, plain.encode(), bcrypt.gensalt()
+    )
+    return hashed.decode()
 
 
 async def verify_password(plain: str, hashed: str) -> bool:
     """Verify a password against a bcrypt hash using asyncio.to_thread()."""
-    return await asyncio.to_thread(_pwd_context.verify, plain, hashed)
+    return await asyncio.to_thread(
+        bcrypt.checkpw, plain.encode(), hashed.encode()
+    )
 
 
 # ── JWT helpers ───────────────────────────────────────────────────────────
@@ -94,6 +100,13 @@ async def verify_refresh_token(db: AsyncSession, raw_token: str) -> RefreshToken
     if db_token is None:
         return None
     if db_token.revoked:
+        # Reuse of a rotated token — treat as theft indicator (OAuth 2.0 BCP §4.13.2)
+        logger.warning(
+            "Revoked refresh token replayed — revoking all sessions for user %s",
+            db_token.user_id,
+        )
+        await revoke_all_user_tokens(db, db_token.user_id)
+        await db.flush()
         return None
     if db_token.expires_at < datetime.now(tz=timezone.utc):
         return None
@@ -169,15 +182,11 @@ async def clear_login_rate_limit(ip: str) -> None:
 
 
 async def cleanup_expired_tokens(db: AsyncSession) -> int:
-    """Delete expired and revoked refresh tokens. Returns count of deleted rows."""
+    """Delete expired refresh tokens. Revoked-but-unexpired rows are preserved
+    so that reuse of a rotated token can still trigger theft detection."""
     now = datetime.now(tz=timezone.utc)
     result = await db.execute(
-        delete(RefreshToken).where(
-            or_(
-                RefreshToken.revoked.is_(True),
-                RefreshToken.expires_at < now,
-            )
-        )
+        delete(RefreshToken).where(RefreshToken.expires_at < now)
     )
     await db.commit()
     return result.rowcount

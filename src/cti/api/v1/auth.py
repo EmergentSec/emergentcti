@@ -28,7 +28,7 @@ from cti.services.auth_service import (
 router = APIRouter()
 
 # Precomputed bcrypt hash for timing equalization when user doesn't exist.
-# Cost factor $2b$12$ matches CryptContext default rounds. Never matches any input.
+# Cost factor $2b$12$ matches bcrypt.gensalt() default (12 rounds). Never matches any input.
 _DUMMY_BCRYPT_HASH = "$2b$12$LJ3m4ys3Lg2VbEIDOlGNku4VR.edSKNnNR0M4PkGMGLnCMBVljX2G"
 
 
