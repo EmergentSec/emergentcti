@@ -9,8 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.database import get_db
-from cti.core.dependencies import verify_api_key
-from cti.models.api_key import ApiKey
+from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
 from cti.models.observable import ObservableType
 from cti.schemas.observable import ObservableCreate, ObservableListResponse, ObservableResponse, ObservableSourceResponse
 from cti.services import observable_service
@@ -45,7 +44,7 @@ def _obs_to_response(obs) -> ObservableResponse:
 @router.get("", response_model=ObservableListResponse)
 async def list_observables(
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(get_current_auth),
     q: str | None = None,
     type: ObservableType | None = None,
     confidence_min: int | None = Query(default=None, ge=0, le=100),
@@ -96,7 +95,7 @@ async def list_observables(
 async def create_observable(
     data: ObservableCreate,
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(require_admin),
 ) -> ObservableResponse:
     obs, _created = await observable_service.create_observable(
         db,
@@ -112,7 +111,7 @@ async def create_observable(
 async def get_observable(
     observable_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(get_current_auth),
 ) -> ObservableResponse:
     obs = await observable_service.get_observable(db, observable_id)
     if not obs:
@@ -124,7 +123,7 @@ async def get_observable(
 async def delete_observable(
     observable_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(require_admin),
 ) -> None:
     deleted = await observable_service.delete_observable(db, observable_id)
     if not deleted:

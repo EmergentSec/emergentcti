@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/Input'
 import { Card, CardContent } from '@/components/ui/Card'
 
 export default function LoginPage() {
-  const [key, setKey] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { login } = useAuth()
@@ -15,15 +16,15 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!key.trim()) return
+    if (!username.trim() || !password) return
 
     setError('')
     setLoading(true)
     try {
-      const success = await login(key.trim())
+      const success = await login({ username: username.trim(), password })
       if (!success) {
-        setError('Invalid API key. Please check and try again.')
-        toast('Invalid API key', 'error')
+        setError('Invalid username or password. Please try again.')
+        toast('Invalid credentials', 'error')
       }
     } catch {
       setError('Failed to connect. Is the server running?')
@@ -42,32 +43,38 @@ export default function LoginPage() {
             <div className="text-center">
               <h1 className="text-2xl font-bold text-foreground tracking-tight">EmergentCTI</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Enter your API key to connect
+                Sign in to your account
               </p>
             </div>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
-              type="password"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              placeholder="cti_..."
-              error={error}
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Username"
               autoFocus
+            />
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              error={error}
             />
             <Button
               type="submit"
-              disabled={loading || !key.trim()}
+              disabled={loading || !username.trim() || !password}
               className="w-full"
             >
               {loading ? (
                 <span className="flex items-center gap-2">
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  Validating...
+                  Signing in...
                 </span>
               ) : (
-                'Connect'
+                'Sign In'
               )}
             </Button>
           </form>

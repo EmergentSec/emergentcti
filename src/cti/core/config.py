@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import SecretStr, computed_field
+from urllib.parse import quote
+
+from pydantic import SecretStr, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,7 +31,10 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "cti"
 
     # ── Redis ────────────────────────────────────────────────────────────
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: SecretStr = SecretStr("")
 
     # ── Feed system ──────────────────────────────────────────────────────
     FEED_ENCRYPTION_KEY: SecretStr = SecretStr("change-me")
@@ -46,11 +51,35 @@ class Settings(BaseSettings):
     # ── CORS ─────────────────────────────────────────────────────────────
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8080"]
 
+    @field_validator("CORS_ORIGINS")
+    @classmethod
+    def cors_origins_no_wildcard(cls, v: list[str]) -> list[str]:
+        if "*" in v:
+            raise ValueError("CORS_ORIGINS must not contain '*' — specify exact origins")
+        return v
+
+    # ── Auth ─────────────────────────────────────────────────────────────
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: SecretStr = SecretStr("")
+    JWT_SECRET_KEY: SecretStr = SecretStr("")
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    TRUST_PROXY_HEADERS: bool = False
+
     # ── Feed API keys (optional) ─────────────────────────────────────────
     ABUSEIPDB_API_KEY: str = ""
     URLSCAN_API_KEY: str = ""
 
     # ── Computed database URLs ───────────────────────────────────────────
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def REDIS_URL(self) -> str:
+        """Redis URL with properly escaped password."""
+        password = self.REDIS_PASSWORD.get_secret_value()
+        if password:
+            return f"redis://:{quote(password, safe='')}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
     @computed_field  # type: ignore[prop-decorator]
     @property

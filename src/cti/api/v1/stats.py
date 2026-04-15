@@ -9,9 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.database import get_db
-from cti.core.dependencies import verify_api_key
+from cti.core.dependencies import AuthSubject, get_current_auth
 from cti.core.redis import cache_get, cache_set
-from cti.models.api_key import ApiKey
 from cti.models.feed import Feed, FeedRun, FeedRunStatus
 from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
@@ -22,7 +21,7 @@ router = APIRouter()
 @router.get("")
 async def get_stats(
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(get_current_auth),
 ) -> dict:
     """Dashboard stats: counts by type, feed health, recent ingestion."""
     import json

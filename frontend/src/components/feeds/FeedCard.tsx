@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
 import { FeedRunHistory } from './FeedRunHistory'
 import { useUpdateFeed, useTriggerFeed, useDeleteFeed } from '@/hooks/useFeeds'
+import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import type { Feed } from '@/types/feed'
@@ -39,6 +40,7 @@ export function FeedCard({ feed }: FeedCardProps) {
   const triggerFeedMut = useTriggerFeed()
   const deleteFeed = useDeleteFeed()
   const { toast } = useToast()
+  const { isAdmin } = useAuth()
 
   const handleToggle = (enabled: boolean) => {
     updateFeed.mutate(
@@ -101,11 +103,13 @@ export function FeedCard({ feed }: FeedCardProps) {
               </p>
             )}
           </div>
-          <Toggle
-            checked={feed.enabled}
-            onChange={handleToggle}
-            disabled={updateFeed.isPending}
-          />
+          {isAdmin && (
+            <Toggle
+              checked={feed.enabled}
+              onChange={handleToggle}
+              disabled={updateFeed.isPending}
+            />
+          )}
         </div>
 
         {/* Stats row */}
@@ -127,21 +131,23 @@ export function FeedCard({ feed }: FeedCardProps) {
 
         {/* Action buttons */}
         <div className="mt-3 flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleTrigger}
-            disabled={!feed.enabled || triggerFeedMut.isPending}
-          >
-            {triggerFeedMut.isPending ? (
-              <span className="flex items-center gap-1.5">
-                <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
-                Running...
-              </span>
-            ) : (
-              'Run Now'
-            )}
-          </Button>
+          {isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTrigger}
+              disabled={!feed.enabled || triggerFeedMut.isPending}
+            >
+              {triggerFeedMut.isPending ? (
+                <span className="flex items-center gap-1.5">
+                  <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                  Running...
+                </span>
+              ) : (
+                'Run Now'
+              )}
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -149,7 +155,7 @@ export function FeedCard({ feed }: FeedCardProps) {
           >
             {expanded ? 'Hide Details' : 'Show Details'}
           </Button>
-          {!feed.is_preconfigured && (
+          {isAdmin && !feed.is_preconfigured && (
             <Button
               variant="destructive"
               size="sm"

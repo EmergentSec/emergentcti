@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from urllib.parse import urlparse
 
 from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -24,12 +23,14 @@ scheduler: AsyncIOScheduler | None = None
 def init_scheduler(redis_url: str) -> AsyncIOScheduler:
     """Initialize APScheduler with a Redis-backed job store."""
     global scheduler  # noqa: PLW0603
-    parsed = urlparse(redis_url)
+    settings = get_settings()
+    password = settings.REDIS_PASSWORD.get_secret_value() or None
     jobstores = {
         "default": RedisJobStore(
-            host=parsed.hostname or "localhost",
-            port=parsed.port or 6379,
-            db=int(parsed.path.lstrip("/") or "0"),
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=password,
         ),
     }
     scheduler = AsyncIOScheduler(jobstores=jobstores, timezone="UTC")
@@ -102,6 +103,17 @@ async def add_decay_job() -> None:
     )
 
 
+async def add_token_cleanup_job() -> None:
+    """Register the periodic refresh-token cleanup job (runs daily)."""
+    sched = get_scheduler()
+    sched.add_job(
+        _run_token_cleanup_job,
+        IntervalTrigger(hours=24),
+        id="system:token_cleanup",
+        replace_existing=True,
+    )
+
+
 async def _run_feed_job(feed_id: uuid.UUID) -> None:
     """APScheduler callback: execute a scheduled feed ingestion run."""
     # Late imports to avoid circular dependencies at module load time.
@@ -136,3 +148,17 @@ async def _run_decay_job() -> None:
                 logger.info("Decay job affected %d observables", count)
         except Exception:
             logger.error("Confidence decay job failed", exc_info=True)
+
+
+async def _run_token_cleanup_job() -> None:
+    """APScheduler callback: delete expired refresh tokens."""
+    from cti.core.database import async_session_factory
+    from cti.services.auth_service import cleanup_expired_tokens
+
+    async with async_session_factory() as db:
+        try:
+            count = await cleanup_expired_tokens(db)
+            if count:
+                logger.info("Token cleanup removed %d expired tokens", count)
+        except Exception:
+            logger.error("Token cleanup job failed", exc_info=True)

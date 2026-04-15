@@ -8,8 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.database import get_db
-from cti.core.dependencies import verify_api_key
-from cti.models.api_key import ApiKey
+from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
 from cti.schemas.feed import FeedCreate, FeedResponse, FeedRunResponse, FeedUpdate
 from cti.services import feed_service
 
@@ -52,7 +51,7 @@ def _feed_to_response(feed, observable_count: int = 0) -> FeedResponse:
 @router.get("", response_model=list[FeedResponse])
 async def list_feeds(
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(get_current_auth),
 ) -> list[FeedResponse]:
     feeds = await feed_service.list_feeds(db)
     result = []
@@ -66,7 +65,7 @@ async def list_feeds(
 async def create_feed(
     data: FeedCreate,
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(require_admin),
 ) -> FeedResponse:
     feed = await feed_service.create_feed(db, data.model_dump())
     await db.commit()
@@ -83,7 +82,7 @@ async def create_feed(
 async def get_feed(
     feed_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(get_current_auth),
 ) -> FeedResponse:
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
@@ -97,7 +96,7 @@ async def update_feed(
     feed_id: uuid.UUID,
     data: FeedUpdate,
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(require_admin),
 ) -> FeedResponse:
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
@@ -120,7 +119,7 @@ async def update_feed(
 async def delete_feed(
     feed_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(require_admin),
 ) -> None:
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
@@ -142,7 +141,7 @@ async def trigger_feed(
     feed_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(require_admin),
 ) -> FeedRunResponse:
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
@@ -177,7 +176,7 @@ async def trigger_feed(
 async def get_feed_runs(
     feed_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _api_key: ApiKey = Depends(verify_api_key),
+    _auth: AuthSubject = Depends(get_current_auth),
 ) -> list[FeedRunResponse]:
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
