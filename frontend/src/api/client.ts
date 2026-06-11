@@ -18,6 +18,15 @@ function processQueue(error: unknown) {
   failedQueue = []
 }
 
+function redirectToLogin() {
+  // Assigning location.href triggers a full navigation even when the URL is
+  // unchanged — on /login that reload remounts the app, whose session probe
+  // 401s again, looping forever. Only navigate when we're somewhere else.
+  if (!window.location.pathname.startsWith('/login')) {
+    window.location.href = '/login'
+  }
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -27,7 +36,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       // Don't retry the refresh endpoint itself — would cause infinite loop
       if (originalRequest.url?.includes('/auth/refresh')) {
-        window.location.href = '/login'
+        redirectToLogin()
         return Promise.reject(error)
       }
 
@@ -51,7 +60,7 @@ api.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError)
         // Redirect to login — session expired
-        window.location.href = '/login'
+        redirectToLogin()
         return Promise.reject(refreshError)
       } finally {
         isRefreshing = false
