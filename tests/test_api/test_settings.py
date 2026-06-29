@@ -40,3 +40,13 @@ async def test_unauthorized_without_key(client: AsyncClient) -> None:
     client.headers.pop("X-API-Key", None)
     response = await client.get("/api/v1/settings/api-keys")
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_config_exposes_instance_settings(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/settings/config")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["instance_name"] == "EmergentCTI"
+    assert data["observable_retention_days"] == 180
+    assert data["default_export_format"] == "text"

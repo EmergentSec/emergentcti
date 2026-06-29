@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     CONFIDENCE_DECAY_FLOOR: int = 10
     CONFIDENCE_DECAY_INTERVAL_HOURS: int = 6
 
+    # ── Instance / display settings (read-only, env-driven) ──────────────
+    INSTANCE_NAME: str = "EmergentCTI"
+    OBSERVABLE_RETENTION_DAYS: int = 180
+    DEFAULT_EXPORT_FORMAT: str = "text"
+
     # ── CORS ─────────────────────────────────────────────────────────────
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8080"]
 
