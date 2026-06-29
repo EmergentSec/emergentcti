@@ -31,6 +31,7 @@ def _obs_to_response(obs) -> ObservableResponse:
                 feed_id=s.feed_id,
                 feed_name=s.feed.name if s.feed else "Unknown",
                 source_confidence=s.source_confidence,
+                native_confidence=s.native_confidence,
                 first_seen_by_feed=s.first_seen_by_feed,
                 last_seen_by_feed=s.last_seen_by_feed,
             )
