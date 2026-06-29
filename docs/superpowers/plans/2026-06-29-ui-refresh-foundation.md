@@ -448,12 +448,43 @@ git commit -m "chore(db): migration for native_confidence column"
 ## Task 5: Add confidence distribution + 24h feed errors to `/stats`
 
 **Files:**
+- Modify: `src/cti/core/redis.py` (make cache helpers best-effort — also greens the pre-existing `test_blocklist_empty`)
 - Modify: `src/cti/api/v1/stats.py`
 - Test: `tests/test_api/test_stats.py` (create)
 
 **Interfaces:**
 - Produces: `/api/v1/stats` response gains
   `"confidence_distribution": {"critical": int, "high": int, "medium": int, "low": int}` (bands 80–100 / 60–79 / 40–59 / 0–39) and `"feed_errors_24h": int`.
+- Also produces: `cache_get`/`cache_set` degrade gracefully (return `None` / no-op) when Redis is uninitialised or errors, instead of raising — so cached endpoints serve uncached rather than 500. This greens the pre-existing `test_blocklist_empty` failure.
+
+- [ ] **Step 0: Make the Redis cache helpers best-effort**
+
+The stats endpoint (and the blocklist export) call `cache_get`, which currently calls `get_redis()` and raises `RuntimeError` when Redis is not initialised (tests don't run the app lifespan). Make both helpers degrade gracefully. In `src/cti/core/redis.py`, replace the bodies of `cache_get` and `cache_set` (the ones that call `get_redis()`):
+
+```python
+async def cache_get(key: str) -> str | None:
+    """Retrieve a cached value by key, or None if missing/expired/unavailable."""
+    if _redis_client is None:
+        return None
+    try:
+        return await _redis_client.get(key)
+    except Exception:  # noqa: BLE001 — cache is best-effort
+        logger.warning("cache_get failed for %s; serving uncached", key)
+        return None
+
+
+async def cache_set(key: str, value: str, ttl_seconds: int = 300) -> None:
+    """Store a value in cache with a TTL; best-effort (no-op if Redis unavailable)."""
+    if _redis_client is None:
+        return
+    try:
+        await _redis_client.set(key, value, ex=ttl_seconds)
+    except Exception:  # noqa: BLE001 — cache is best-effort
+        logger.warning("cache_set failed for %s; skipping cache", key)
+```
+
+Verify this alone turns `test_blocklist_empty` from failing to passing:
+Run: `uv run --extra dev pytest tests/test_api/test_export.py -q` → all pass.
 
 - [ ] **Step 1: Write the failing test**
 
