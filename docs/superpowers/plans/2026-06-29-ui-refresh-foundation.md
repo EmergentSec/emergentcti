@@ -676,15 +676,16 @@ git commit -m "feat(settings): expose instance name, retention, export format (r
 - Modify: `frontend/index.html`
 
 **Interfaces:**
-- Produces: `@phosphor-icons/react` and `recharts` importable; Hanken Grotesk + JetBrains Mono available as CSS font families.
+- Produces: `@phosphor-icons/react` and `recharts` importable; Hanken Grotesk + JetBrains Mono available as CSS font families; `@testing-library/react` available for the component tests in Tasks 9–12 (vitest env is already `happy-dom`).
 
 - [ ] **Step 1: Install the npm deps**
 
 Run (in `frontend/`):
 ```bash
 npm install @phosphor-icons/react recharts
+npm install -D @testing-library/react @testing-library/dom
 ```
-Expected: both added to `dependencies` in `frontend/package.json`.
+Expected: `@phosphor-icons/react` and `recharts` added to `dependencies`; `@testing-library/react` and `@testing-library/dom` added to `devDependencies`.
 
 - [ ] **Step 2: Add the font links**
 
