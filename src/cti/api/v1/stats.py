@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.database import get_db
@@ -82,12 +82,42 @@ async def get_stats(
             }
         )
 
+    # Confidence distribution (band counts)
+    dist_result = await db.execute(
+        select(
+            func.sum(case((Observable.confidence_score >= 80, 1), else_=0)),
+            func.sum(case((and_(Observable.confidence_score >= 60,
+                                Observable.confidence_score < 80), 1), else_=0)),
+            func.sum(case((and_(Observable.confidence_score >= 40,
+                                Observable.confidence_score < 60), 1), else_=0)),
+            func.sum(case((Observable.confidence_score < 40, 1), else_=0)),
+        )
+    )
+    crit, high, med, low = dist_result.one()
+    confidence_distribution = {
+        "critical": int(crit or 0),
+        "high": int(high or 0),
+        "medium": int(med or 0),
+        "low": int(low or 0),
+    }
+
+    # Feed errors in the last 24h
+    errors_result = await db.execute(
+        select(func.count(FeedRun.id)).where(
+            FeedRun.status == FeedRunStatus.FAILURE,
+            func.coalesce(FeedRun.completed_at, FeedRun.started_at) >= cutoff_24h,
+        )
+    )
+    feed_errors_24h = errors_result.scalar_one()
+
     result = {
         "total_observables": total,
         "by_type": by_type,
         "total_feeds": total_feeds,
         "feeds_enabled": feeds_enabled,
         "last_24h_ingested": last_24h_ingested,
+        "confidence_distribution": confidence_distribution,
+        "feed_errors_24h": feed_errors_24h,
         "feeds_health": feeds_health,
     }
 
