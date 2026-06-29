@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, JSON, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,7 +32,9 @@ class Feed(UUIDMixin, TimestampMixin, Base):
         Enum(FeedType, values_callable=lambda x: [e.value for e in x]),
     )
     url: Mapped[str | None] = mapped_column(String(2048), default=None)
-    config: Mapped[dict | None] = mapped_column(JSONB, default=None)
+    config: Mapped[dict | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), default=None
+    )
     schedule_cron: Mapped[str | None] = mapped_column(String(64), default=None)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     is_preconfigured: Mapped[bool] = mapped_column(Boolean, default=False)
