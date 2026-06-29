@@ -9,6 +9,7 @@ from collections.abc import AsyncGenerator
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from cti.core.database import get_db
@@ -20,6 +21,17 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///file::memory:?cache=shared&uri=true"
 
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestSessionFactory = async_sessionmaker(engine, expire_on_commit=False)
+
+
+# SQLite does not have GREATEST(); register it as a user-defined function so
+# that upsert logic using func.greatest() works in tests.
+@event.listens_for(engine.sync_engine, "connect")
+def _register_sqlite_greatest(dbapi_connection, connection_record):
+    dbapi_connection.create_function(
+        "greatest",
+        -1,
+        lambda *args: max((a for a in args if a is not None), default=None),
+    )
 
 
 @pytest.fixture(autouse=True)
