@@ -1392,3 +1392,23 @@ git commit -m "feat(types): native_confidence, stats distribution, instance conf
 3. **Type consistency:** `native_confidence` is `int`/`number` end-to-end; stats keys (`confidence_distribution`, `feed_errors_24h`) match between Task 5 (backend) and Task 14 (types); `InstanceConfig` field names match Task 6's endpoint keys.
 
 > **Open assumption to verify at execution time:** the public ingest entrypoint is referenced as `observable_service.ingest_raw_observables(db, feed, raws)`. Confirm the real exported function name/signature in `src/cti/services/observable_service.py` and adjust the three test call-sites if it differs.
+
+---
+
+## Post-implementation notes (final whole-branch review, 2026-06-29)
+
+**Verdict: Ready to merge** — no Critical/Important issues; backend 19/19 + frontend 8/8 green; clean builds.
+
+**Ratified decay cadence (supersedes Task 2 Step 3's formula).** Shipped code uses
+`weeks_stale = max(1, (days_stale - decay_days) // 7)` — the plan's earlier `... // 7 + 1`
+was an over-decay off-by-one. Semantics: a stale source decays by `decay_rate` per full week
+beyond the cutoff, minimum one rate-unit once stale (first bucket days 31–43 decay one unit,
+then clean 7-day steps). Idempotent, floor-clamped, covered by `test_decay_from_native.py`.
+**Future screen plans must NOT reintroduce the `+ 1`.**
+
+**Deferred follow-ups (none block merge — fold into the first screen PR touching each area):**
+- `confidence.py` ~L64: reword tz comment — the column is naive in BOTH SQLite and Postgres.
+- `stats.py`: drop the now-redundant `try/except` around `cache_set` (best-effort now).
+- `redis.py`: harmonize `invalidate_blocklist_cache` to best-effort (sole caller already wraps it).
+- Add decay floor-clamp + multi-week step tests.
+- Primitives: Popover trigger keyboard a11y; Tabs same-tab `onChange` guard; Slider redundant `role`.
