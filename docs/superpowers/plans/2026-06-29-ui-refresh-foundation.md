@@ -17,13 +17,14 @@
 - **General settings are read-only** projections of env vars — never writable via API.
 - **Decay model is linear** (`max(floor, native − weeks_stale·rate)`), not half-life. Any UI caption must say so.
 - Existing dependency floors: React 18.3, react-router 6.28, react-query 5.62, Tailwind 3.4, Vite 5.4, TypeScript 5.6. Do not bump majors.
-- Every backend test uses `@pytest.mark.asyncio` and the `client` / `db_session` fixtures from `tests/conftest.py`. Run backend tests with `uv run pytest`; frontend tests with `npm run test` (Vitest) inside `frontend/`.
+- Every backend test uses `@pytest.mark.asyncio` and the `client` / `db_session` fixtures from `tests/conftest.py`. Run backend tests with `uv run --extra dev pytest`; frontend tests with `npm run test` (Vitest) inside `frontend/`.
 
 ---
 
 ## File Structure
 
 **Backend (modify):**
+- `src/cti/models/feed.py` — portable JSON variant for `config` (Task 0, baseline unblock).
 - `src/cti/models/observable_source.py` — add `native_confidence` column.
 - `src/cti/services/observable_service.py` — set `native_confidence` on ingest upsert.
 - `src/cti/services/confidence.py` — decay *from* `native_confidence` (idempotent; fixes compounding bug).
@@ -46,6 +47,51 @@
 - `frontend/src/components/common/EmergentLogo.tsx` — recolor inner network to brand.
 - `frontend/src/types/{observable,dashboard,settings}.ts` — add new fields.
 - `frontend/src/main.tsx` — wrap app in `ThemeProvider`.
+
+---
+
+## Task 0: Fix JSONB-on-SQLite so the test suite runs (baseline unblock)
+
+**Context:** The test suite (`tests/conftest.py`) runs on SQLite, but `Feed.config` is typed `JSONB` (Postgres-only), which SQLite cannot compile — so `Base.metadata.create_all` fails and **every** schema-building test errors on a clean checkout. This blocks all backend tasks below. The fix is a portable type that renders `JSON` on SQLite and stays `JSONB` on Postgres (no migration, behavior-preserving on prod).
+
+**Files:**
+- Modify: `src/cti/models/feed.py:8,35`
+
+**Interfaces:**
+- Produces: `Feed.config` compiles on both SQLite and Postgres. No schema change on Postgres (column stays `JSONB`).
+
+- [ ] **Step 1: Confirm the suite is red for this reason**
+
+Run: `uv run --extra dev pytest tests/test_api/test_health.py -q`
+Expected: ERROR — `sqlalchemy.exc.CompileError: ... can't render element of type JSONB`.
+
+- [ ] **Step 2: Make the column type portable**
+
+In `src/cti/models/feed.py`, update the import (`:8`) and the column (`:35`):
+
+```python
+from sqlalchemy import JSON
+from sqlalchemy.dialects.postgresql import JSONB
+```
+```python
+    config: Mapped[dict | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), default=None
+    )
+```
+
+(Keep any other existing imports on those lines; only add `JSON` and adjust the `config` column.)
+
+- [ ] **Step 3: Verify the whole suite now runs (and record the true baseline)**
+
+Run: `uv run --extra dev pytest -q`
+Expected: collection succeeds and tests run. Record the pass/fail counts as the baseline; all remaining tasks must keep this green.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/cti/models/feed.py
+git commit -m "fix(models): portable JSON variant for feed.config (unblocks SQLite tests)"
+```
 
 ---
 
@@ -88,7 +134,7 @@ async def test_ingest_sets_native_confidence(db_session):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_services/test_native_confidence.py -v`
+Run: `uv run --extra dev pytest tests/test_services/test_native_confidence.py -v`
 Expected: FAIL — `AttributeError: 'ObservableSource' object has no attribute 'native_confidence'` (or the ingest helper name differs; if so, match the real public ingest entrypoint in `observable_service.py` and update the call).
 
 - [ ] **Step 3: Add the column to the model**
@@ -140,7 +186,7 @@ And in the `on_conflict_do_update(set_={...})` block (`:318-327`), keep native a
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_services/test_native_confidence.py -v`
+Run: `uv run --extra dev pytest tests/test_services/test_native_confidence.py -v`
 Expected: PASS. (Tests build tables from the model via `Base.metadata.create_all`, so no migration is needed for tests.)
 
 - [ ] **Step 6: Commit**
@@ -215,7 +261,7 @@ async def test_decay_is_idempotent_and_native_preserved(db_session):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_services/test_decay_from_native.py -v`
+Run: `uv run --extra dev pytest tests/test_services/test_decay_from_native.py -v`
 Expected: FAIL — second run decays again (e.g. `80 != 85`), because the current code subtracts from the already-decayed `source_confidence`.
 
 - [ ] **Step 3: Rewrite the decay loop to compute from native**
@@ -247,12 +293,12 @@ In `src/cti/services/confidence.py`, replace the query filter and loop (`:66-85`
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_services/test_decay_from_native.py -v`
+Run: `uv run --extra dev pytest tests/test_services/test_decay_from_native.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Run the full confidence suite for regressions**
 
-Run: `uv run pytest tests/test_services -v`
+Run: `uv run --extra dev pytest tests/test_services -v`
 Expected: PASS (no other decay tests broken).
 
 - [ ] **Step 6: Commit**
@@ -298,7 +344,7 @@ async def test_observable_source_exposes_native_confidence(client, db_session):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_api/test_observables.py::test_observable_source_exposes_native_confidence -v`
+Run: `uv run --extra dev pytest tests/test_api/test_observables.py::test_observable_source_exposes_native_confidence -v`
 Expected: FAIL — `KeyError: 'native_confidence'`.
 
 - [ ] **Step 3: Add the field to the schema**
@@ -319,7 +365,7 @@ class ObservableSourceResponse(BaseModel):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_api/test_observables.py::test_observable_source_exposes_native_confidence -v`
+Run: `uv run --extra dev pytest tests/test_api/test_observables.py::test_observable_source_exposes_native_confidence -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -437,7 +483,7 @@ async def test_stats_includes_distribution_and_errors(client, db_session):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_api/test_stats.py -v`
+Run: `uv run --extra dev pytest tests/test_api/test_stats.py -v`
 Expected: FAIL — `KeyError: 'confidence_distribution'`. (If a cached value is returned, the test DB is fresh per-test so the cache key is empty; if flaky, the cache is Redis and may be unavailable in tests — `cache_get` returns `None` on failure, which is fine.)
 
 - [ ] **Step 3: Add the imports**
@@ -495,7 +541,7 @@ In the `result = {...}` literal (`:85-92`), add:
 
 - [ ] **Step 6: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_api/test_stats.py -v`
+Run: `uv run --extra dev pytest tests/test_api/test_stats.py -v`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -534,7 +580,7 @@ async def test_config_exposes_instance_settings(client: AsyncClient) -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_api/test_settings.py::test_config_exposes_instance_settings -v`
+Run: `uv run --extra dev pytest tests/test_api/test_settings.py::test_config_exposes_instance_settings -v`
 Expected: FAIL — `KeyError: 'instance_name'`.
 
 - [ ] **Step 3: Add the settings fields**
@@ -580,7 +626,7 @@ DEFAULT_EXPORT_FORMAT=text
 
 - [ ] **Step 6: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_api/test_settings.py::test_config_exposes_instance_settings -v`
+Run: `uv run --extra dev pytest tests/test_api/test_settings.py::test_config_exposes_instance_settings -v`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -1300,7 +1346,7 @@ git commit -m "feat(types): native_confidence, stats distribution, instance conf
 
 ## Final foundation verification
 
-- [ ] **Backend suite green:** `uv run pytest -q` → all pass.
+- [ ] **Backend suite green:** `uv run --extra dev pytest -q` → all pass.
 - [ ] **Frontend suite green:** `cd frontend && npm run test` → all pass.
 - [ ] **Frontend builds:** `cd frontend && npm run build` → succeeds.
 - [ ] **App boots in both themes:** `docker compose up -d --build` → api healthy; open the app, toggle dark/light, confirm brand palette + fonts render.
