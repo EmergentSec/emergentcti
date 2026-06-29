@@ -22,8 +22,8 @@ export function EmergentLogo({ size = 40, className = '' }: EmergentLogoProps) {
         strokeLinejoin="round"
       />
 
-      {/* Network lines - red accent */}
-      <g style={{ stroke: '#85191A' }} className="fill-none" strokeWidth="16" strokeLinecap="round" strokeLinejoin="round">
+      {/* Network lines - brand accent */}
+      <g style={{ stroke: 'var(--brand)' }} className="fill-none" strokeWidth="16" strokeLinecap="round" strokeLinejoin="round">
         <path d="M190 190 L256 256 L322 190" />
         <path d="M190 322 L256 256 L322 322" />
         <path d="M190 190 L190 322" />
@@ -33,10 +33,10 @@ export function EmergentLogo({ size = 40, className = '' }: EmergentLogoProps) {
       </g>
 
       {/* Network nodes */}
-      <circle cx="190" cy="190" r="16" style={{ fill: '#85191A', stroke: 'currentColor' }} strokeWidth="8" />
-      <circle cx="322" cy="190" r="16" style={{ fill: '#85191A', stroke: 'currentColor' }} strokeWidth="8" />
-      <circle cx="190" cy="322" r="16" style={{ fill: '#85191A', stroke: 'currentColor' }} strokeWidth="8" />
-      <circle cx="322" cy="322" r="16" style={{ fill: '#85191A', stroke: 'currentColor' }} strokeWidth="8" />
+      <circle cx="190" cy="190" r="16" style={{ fill: 'var(--brand)', stroke: 'currentColor' }} strokeWidth="8" />
+      <circle cx="322" cy="190" r="16" style={{ fill: 'var(--brand)', stroke: 'currentColor' }} strokeWidth="8" />
+      <circle cx="190" cy="322" r="16" style={{ fill: 'var(--brand)', stroke: 'currentColor' }} strokeWidth="8" />
+      <circle cx="322" cy="322" r="16" style={{ fill: 'var(--brand)', stroke: 'currentColor' }} strokeWidth="8" />
     </svg>
   );
 }
