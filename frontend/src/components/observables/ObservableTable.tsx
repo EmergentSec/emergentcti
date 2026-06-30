@@ -86,7 +86,7 @@ function ConfidenceBar({ score }: { score: number }) {
       <span className="font-mono text-xs tabular-nums" style={{ color }}>
         {score}
       </span>
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-xs" style={{ color }}>{label}</span>
     </div>
   )
 }
@@ -105,7 +105,7 @@ function SourceChips({ sources }: { sources: ObservableSource[] }) {
   }
 
   const shown = sources.slice(0, 2)
-  const overflow = sources.length - 2
+  const overflowCount = Math.max(0, sources.length - 2)
 
   return (
     <span className="inline-flex flex-wrap gap-1">
@@ -117,9 +117,9 @@ function SourceChips({ sources }: { sources: ObservableSource[] }) {
           {s.feed_name}
         </span>
       ))}
-      {overflow > 0 && (
+      {overflowCount > 0 && (
         <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-          +{overflow}
+          +{overflowCount}
         </span>
       )}
     </span>
