@@ -158,7 +158,7 @@ export function FeedCard({ feed }: FeedCardProps) {
             {/* Header row: status dot · name · type chip */}
             <div className="flex items-center gap-2">
               <StatusDot status={runStatus} />
-              <span className="font-semibold text-foreground">{feed.name}</span>
+              <h3 className="font-semibold text-foreground">{feed.name}</h3>
               <span
                 className="rounded px-1.5 py-0.5 text-[10px] font-medium leading-none"
                 style={{
@@ -211,17 +211,20 @@ export function FeedCard({ feed }: FeedCardProps) {
               variant="outline"
               size="sm"
               onClick={handleTrigger}
-              disabled={!feed.enabled || triggerFeedMut.isPending}
+              disabled={!isAdmin || !feed.enabled || triggerFeedMut.isPending}
+              title={!isAdmin ? 'Admin only' : undefined}
             >
               <Play size={14} aria-hidden="true" />
               {triggerFeedMut.isPending ? 'Running…' : 'Run now'}
             </Button>
 
-            <Toggle
-              checked={feed.enabled}
-              onChange={handleToggle}
-              disabled={updateFeed.isPending}
-            />
+            <span title={!isAdmin ? 'Admin only' : undefined}>
+              <Toggle
+                checked={feed.enabled}
+                onChange={handleToggle}
+                disabled={!isAdmin || updateFeed.isPending}
+              />
+            </span>
 
             <Popover
               trigger={

@@ -13,8 +13,10 @@ vi.mock('@/hooks/useFeeds', () => ({
   useDeleteFeed: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
+const mockIsAdmin = { isAdmin: true }
+
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ isAdmin: true }),
+  useAuth: () => mockIsAdmin,
 }))
 
 vi.mock('@/contexts/ToastContext', () => ({
@@ -58,6 +60,7 @@ describe('FeedCard', () => {
     cleanup()
     mockUpdateMutate.mockClear()
     mockTriggerMutate.mockClear()
+    mockIsAdmin.isAdmin = true
   })
 
   it('renders feed name and type chip', () => {
@@ -95,5 +98,14 @@ describe('FeedCard', () => {
       { id: '1', data: { enabled: false } },
       expect.anything(),
     )
+  })
+
+  it('disables Run now and Toggle for non-admin users', () => {
+    mockIsAdmin.isAdmin = false
+    render(<FeedCard feed={mockFeed} />)
+    const runBtn = screen.getByRole('button', { name: 'Run now' })
+    expect(runBtn.hasAttribute('disabled')).toBe(true)
+    const toggle = screen.getByRole('switch')
+    expect(toggle.hasAttribute('disabled')).toBe(true)
   })
 })
