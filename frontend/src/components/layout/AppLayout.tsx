@@ -11,9 +11,9 @@ export function AppLayout({ username, onLogout }: AppLayoutProps) {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <Sidebar />
-      <div className="pl-60">
+      <div className="pl-[236px]">
         <Header username={username} onLogout={onLogout} />
-        <main className="p-6">
+        <main className="mx-auto max-w-[1320px] p-6">
           <Outlet />
         </main>
       </div>
