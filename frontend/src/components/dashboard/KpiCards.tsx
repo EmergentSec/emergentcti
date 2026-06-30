@@ -12,18 +12,19 @@ interface KpiCardProps {
   value: string
   icon: React.ReactNode
   iconBg: string
+  iconColor: string
   subtitle?: React.ReactNode
 }
 
-function KpiCard({ label, value, icon, iconBg, subtitle }: KpiCardProps) {
+function KpiCard({ label, value, icon, iconBg, iconColor, subtitle }: KpiCardProps) {
   return (
     <Card>
       <CardContent className="p-5">
         <div className="flex items-start justify-between">
           <p className="text-[13px] text-muted-foreground">{label}</p>
           <div
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-white"
-            style={{ background: iconBg }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg"
+            style={{ background: iconBg, color: iconColor }}
           >
             {icon}
           </div>
@@ -82,6 +83,7 @@ export function KpiCards({ stats }: KpiCardsProps) {
         value={total_observables.toLocaleString()}
         icon={<CrosshairSimple size={16} weight="bold" />}
         iconBg="color-mix(in srgb, var(--brand) 20%, transparent)"
+        iconColor="var(--brand)"
         subtitle={
           <span className="text-muted-foreground">indicators tracked</span>
         }
@@ -91,6 +93,7 @@ export function KpiCards({ stats }: KpiCardsProps) {
         value={`${feeds_enabled} / ${total_feeds}`}
         icon={<Rss size={16} weight="bold" />}
         iconBg="color-mix(in srgb, var(--cat-blue) 20%, transparent)"
+        iconColor="var(--cat-blue)"
         subtitle={
           <span className="text-muted-foreground">
             {total_feeds - feeds_enabled} disabled
@@ -102,6 +105,7 @@ export function KpiCards({ stats }: KpiCardsProps) {
         value={last_24h_ingested.toLocaleString()}
         icon={<DownloadSimple size={16} weight="bold" />}
         iconBg="color-mix(in srgb, var(--cat-green) 20%, transparent)"
+        iconColor="var(--cat-green)"
         subtitle={deltaSubtitle}
       />
       <KpiCard
@@ -109,6 +113,7 @@ export function KpiCards({ stats }: KpiCardsProps) {
         value={String(feed_errors_24h)}
         icon={<Warning size={16} weight="bold" />}
         iconBg="color-mix(in srgb, var(--conf-critical) 20%, transparent)"
+        iconColor="var(--conf-critical)"
         subtitle={errorSubtitle}
       />
     </div>

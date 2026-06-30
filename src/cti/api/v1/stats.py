@@ -111,8 +111,6 @@ async def get_stats(
     feed_errors_24h = errors_result.scalar_one()
 
     # 14-day daily new-observable series (zero-padded, oldest -> newest)
-    from datetime import date as _date
-
     start_day = (datetime.now(UTC) - timedelta(days=13)).date()
     daily_rows = await db.execute(
         select(
