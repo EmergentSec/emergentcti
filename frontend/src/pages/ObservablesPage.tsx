@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { SortAscending, SortDescending } from '@phosphor-icons/react'
 import { useObservables, useCreateObservable } from '@/hooks/useObservables'
 import { useAuth } from '@/contexts/AuthContext'
@@ -35,6 +36,18 @@ export default function ObservablesPage() {
   const createObservable = useCreateObservable()
   const { toast } = useToast()
   const { isAdmin } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // The topbar "Add Observable" button routes here with ?create=1 — open the
+  // create dialog once (admin only), then strip the param so it doesn't re-fire.
+  useEffect(() => {
+    if (searchParams.get('create') === '1') {
+      if (isAdmin) setShowCreateDialog(true)
+      const next = new URLSearchParams(searchParams)
+      next.delete('create')
+      setSearchParams(next, { replace: true })
+    }
+  }, [searchParams, isAdmin, setSearchParams])
 
   /** Update filter fields and reset to page 1 */
   const updateFilters = (partial: Partial<Filters>) => {

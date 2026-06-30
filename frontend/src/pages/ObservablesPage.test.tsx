@@ -13,6 +13,11 @@ vi.mock('@/components/observables/ObservableTable', () => ({
   ObservableTable: () => <div data-testid="observable-table" />,
 }))
 
+// Stub the create form so we can detect whether the dialog is open
+vi.mock('@/components/observables/ObservableForm', () => ({
+  ObservableForm: () => <div data-testid="observable-form" />,
+}))
+
 const mockUseObservables = vi.fn()
 
 vi.mock('@/hooks/useObservables', () => ({
@@ -20,15 +25,19 @@ vi.mock('@/hooks/useObservables', () => ({
   useCreateObservable: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
+const { mockAuth } = vi.hoisted(() => ({ mockAuth: { isAdmin: false } }))
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ isAdmin: false }),
+  useAuth: () => mockAuth,
 }))
 
 vi.mock('@/contexts/ToastContext', () => ({
   useToast: () => ({ toast: vi.fn() }),
 }))
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  mockAuth.isAdmin = false
+})
 
 const ITEMS = [
   {
@@ -136,5 +145,27 @@ describe('ObservablesPage', () => {
     // No table or count while loading
     expect(screen.queryByText(/observables/)).toBeNull()
     expect(screen.queryByTestId('observable-table')).toBeNull()
+  })
+
+  it('opens the create dialog when routed with ?create=1 as admin (topbar Add Observable)', () => {
+    mockAuth.isAdmin = true
+    mockUseObservables.mockReturnValue({ data: DEFAULT_DATA, isLoading: false, error: null })
+    render(
+      <MemoryRouter initialEntries={['/observables?create=1']}>
+        <ObservablesPage />
+      </MemoryRouter>,
+    )
+    expect(screen.getByTestId('observable-form')).toBeTruthy()
+  })
+
+  it('does not open the create dialog from ?create=1 for non-admins', () => {
+    mockAuth.isAdmin = false
+    mockUseObservables.mockReturnValue({ data: DEFAULT_DATA, isLoading: false, error: null })
+    render(
+      <MemoryRouter initialEntries={['/observables?create=1']}>
+        <ObservablesPage />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByTestId('observable-form')).toBeNull()
   })
 })

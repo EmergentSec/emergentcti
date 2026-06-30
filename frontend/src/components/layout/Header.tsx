@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { MagnifyingGlass, Sun, Moon, Plus } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '../ui/Button';
 
 const PAGE_META: Record<string, { title: string; subtitle: string }> = {
@@ -24,6 +25,7 @@ export function Header({ className }: HeaderProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
+  const { isAdmin } = useAuth();
   const [search, setSearch] = useState('');
 
   const page = PAGE_META[location.pathname] ?? { title: 'EmergentCTI', subtitle: '' };
@@ -80,17 +82,17 @@ export function Header({ className }: HeaderProps) {
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>
 
-        {/* Add Observable */}
-        <Button
-          variant="brand"
-          className="gap-1.5"
-          onClick={() => {
-            /* no-op — create modal is an Observables-screen concern */
-          }}
-        >
-          <Plus size={14} weight="bold" />
-          Add Observable
-        </Button>
+        {/* Add Observable — opens the create dialog on the Observables page (admin-only) */}
+        {isAdmin && (
+          <Button
+            variant="brand"
+            className="gap-1.5"
+            onClick={() => navigate('/observables?create=1')}
+          >
+            <Plus size={14} weight="bold" />
+            Add Observable
+          </Button>
+        )}
       </div>
     </header>
   );
