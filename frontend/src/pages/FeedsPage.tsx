@@ -135,10 +135,7 @@ export default function FeedsPage() {
           <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
             Observables
           </p>
-          <p
-            className="mt-1.5 font-mono text-2xl font-semibold tabular-nums"
-            style={{ color: 'var(--brand)' }}
-          >
+          <p className="mt-1.5 font-mono text-2xl font-semibold tabular-nums text-brand">
             {compactNumber(totalObservables)}
           </p>
         </CardContent>
@@ -148,7 +145,7 @@ export default function FeedsPage() {
       <div className="flex items-center justify-between gap-3">
         {/* Segmented control */}
         <div
-          className="flex items-center gap-0.5 rounded-md border border-border bg-surface-2 p-0.5"
+          className="flex items-center gap-0.5 rounded-md border border-border bg-surface2 p-0.5"
           role="group"
           aria-label="Filter feeds by type"
         >
@@ -195,8 +192,8 @@ export default function FeedsPage() {
         {filteredFeeds.length === 0 ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             {activeSegment === 'all'
-              ? 'No feeds configured yet.'
-              : `No ${activeSegment} feeds.`}
+              ? 'No feeds.'
+              : `No ${SEGMENTS.find((s) => s.key === activeSegment)?.label ?? activeSegment} feeds.`}
           </p>
         ) : (
           filteredFeeds.map((feed) => <FeedCard key={feed.id} feed={feed} />)
