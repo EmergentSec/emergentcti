@@ -54,7 +54,7 @@ export function KpiCards({ stats }: KpiCardsProps) {
   const delta = vsAvgDelta(last_24h_ingested, daily_ingest_14d)
   const deltaSubtitle =
     delta !== null ? (
-      <span className={delta >= 0 ? 'text-[--cat-green]' : 'text-[--conf-critical]'}>
+      <span className={delta >= 0 ? 'text-cat-green' : 'text-conf-critical'}>
         {delta >= 0 ? '▲' : '▼'} {Math.abs(delta)}% vs avg
       </span>
     ) : null
@@ -65,10 +65,14 @@ export function KpiCards({ stats }: KpiCardsProps) {
       ? feeds_health.find((f) => f.last_run_status === 'failure')
       : null
   const errorSubtitle =
-    feed_errors_24h > 0 && failingFeed ? (
-      <span className="text-muted-foreground">↳ {failingFeed.name} failed</span>
+    feed_errors_24h > 0 ? (
+      failingFeed ? (
+        <span className="text-muted-foreground">↳ {failingFeed.name} failed</span>
+      ) : (
+        <span className="text-muted-foreground">{feed_errors_24h} feed error(s)</span>
+      )
     ) : (
-      <span className="text-[--cat-green]">all healthy</span>
+      <span className="text-cat-green">all healthy</span>
     )
 
   return (

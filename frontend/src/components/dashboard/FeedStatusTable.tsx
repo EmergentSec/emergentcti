@@ -54,7 +54,7 @@ export function FeedStatusTable({ feeds }: FeedStatusTableProps) {
             {feeds.map((feed) => (
               <tr
                 key={feed.id}
-                className="flex items-center gap-3 border-t border-border px-5 py-2.5 hover:bg-hover/50"
+                className="flex items-center gap-3 border-t border-border px-5 py-2.5 hover:bg-hover"
               >
                 <td className="flex-none">
                   <StatusDot status={feed.last_run_status} />

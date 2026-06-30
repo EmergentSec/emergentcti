@@ -82,7 +82,7 @@ export function TypeDonut({ byType, total }: TypeDonutProps) {
                 {total.toLocaleString()}
               </span>
               <span className="mt-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                types
+                total
               </span>
             </div>
           </div>
