@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { DetailRawTab } from './DetailRawTab'
 import type { Observable } from '@/types/observable'
 
@@ -47,7 +47,7 @@ describe('DetailRawTab', () => {
     expect(screen.getByText('Copy')).toBeTruthy()
   })
 
-  it('switches to "Copied" label after clicking copy', () => {
+  it('switches to "Copied" label after clicking copy', async () => {
     // Mock clipboard API
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -56,6 +56,6 @@ describe('DetailRawTab', () => {
     render(<DetailRawTab observable={OBS} />)
     const btn = screen.getByRole('button', { name: /copy json/i })
     fireEvent.click(btn)
-    expect(screen.getByText('Copied')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('Copied')).toBeTruthy())
   })
 })

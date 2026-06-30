@@ -16,6 +16,12 @@ vi.mock('@/hooks/useObservables', () => ({
   useDeleteObservable: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
+const mockUseAuth = vi.fn(() => ({ isAdmin: true }) as ReturnType<typeof import('@/contexts/AuthContext').useAuth>)
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
+}))
+
 const OBSERVABLES: Observable[] = [
   {
     id: 'obs-1',
@@ -170,5 +176,15 @@ describe('ObservableTable', () => {
     const deleteButtons = screen.getAllByRole('button', { name: /delete/i })
     fireEvent.click(deleteButtons[0])
     expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
+  it('hides the delete button for non-admin users', () => {
+    mockUseAuth.mockReturnValueOnce({ isAdmin: false } as ReturnType<typeof import('@/contexts/AuthContext').useAuth>)
+    render(
+      <MemoryRouter>
+        <ObservableTable observables={OBSERVABLES} />
+      </MemoryRouter>,
+    )
+    expect(screen.queryAllByRole('button', { name: /delete/i })).toHaveLength(0)
   })
 })

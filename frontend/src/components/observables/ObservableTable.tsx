@@ -12,6 +12,7 @@ import {
 } from '@phosphor-icons/react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table'
 import { useDeleteObservable } from '@/hooks/useObservables'
+import { useAuth } from '@/contexts/AuthContext'
 import { typeLabels, formatRelativeTime } from '@/lib/utils'
 import type { Observable, ObservableSource, ObservableType } from '@/types/observable'
 
@@ -133,6 +134,7 @@ function SourceChips({ sources }: { sources: ObservableSource[] }) {
 export function ObservableTable({ observables }: ObservableTableProps) {
   const navigate = useNavigate()
   const deleteObservable = useDeleteObservable()
+  const { isAdmin } = useAuth()
 
   return (
     <Table>
@@ -189,20 +191,22 @@ export function ObservableTable({ observables }: ObservableTableProps) {
               {formatRelativeTime(obs.last_seen)}
             </TableCell>
 
-            {/* DELETE — hover-only, stops propagation */}
+            {/* DELETE — admin-only, hover-only, stops propagation */}
             <TableCell className="text-right">
-              <button
-                className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-muted-foreground hover:text-destructive focus:opacity-100"
-                aria-label={`Delete ${obs.value}`}
-                disabled={deleteObservable.isPending}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (!window.confirm(`Delete observable "${obs.value}"?`)) return
-                  deleteObservable.mutate(obs.id)
-                }}
-              >
-                <Trash size={14} />
-              </button>
+              {isAdmin && (
+                <button
+                  className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-muted-foreground hover:text-destructive focus:opacity-100"
+                  aria-label={`Delete ${obs.value}`}
+                  disabled={deleteObservable.isPending}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (!window.confirm(`Delete observable "${obs.value}"?`)) return
+                    deleteObservable.mutate(obs.id)
+                  }}
+                >
+                  <Trash size={14} />
+                </button>
+              )}
             </TableCell>
 
             {/* CARET */}

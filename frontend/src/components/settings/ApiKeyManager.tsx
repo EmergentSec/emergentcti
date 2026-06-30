@@ -188,8 +188,14 @@ export function ApiKeyManager() {
       >
         {createdKey ? (
           <div className="space-y-4">
-            <div className="rounded-md border border-amber-500/30 bg-amber-950/20 p-4">
-              <p className="mb-2 text-sm font-medium text-amber-300">
+            <div
+              className="rounded-md border p-4"
+              style={{
+                background: 'color-mix(in srgb, var(--cat-yellow) 12%, transparent)',
+                borderColor: 'color-mix(in srgb, var(--cat-yellow) 30%, transparent)',
+              }}
+            >
+              <p className="mb-2 text-sm font-medium text-cat-yellow">
                 Save this key now — you will not be able to see it again.
               </p>
               <div className="flex items-center gap-2">

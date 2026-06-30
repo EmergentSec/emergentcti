@@ -10,10 +10,14 @@ export function DetailRawTab({ observable }: DetailRawTabProps) {
   const [copied, setCopied] = useState(false)
   const json = JSON.stringify(observable, null, 2)
 
-  function handleCopy() {
-    navigator.clipboard.writeText(json)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1400)
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(json)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1400)
+    } catch {
+      // clipboard write failed — do not set copied
+    }
   }
 
   return (

@@ -14,7 +14,7 @@ function SettingRow({ label, value, mono = false }: SettingRowProps) {
   return (
     <div className="flex items-start justify-between border-b border-border py-3 last:border-0">
       <p className="text-sm text-muted-foreground">{label}</p>
-      <span className={mono ? 'font-mono text-sm text-foreground' : 'text-sm text-foreground'}>
+      <span className={mono ? 'font-mono tabular-nums text-sm text-foreground' : 'text-sm text-foreground'}>
         {value}
       </span>
     </div>

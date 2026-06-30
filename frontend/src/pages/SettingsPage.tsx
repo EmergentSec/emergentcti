@@ -38,6 +38,7 @@ export default function SettingsPage() {
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
+                aria-current={isActive ? 'page' : undefined}
                 className={cn(
                   'flex w-full items-center gap-3 px-3 py-2.5 text-sm transition-colors',
                   isActive

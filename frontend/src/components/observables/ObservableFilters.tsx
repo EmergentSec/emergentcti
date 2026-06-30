@@ -31,7 +31,7 @@ export function ObservableFilters({ filters, onChange }: ObservableFiltersProps)
   ]
 
   const confValue = filters.confidence_min ?? 0
-  const exportFilters = { confidence_min: confValue > 0 ? confValue : undefined, source: filters.source }
+  const exportFilters = { type: filters.type || undefined, confidence_min: confValue > 0 ? confValue : undefined, source: filters.source }
 
   const exportTrigger = (
     <div className="inline-flex h-9 cursor-pointer items-center rounded-md border border-input bg-background text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground select-none">
@@ -59,6 +59,7 @@ export function ObservableFilters({ filters, onChange }: ObservableFiltersProps)
             placeholder="Search by value…"
             value={filters.q ?? ''}
             onChange={(e) => update({ q: e.target.value || undefined })}
+            aria-label="Search observables by value"
             className="flex h-9 w-full rounded-md border border-input bg-background py-1 pl-8 pr-3 text-sm text-foreground shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>

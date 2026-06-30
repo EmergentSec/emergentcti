@@ -76,7 +76,7 @@ export default function ObservableDetailPage() {
     navigator.clipboard.writeText(obs.value).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)
-    })
+    }).catch(() => {})
   }
 
   if (isLoading) {
