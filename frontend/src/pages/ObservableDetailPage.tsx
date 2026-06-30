@@ -15,9 +15,15 @@ import {
   TerminalWindow,
 } from '@phosphor-icons/react'
 import { useObservable } from '@/hooks/useObservables'
+import { useConfig } from '@/hooks/useConfig'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { Tabs } from '@/components/ui/Tabs'
+import { ConfidenceRing } from '@/components/observables/ConfidenceRing'
+import { DecayChart } from '@/components/observables/DecayChart'
+import { DetailSourcesTab } from '@/components/observables/DetailSourcesTab'
+import { DetailRawTab } from '@/components/observables/DetailRawTab'
 import { jsonExportUrl } from '@/api/export'
 import { cn, formatDate, formatRelativeTime, typeLabels } from '@/lib/utils'
 import type { ObservableType } from '@/types/observable'
@@ -51,10 +57,19 @@ function getBand(score: number): { label: string; cssVar: string } {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+const DECAY_DEFAULTS = { days: 30, rate: 5, floor: 10 }
+
+const DETAIL_TABS = [
+  { key: 'sources', label: 'Sources' },
+  { key: 'raw', label: 'Raw JSON' },
+]
+
 export default function ObservableDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: obs, isLoading, error } = useObservable(id ?? null)
+  const { data: cfg } = useConfig()
   const [copied, setCopied] = useState(false)
+  const [activeTab, setActiveTab] = useState('sources')
 
   const handleCopy = () => {
     if (!obs) return
@@ -220,10 +235,45 @@ export default function ObservableDetailPage() {
         </div>
       </Card>
 
-      {/* ── Placeholder for decay ring + tabs (next batch) ─────────── */}
-      <div data-testid="detail-placeholder">
-        {/* decay + tabs added in next batch */}
-      </div>
+      {/* ── Decay viz: ring (1 col) + chart (2 cols) ───────────────── */}
+      {(() => {
+        const nativeMax =
+          obs.sources.length > 0
+            ? Math.max(obs.confidence_score, ...obs.sources.map((s) => s.native_confidence))
+            : obs.confidence_score
+
+        const ageDays = obs.last_seen
+          ? Math.floor((Date.now() - new Date(obs.last_seen).getTime()) / 86_400_000)
+          : 0
+
+        const decayDays = cfg?.confidence_decay_days ?? DECAY_DEFAULTS.days
+        const decayRate = cfg?.confidence_decay_rate ?? DECAY_DEFAULTS.rate
+        const decayFloor = cfg?.confidence_decay_floor ?? DECAY_DEFAULTS.floor
+
+        return (
+          <div className="grid gap-3.5 lg:grid-cols-3">
+            <div className="lg:col-span-1">
+              <ConfidenceRing decayed={obs.confidence_score} nativeMax={nativeMax} />
+            </div>
+            <div className="lg:col-span-2">
+              <DecayChart
+                nativeMax={nativeMax}
+                ageDays={ageDays}
+                decayDays={decayDays}
+                decayRate={decayRate}
+                decayFloor={decayFloor}
+              />
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── Sources / Raw JSON tabs ─────────────────────────────────── */}
+      <Card className="p-5">
+        <Tabs tabs={DETAIL_TABS} active={activeTab} onChange={setActiveTab} className="mb-4" />
+        {activeTab === 'sources' && <DetailSourcesTab sources={obs.sources} />}
+        {activeTab === 'raw' && <DetailRawTab observable={obs} />}
+      </Card>
     </div>
   )
 }
