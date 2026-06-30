@@ -4,6 +4,7 @@ import { AppLayout } from './components/layout/AppLayout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import ObservablesPage from './pages/ObservablesPage'
+import ObservableDetailPage from './pages/ObservableDetailPage'
 import FeedsPage from './pages/FeedsPage'
 import SettingsPage from './pages/SettingsPage'
 
@@ -40,6 +41,7 @@ export default function App() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="observables" element={<ObservablesPage />} />
+        <Route path="observables/:id" element={<ObservableDetailPage />} />
         <Route path="feeds" element={<FeedsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>

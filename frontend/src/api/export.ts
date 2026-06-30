@@ -4,9 +4,13 @@
  * using the JWT cookie that the browser sends automatically on navigation.
  */
 
+import type { ObservableType } from '@/types/observable'
+
 export type BlocklistObsType = 'ip-addr' | 'domain-name' | 'url'
 
 export interface ExportFilters {
+  /** Optional observable type filter (adds `?type=` param when set). */
+  type?: ObservableType
   confidence_min?: number
   /** Feed UUID, 'manual', or undefined/empty (all sources). */
   source?: string
@@ -38,6 +42,9 @@ export function blocklistUrl(obsType: BlocklistObsType, filters: ExportFilters):
  */
 export function jsonExportUrl(filters: ExportFilters): string {
   const params = new URLSearchParams()
+  if (filters.type) {
+    params.set('type', filters.type)
+  }
   if (filters.confidence_min != null && filters.confidence_min > 0) {
     params.set('confidence_min', String(filters.confidence_min))
   }
