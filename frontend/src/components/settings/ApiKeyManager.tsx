@@ -2,14 +2,12 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getApiKeys, createApiKey, revokeApiKey } from '@/api/settings'
 import { useToast } from '@/contexts/ToastContext'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Dialog } from '@/components/ui/Dialog'
-import { Badge } from '@/components/ui/Badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatRelativeTime } from '@/lib/utils'
 import type { ApiKeyCreateResponse } from '@/types/auth'
 
 export function ApiKeyManager() {
@@ -20,6 +18,7 @@ export function ApiKeyManager() {
   const [newKeyDescription, setNewKeyDescription] = useState('')
   const [createdKey, setCreatedKey] = useState<ApiKeyCreateResponse | null>(null)
   const [copied, setCopied] = useState(false)
+  const [revokeTarget, setRevokeTarget] = useState<string | null>(null)
 
   const { data: keys, isLoading, error } = useQuery({
     queryKey: ['apiKeys'],
@@ -45,10 +44,12 @@ export function ApiKeyManager() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['apiKeys'] })
       toast('API key revoked', 'success')
+      setRevokeTarget(null)
     },
     onError: (err) => {
       const message = err instanceof Error ? err.message : 'Failed to revoke key'
       toast(message, 'error')
+      setRevokeTarget(null)
     },
   })
 
@@ -82,129 +83,183 @@ export function ApiKeyManager() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>API Keys</CardTitle>
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            Create New Key
-          </Button>
+    <div className="space-y-6">
+      {/* Page header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground">API keys</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Authenticate requests with the{' '}
+            <code className="rounded bg-surface2 px-1 py-0.5 font-mono text-xs">X-API-Key</code>{' '}
+            header
+          </p>
         </div>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <div className="flex justify-center py-8">
-            <LoadingSpinner />
-          </div>
-        ) : error ? (
-          <p className="text-sm text-destructive-foreground">Failed to load API keys</p>
-        ) : !keys || keys.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No API keys found</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Prefix</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Last Used</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {keys.map((key) => (
-                <TableRow key={key.id}>
-                  <TableCell>
-                    <Badge variant="outline" className="font-mono text-xs">
-                      {key.key_prefix}...
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-medium">{key.name}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {formatDate(key.created_at)}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {key.last_used_at ? formatDate(key.last_used_at) : 'Never'}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => {
-                        if (confirm('Are you sure you want to revoke this API key?')) {
-                          revokeMutation.mutate(key.id)
-                        }
-                      }}
-                      disabled={revokeMutation.isPending}
-                    >
-                      Revoke
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+        <Button variant="brand" onClick={() => setShowCreate(true)}>
+          Create key
+        </Button>
+      </div>
 
-        {/* Create API Key Dialog */}
-        <Dialog
-          open={showCreate}
-          onClose={closeCreateDialog}
-          title={createdKey ? 'API Key Created' : 'Create New API Key'}
-        >
-          {createdKey ? (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-amber-500/30 bg-amber-950/30 p-4">
-                <p className="mb-2 text-sm font-medium text-amber-200">
-                  Save this key now. You will not be able to see it again.
-                </p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded bg-background px-3 py-2 font-mono text-sm text-foreground break-all">
-                    {createdKey.key}
+      {/* Terminal curl example */}
+      <div className="overflow-hidden rounded-md border border-border bg-surface2">
+        <div className="flex items-center gap-2 border-b border-border bg-surface3 px-4 py-2">
+          <span className="font-mono text-xs text-muted-foreground">$_</span>
+        </div>
+        <pre className="overflow-x-auto px-4 py-3 font-mono text-sm text-foreground">
+          {'curl -H "X-API-Key: cti_••••••••" https://<your-instance>/api/v1/observables'}
+        </pre>
+      </div>
+
+      {/* Keys table */}
+      {isLoading ? (
+        <div className="flex justify-center py-8">
+          <LoadingSpinner />
+        </div>
+      ) : error ? (
+        <p className="text-sm text-destructive-foreground">Failed to load API keys</p>
+      ) : !keys || keys.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No API keys found. Create one to get started.
+        </p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>NAME</TableHead>
+              <TableHead>KEY</TableHead>
+              <TableHead>CREATED</TableHead>
+              <TableHead>LAST USED</TableHead>
+              <TableHead className="w-12" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {keys.map((key) => (
+              <TableRow key={key.id}>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-foreground">{key.name}</span>
+                    {key.name === 'Default Admin Key' && (
+                      <span className="text-xs text-muted-foreground">
+                        auto-generated on first startup
+                      </span>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <code className="rounded bg-surface2 px-2 py-0.5 font-mono text-xs text-muted-foreground">
+                    {key.key_prefix}
                   </code>
-                  <Button size="sm" variant="outline" onClick={handleCopy}>
-                    {copied ? 'Copied' : 'Copy'}
-                  </Button>
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <Button onClick={closeCreateDialog}>Done</Button>
+                </TableCell>
+                <TableCell className="font-mono text-sm text-muted-foreground">
+                  {formatDate(key.created_at)}
+                </TableCell>
+                <TableCell className="font-mono text-sm text-muted-foreground">
+                  {key.last_used_at ? formatRelativeTime(key.last_used_at) : 'Never'}
+                </TableCell>
+                <TableCell>
+                  <button
+                    className="rounded p-1 text-muted-foreground transition-colors hover:text-destructive"
+                    onClick={() => setRevokeTarget(key.id)}
+                    title="Revoke key"
+                    aria-label={`Revoke key ${key.name}`}
+                  >
+                    <svg
+                      width="15"
+                      height="15"
+                      viewBox="0 0 15 15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    >
+                      <path d="M11.5 3.5l-8 8M3.5 3.5l8 8" />
+                    </svg>
+                  </button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      {/* Create API Key Dialog */}
+      <Dialog
+        open={showCreate}
+        onClose={closeCreateDialog}
+        title={createdKey ? 'API Key Created' : 'Create New API Key'}
+      >
+        {createdKey ? (
+          <div className="space-y-4">
+            <div className="rounded-md border border-amber-500/30 bg-amber-950/20 p-4">
+              <p className="mb-2 text-sm font-medium text-amber-300">
+                Save this key now — you will not be able to see it again.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 break-all rounded bg-surface2 px-3 py-2 font-mono text-sm text-foreground">
+                  {createdKey.key}
+                </code>
+                <Button size="sm" variant="outline" onClick={handleCopy}>
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
               </div>
             </div>
-          ) : (
-            <form onSubmit={handleCreate} className="space-y-4">
-              <Input
-                label="Key Name"
-                value={newKeyName}
-                onChange={(e) => setNewKeyName(e.target.value)}
-                placeholder="e.g., Production Server"
-                autoFocus
-              />
-              <Input
-                label="Description (optional)"
-                value={newKeyDescription}
-                onChange={(e) => setNewKeyDescription(e.target.value)}
-                placeholder="What is this key used for?"
-              />
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={closeCreateDialog}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={!newKeyName.trim() || createMutation.isPending}
-                >
-                  {createMutation.isPending ? 'Creating...' : 'Create Key'}
-                </Button>
-              </div>
-            </form>
-          )}
-        </Dialog>
-      </CardContent>
-    </Card>
+            <div className="flex justify-end">
+              <Button onClick={closeCreateDialog}>Done</Button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleCreate} className="space-y-4">
+            <Input
+              label="Key Name"
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              placeholder="e.g., Production Server"
+              autoFocus
+            />
+            <Input
+              label="Description (optional)"
+              value={newKeyDescription}
+              onChange={(e) => setNewKeyDescription(e.target.value)}
+              placeholder="What is this key used for?"
+            />
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={closeCreateDialog}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={!newKeyName.trim() || createMutation.isPending}
+              >
+                {createMutation.isPending ? 'Creating...' : 'Create Key'}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Dialog>
+
+      {/* Revoke Confirm Dialog */}
+      <Dialog
+        open={revokeTarget !== null}
+        onClose={() => setRevokeTarget(null)}
+        title="Revoke API Key"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to revoke this key? Any integrations using it will immediately
+            lose access.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setRevokeTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => revokeTarget && revokeMutation.mutate(revokeTarget)}
+              disabled={revokeMutation.isPending}
+            >
+              {revokeMutation.isPending ? 'Revoking...' : 'Revoke Key'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    </div>
   )
 }
