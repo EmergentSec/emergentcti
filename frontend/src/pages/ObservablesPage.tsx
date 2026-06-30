@@ -44,20 +44,16 @@ export default function ObservablesPage() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardContent className="pt-4 pb-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex-1">
-              <ObservableFilters filters={filters} onChange={setFilters} />
-            </div>
-            {isAdmin && (
-              <Button onClick={() => setShowCreateDialog(true)}>
-                Add Observable
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex items-start gap-3">
+        <div className="flex-1">
+          <ObservableFilters filters={filters} onChange={setFilters} />
+        </div>
+        {isAdmin && (
+          <Button onClick={() => setShowCreateDialog(true)} className="mt-0 shrink-0 self-start h-9">
+            Add Observable
+          </Button>
+        )}
+      </div>
 
       {isLoading ? (
         <div className="flex items-center justify-center py-24">
