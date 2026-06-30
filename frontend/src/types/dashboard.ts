@@ -16,4 +16,5 @@ export interface DashboardStats {
   feeds_health: FeedHealth[]
   confidence_distribution: { critical: number; high: number; medium: number; low: number }
   feed_errors_24h: number
+  daily_ingest_14d: { date: string; count: number }[]
 }
