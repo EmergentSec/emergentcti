@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { MagnifyingGlass, Sun, Moon, Plus } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '../ui/Button';
 
 const PAGE_META: Record<string, { title: string; subtitle: string }> = {
@@ -25,7 +24,6 @@ export function Header({ className }: HeaderProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
-  useAuth(); // ensure context is available; logout unused here
   const [search, setSearch] = useState('');
 
   const page = PAGE_META[location.pathname] ?? { title: 'EmergentCTI', subtitle: '' };

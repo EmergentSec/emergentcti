@@ -79,7 +79,7 @@ export function Sidebar() {
         {/* API status row */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+            <span className="inline-block h-2 w-2 rounded-full bg-cat-green" />
             <span className="text-xs text-muted-foreground">API online</span>
           </div>
           <span className="font-mono text-xs text-muted-foreground">v2.0.0</span>
