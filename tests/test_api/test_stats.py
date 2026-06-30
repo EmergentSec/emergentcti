@@ -5,6 +5,19 @@ from cti.models.observable import Observable, ObservableType
 
 
 @pytest.mark.asyncio
+async def test_stats_includes_14d_ingestion_series(client, db_session):
+    resp = await client.get("/api/v1/stats")
+    assert resp.status_code == 200
+    series = resp.json()["daily_ingest_14d"]
+    assert isinstance(series, list)
+    assert len(series) == 14
+    assert all(set(p) == {"date", "count"} for p in series)
+    # oldest first, newest last
+    assert series[0]["date"] < series[-1]["date"]
+    assert all(isinstance(p["count"], int) for p in series)
+
+
+@pytest.mark.asyncio
 async def test_stats_includes_distribution_and_errors(client, db_session):
     db_session.add_all([
         Observable(type=ObservableType.IP_ADDR, value="1.1.1.1", confidence_score=95),  # critical
