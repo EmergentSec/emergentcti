@@ -110,6 +110,34 @@ async def get_stats(
     )
     feed_errors_24h = errors_result.scalar_one()
 
+    # 14-day daily new-observable series (zero-padded, oldest -> newest)
+    start_day = (datetime.now(UTC) - timedelta(days=13)).date()
+    daily_rows = await db.execute(
+        select(
+            func.date(FeedRun.completed_at).label("day"),
+            func.coalesce(func.sum(FeedRun.observables_new), 0).label("count"),
+        )
+        .where(
+            FeedRun.status == FeedRunStatus.SUCCESS,
+            FeedRun.completed_at >= datetime.combine(start_day, datetime.min.time(), UTC),
+        )
+        .group_by(func.date(FeedRun.completed_at))
+    )
+    # SQLite returns the grouped day as a string; Postgres returns a date — normalize to ISO string.
+    counts_by_day: dict[str, int] = {}
+    for row in daily_rows.all():
+        day = row.day
+        key = day if isinstance(day, str) else day.isoformat()
+        counts_by_day[key] = int(row.count or 0)
+
+    daily_ingest_14d = [
+        {
+            "date": (start_day + timedelta(days=i)).isoformat(),
+            "count": counts_by_day.get((start_day + timedelta(days=i)).isoformat(), 0),
+        }
+        for i in range(14)
+    ]
+
     result = {
         "total_observables": total,
         "by_type": by_type,
@@ -118,6 +146,7 @@ async def get_stats(
         "last_24h_ingested": last_24h_ingested,
         "confidence_distribution": confidence_distribution,
         "feed_errors_24h": feed_errors_24h,
+        "daily_ingest_14d": daily_ingest_14d,
         "feeds_health": feeds_health,
     }
 
