@@ -18,3 +18,6 @@ uv.lock
 CLAUDE.md
 .worktrees/
 *.tsbuildinfo
+
+# subagent-driven-development scratch
+.superpowers/

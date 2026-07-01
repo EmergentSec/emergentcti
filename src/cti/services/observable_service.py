@@ -304,6 +304,7 @@ async def bulk_upsert_from_feed(
                             "observable_id": obs_id,
                             "feed_id": feed.id,
                             "source_confidence": source_conf,
+                            "native_confidence": source_conf,
                             "first_seen_by_feed": raw.first_seen or now,
                             "last_seen_by_feed": raw.last_seen or now,
                         }
@@ -319,6 +320,10 @@ async def bulk_upsert_from_feed(
                             "source_confidence": func.greatest(
                                 ObservableSource.__table__.c.source_confidence,
                                 src_stmt.excluded.source_confidence,
+                            ),
+                            "native_confidence": func.greatest(
+                                ObservableSource.__table__.c.native_confidence,
+                                src_stmt.excluded.native_confidence,
                             ),
                             "last_seen_by_feed": func.greatest(
                                 ObservableSource.__table__.c.last_seen_by_feed,

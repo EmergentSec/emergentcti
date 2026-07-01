@@ -118,6 +118,9 @@ async def get_config(
         "confidence_decay_rate": settings.CONFIDENCE_DECAY_RATE,
         "confidence_decay_floor": settings.CONFIDENCE_DECAY_FLOOR,
         "confidence_decay_interval_hours": settings.CONFIDENCE_DECAY_INTERVAL_HOURS,
+        "instance_name": settings.INSTANCE_NAME,
+        "observable_retention_days": settings.OBSERVABLE_RETENTION_DAYS,
+        "default_export_format": settings.DEFAULT_EXPORT_FORMAT,
     }
 
 

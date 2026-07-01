@@ -60,14 +60,16 @@ async def apply_confidence_decay(
     if not settings.enabled:
         return 0
 
-    now = datetime.now(UTC)
+    # Use a timezone-naive UTC "now" so arithmetic works with the naive
+    # datetimes that SQLite returns when it reads stored values back.
+    now = datetime.now(UTC).replace(tzinfo=None)
     stale_cutoff = now - timedelta(days=settings.decay_days)
 
-    # Find stale sources that are still above the floor.
+    # Find stale sources whose NATIVE score still has room to decay.
     result = await db.execute(
         select(ObservableSource).where(
             ObservableSource.last_seen_by_feed < stale_cutoff,
-            ObservableSource.source_confidence > settings.decay_floor,
+            ObservableSource.native_confidence > settings.decay_floor,
         )
     )
 
@@ -75,10 +77,10 @@ async def apply_confidence_decay(
 
     for source in result.scalars():
         days_stale = (now - source.last_seen_by_feed).days
-        weeks_stale = max(1, (days_stale - settings.decay_days) // 7 + 1)
+        weeks_stale = max(1, (days_stale - settings.decay_days) // 7)
         new_conf = max(
             settings.decay_floor,
-            source.source_confidence - (weeks_stale * settings.decay_rate),
+            source.native_confidence - (weeks_stale * settings.decay_rate),
         )
         if new_conf != source.source_confidence:
             source.source_confidence = new_conf

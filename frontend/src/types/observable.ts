@@ -10,6 +10,7 @@ export interface ObservableSource {
   feed_id: string
   feed_name: string
   source_confidence: number
+  native_confidence: number
   first_seen_by_feed: string
   last_seen_by_feed: string
 }

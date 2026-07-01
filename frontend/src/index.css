@@ -4,61 +4,107 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+    /* Light theme */
+    --background: #f2f4f8;
+    --foreground: #10141d;
+    --surface: #ffffff;
+    --surface-2: #f7f9fc;
+    --surface-3: #eef1f6;
+    --hover: #f4f7fa;
+    --card: var(--surface);
+    --popover: var(--surface);
+    --border: #e5e9f0;
+    --border-strong: #d3dae4;
+    --muted: var(--surface-3);
+    --muted-foreground: #576175;
+    --text-3: #8a94a6;
+    --primary: #a31f24;
+    --brand: #a31f24;
+    --brand-2: #851a1d;
+    --on-brand: #ffffff;
+    --destructive: #d23a3f;
+    /* backward-compat aliases */
+    --secondary: var(--surface-2);
+    --secondary-foreground: var(--muted-foreground);
+    --accent: var(--surface-3);
+    --accent-foreground: var(--foreground);
+
+    /* Categorical (light) */
+    --cat-green: #1f9d63;
+    --cat-blue: #2f6fe0;
+    --cat-purple: #7a4fd6;
+    --cat-orange: #d9710a;
+    --cat-pink: #cf4f93;
+    --cat-yellow: #b8860b;
+
+    /* Confidence bands (light) */
+    --conf-critical: #d23a3f;
+    --conf-high: #d9710a;
+    --conf-medium: #b8860b;
+    --conf-low: #6b7585;
+
+    --radius: 0.8125rem; /* 13px cards */
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 6.5%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 6.5%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
-    --radius: 0.5rem;
+    /* Dark theme (default) */
+    --background: #0a0d13;
+    --foreground: #eef1f7;
+    --surface: #10141c;
+    --surface-2: #151a23;
+    --surface-3: #1b212c;
+    --hover: #181e28;
+    --card: var(--surface);
+    --popover: var(--surface);
+    --border: #222a37;
+    --border-strong: #2f3a4a;
+    --muted: var(--surface-3);
+    --muted-foreground: #9aa6b8;
+    --text-3: #646f82;
+    --primary: #e0484e;
+    --brand: #e0484e;
+    --brand-2: #b22f34;
+    --on-brand: #ffffff;
+    --destructive: #ef5350;
+    /* backward-compat aliases */
+    --secondary: var(--surface-2);
+    --secondary-foreground: var(--muted-foreground);
+    --accent: var(--surface-3);
+    --accent-foreground: var(--foreground);
+
+    /* Categorical (dark) */
+    --cat-green: #2fbf71;
+    --cat-blue: #4b8bf5;
+    --cat-purple: #9b6dff;
+    --cat-orange: #f0883e;
+    --cat-pink: #ec6aa6;
+    --cat-yellow: #e0a92a;
+
+    /* Confidence bands (dark) */
+    --conf-critical: #ef5350;
+    --conf-high: #ff8a3d;
+    --conf-medium: #ffc24b;
+    --conf-low: #8b95a6;
+
+    --radius: 0.8125rem;
   }
 }
 
 @layer base {
   * { @apply border-border; }
-  body { @apply bg-background text-foreground; }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
 }
 
 .dark ::-webkit-scrollbar { width: 8px; height: 8px; }
-.dark ::-webkit-scrollbar-track { background: hsl(222.2 84% 4.9%); }
-.dark ::-webkit-scrollbar-thumb { background: hsl(217.2 32.6% 25%); border-radius: 4px; }
-.dark ::-webkit-scrollbar-thumb:hover { background: hsl(217.2 32.6% 35%); }
+.dark ::-webkit-scrollbar-track { background: var(--surface); }
+.dark ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 4px; }
+.dark ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }

@@ -14,6 +14,7 @@ class ObservableSourceResponse(BaseModel):
     feed_id: uuid.UUID
     feed_name: str
     source_confidence: int
+    native_confidence: int
     first_seen_by_feed: datetime
     last_seen_by_feed: datetime
 

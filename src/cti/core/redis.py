@@ -46,15 +46,24 @@ def get_redis() -> Redis:
 # ── Cache helpers ────────────────────────────────────────────────────────
 
 async def cache_get(key: str) -> str | None:
-    """Retrieve a cached value by key, or None if missing/expired."""
-    client = get_redis()
-    return await client.get(key)
+    """Retrieve a cached value by key, or None if missing/expired/unavailable."""
+    if _redis_client is None:
+        return None
+    try:
+        return await _redis_client.get(key)
+    except Exception:  # noqa: BLE001 — cache is best-effort
+        logger.warning("cache_get failed for %s; serving uncached", key)
+        return None
 
 
 async def cache_set(key: str, value: str, ttl_seconds: int = 300) -> None:
-    """Store a value in cache with a TTL (default 5 minutes)."""
-    client = get_redis()
-    await client.set(key, value, ex=ttl_seconds)
+    """Store a value in cache with a TTL; best-effort (no-op if Redis unavailable)."""
+    if _redis_client is None:
+        return
+    try:
+        await _redis_client.set(key, value, ex=ttl_seconds)
+    except Exception:  # noqa: BLE001 — cache is best-effort
+        logger.warning("cache_set failed for %s; skipping cache", key)
 
 
 async def invalidate_blocklist_cache() -> None:

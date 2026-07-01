@@ -8,3 +8,9 @@ export interface ConfidenceDecayConfig {
 
 /** @deprecated Use ConfidenceDecayConfig instead */
 export type GlobalConfig = ConfidenceDecayConfig
+
+export interface InstanceConfig extends ConfidenceDecayConfig {
+  instance_name: string
+  observable_retention_days: number
+  default_export_format: string
+}

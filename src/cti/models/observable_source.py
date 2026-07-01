@@ -29,6 +29,7 @@ class ObservableSource(UUIDMixin, Base):
         ForeignKey("feeds.id", ondelete="CASCADE"),
     )
     source_confidence: Mapped[int] = mapped_column(Integer, default=50)
+    native_confidence: Mapped[int] = mapped_column(Integer, default=50)
     first_seen_by_feed: Mapped[datetime] = mapped_column(server_default=func.now())
     last_seen_by_feed: Mapped[datetime] = mapped_column(server_default=func.now())
 
