@@ -2,29 +2,28 @@ import { useQuery } from '@tanstack/react-query'
 import { getConfig } from '@/api/settings'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import type { InstanceConfig } from '@/types/settings'
 
 interface SettingRowProps {
   label: string
-  value: string | number | boolean
-  description?: string
+  value: string
+  mono?: boolean
 }
 
-function SettingRow({ label, value, description }: SettingRowProps) {
-  const displayValue = typeof value === 'boolean' ? (value ? 'Enabled' : 'Disabled') : String(value)
-
+function SettingRow({ label, value, mono = false }: SettingRowProps) {
   return (
-    <div className="flex items-center justify-between py-3 border-b border-border last:border-0">
-      <div>
-        <p className="text-sm font-medium text-foreground">{label}</p>
-        {description && (
-          <p className="text-xs text-muted-foreground">{description}</p>
-        )}
-      </div>
-      <span className="text-sm font-mono tabular-nums text-muted-foreground">
-        {displayValue}
+    <div className="flex items-start justify-between border-b border-border py-3 last:border-0">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <span className={mono ? 'font-mono tabular-nums text-sm text-foreground' : 'text-sm text-foreground'}>
+        {value}
       </span>
     </div>
   )
+}
+
+function decayLabel(config: InstanceConfig): string {
+  if (!config.confidence_decay_enabled) return 'Disabled'
+  return `-${config.confidence_decay_rate}/wk after ${config.confidence_decay_days}d, floor ${config.confidence_decay_floor}`
 }
 
 export function GeneralSettings() {
@@ -36,7 +35,7 @@ export function GeneralSettings() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Confidence Decay Settings</CardTitle>
+        <CardTitle>General</CardTitle>
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -47,34 +46,17 @@ export function GeneralSettings() {
           <p className="text-sm text-destructive-foreground">Failed to load configuration</p>
         ) : config ? (
           <div>
+            <SettingRow label="Instance name" value={config.instance_name} />
+            <SettingRow label="Confidence decay" value={decayLabel(config)} mono />
             <SettingRow
-              label="Decay Enabled"
-              value={config.confidence_decay_enabled}
-              description="Whether confidence scores decay over time without re-sighting"
+              label="Observable retention"
+              value={`${config.observable_retention_days} days`}
+              mono
             />
-            <SettingRow
-              label="Decay Starts After"
-              value={`${config.confidence_decay_days} days`}
-              description="Days without re-sighting before decay begins"
-            />
-            <SettingRow
-              label="Decay Rate"
-              value={`${config.confidence_decay_rate} points/week`}
-              description="How many confidence points are lost per week of staleness"
-            />
-            <SettingRow
-              label="Decay Floor"
-              value={config.confidence_decay_floor}
-              description="Minimum confidence score (never decays below this)"
-            />
-            <SettingRow
-              label="Decay Check Interval"
-              value={`${config.confidence_decay_interval_hours} hours`}
-              description="How often the decay job runs"
-            />
+            <SettingRow label="Default export format" value={config.default_export_format} />
 
             <p className="mt-4 text-xs text-muted-foreground">
-              These settings are configured via environment variables. Restart the API service after changing.
+              Configured via environment; restart to change.
             </p>
           </div>
         ) : null}

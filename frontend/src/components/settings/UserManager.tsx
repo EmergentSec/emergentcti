@@ -2,16 +2,53 @@ import { useState } from 'react'
 import { useUsers, useCreateUser, useUpdateUser, useDeleteUser, useChangePassword } from '@/hooks/useUsers'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Dialog } from '@/components/ui/Dialog'
 import { Badge } from '@/components/ui/Badge'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
-import { formatRelativeTime, formatDate } from '@/lib/utils'
+import { formatRelativeTime } from '@/lib/utils'
 import type { User, UserRole } from '@/types/user'
+
+// ── Avatar helpers ────────────────────────────────────────────────────────────
+
+/** Derive up to two initials from a username (splits on . _ - space). */
+function getInitials(username: string): string {
+  const parts = username.split(/[._\-\s]+/).filter(Boolean)
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[1][0]).toUpperCase()
+}
+
+/** Deterministic background colour from username. */
+const AVATAR_PALETTE = [
+  'bg-cat-blue',
+  'bg-cat-green',
+  'bg-cat-purple',
+  'bg-cat-orange',
+  'bg-cat-pink',
+] as const
+
+function avatarBg(username: string): string {
+  let h = 0
+  for (let i = 0; i < username.length; i++) {
+    h = ((h * 31) + username.charCodeAt(i)) >>> 0
+  }
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length]
+}
+
+function UserAvatar({ username }: { username: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${avatarBg(username)}`}
+    >
+      {getInitials(username)}
+    </div>
+  )
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export function UserManager() {
   const { user: currentUser } = useAuth()
@@ -35,13 +72,15 @@ export function UserManager() {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPasswordValue, setNewPasswordValue] = useState('')
 
-  // Delete confirmation dialog state
+  // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
 
-  // Per-row pending state for toggle to avoid disabling all rows
+  // Per-row pending toggle tracker (avoids disabling entire table)
   const [pendingToggleId, setPendingToggleId] = useState<string | null>(null)
 
   const isSelf = (user: User) => currentUser?.id === user.id
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault()
@@ -61,7 +100,7 @@ export function UserManager() {
         onError: (err) => {
           toast(err instanceof Error ? err.message : 'Failed to create user', 'error')
         },
-      }
+      },
     )
   }
 
@@ -86,7 +125,7 @@ export function UserManager() {
           setPendingToggleId(null)
           toast(err instanceof Error ? err.message : 'Failed to update user', 'error')
         },
-      }
+      },
     )
   }
 
@@ -106,7 +145,7 @@ export function UserManager() {
         onError: (err) => {
           toast(err instanceof Error ? err.message : 'Failed to change password', 'error')
         },
-      }
+      },
     )
   }
 
@@ -130,234 +169,236 @@ export function UserManager() {
     })
   }
 
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>Users</CardTitle>
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            Add User
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <div className="flex justify-center py-8">
-            <LoadingSpinner />
-          </div>
-        ) : error ? (
-          <p className="text-sm text-destructive-foreground">Failed to load users</p>
-        ) : !users || users.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No users found</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Username</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Last Login</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell className="font-medium">
-                    {user.username}
-                    {isSelf(user) && (
-                      <span className="ml-1.5 text-xs text-muted-foreground">(you)</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                      {user.role === 'admin' ? 'Admin' : 'User'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={user.is_active ? 'success' : 'destructive'}>
-                      {user.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {user.last_login_at ? formatRelativeTime(user.last_login_at) : 'Never'}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {formatDate(user.created_at)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleToggleActive(user)}
-                        disabled={isSelf(user) || pendingToggleId === user.id}
-                        title={isSelf(user) ? 'Cannot deactivate your own account' : undefined}
-                      >
-                        {user.is_active ? 'Deactivate' : 'Activate'}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setPasswordTarget(user)}
-                      >
-                        Password
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => setDeleteTarget(user)}
-                        disabled={isSelf(user)}
-                        title={isSelf(user) ? 'Cannot delete your own account' : undefined}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+  // ── Render ──────────────────────────────────────────────────────────────────
 
-        {/* Create User Dialog */}
-        <Dialog
-          open={showCreate}
-          onClose={closeCreateDialog}
-          title="Add User"
-        >
-          <form onSubmit={handleCreate} className="space-y-4">
+  return (
+    <div className="space-y-6">
+      {/* Page header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground">Members</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Manage who can access this instance
+          </p>
+        </div>
+        <Button variant="brand" onClick={() => setShowCreate(true)}>
+          + Invite
+        </Button>
+      </div>
+
+      {/* Member list */}
+      {isLoading ? (
+        <div className="flex justify-center py-8">
+          <LoadingSpinner />
+        </div>
+      ) : error ? (
+        <p className="text-sm text-destructive-foreground">Failed to load users</p>
+      ) : !users || users.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No members found.</p>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-border">
+          {users.map((user, idx) => (
+            <div
+              key={user.id}
+              className={[
+                'flex items-center gap-4 px-5 py-3.5 transition-colors hover:bg-muted/30',
+                !user.is_active ? 'opacity-60' : '',
+                idx < users.length - 1 ? 'border-b border-border' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              {/* Avatar */}
+              <UserAvatar username={user.username} />
+
+              {/* Name + email */}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium text-foreground">{user.username}</span>
+                  {isSelf(user) && (
+                    <span className="text-xs text-muted-foreground">(you)</span>
+                  )}
+                </div>
+                <span className="block truncate font-mono text-xs text-muted-foreground">
+                  {user.email ?? '—'}
+                </span>
+              </div>
+
+              {/* Role chip — real backend roles only: admin | user */}
+              <Badge
+                variant={user.role === 'admin' ? 'default' : 'secondary'}
+                className={user.role === 'admin' ? 'bg-brand text-brand-foreground' : ''}
+              >
+                {user.role === 'admin' ? 'Admin' : 'User'}
+              </Badge>
+
+              {/* Last login */}
+              <span className="w-20 shrink-0 text-right font-mono text-xs text-muted-foreground">
+                {user.last_login_at ? formatRelativeTime(user.last_login_at) : 'Never'}
+              </span>
+
+              {/* Actions */}
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleToggleActive(user)}
+                  disabled={isSelf(user) || pendingToggleId === user.id}
+                  title={
+                    isSelf(user)
+                      ? 'Cannot deactivate your own account'
+                      : user.is_active
+                        ? 'Deactivate'
+                        : 'Activate'
+                  }
+                >
+                  {user.is_active ? 'Deactivate' : 'Activate'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setPasswordTarget(user)}
+                >
+                  Password
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDeleteTarget(user)}
+                  disabled={isSelf(user)}
+                  title={isSelf(user) ? 'Cannot delete your own account' : 'Delete'}
+                  className="text-destructive hover:text-destructive"
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Invite / Create User Dialog */}
+      <Dialog open={showCreate} onClose={closeCreateDialog} title="Invite Member">
+        <form onSubmit={handleCreate} className="space-y-4">
+          <Input
+            label="Username"
+            value={newUsername}
+            onChange={(e) => setNewUsername(e.target.value)}
+            placeholder="e.g., jsmith"
+            autoFocus
+            required
+          />
+          <Input
+            label="Password"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="Enter a password"
+            required
+          />
+          <Select
+            label="Role"
+            value={newRole}
+            onChange={(e) => setNewRole(e.target.value as UserRole)}
+            options={[
+              { value: 'user', label: 'User' },
+              { value: 'admin', label: 'Admin' },
+            ]}
+          />
+          <Input
+            label="Email (optional)"
+            type="email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            placeholder="e.g., jsmith@example.com"
+          />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={closeCreateDialog}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={!newUsername.trim() || !newPassword.trim() || createUser.isPending}
+            >
+              {createUser.isPending ? 'Creating...' : 'Create User'}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* Change Password Dialog */}
+      <Dialog
+        open={passwordTarget !== null}
+        onClose={closePasswordDialog}
+        title={`Change Password — ${passwordTarget?.username ?? ''}`}
+      >
+        <form onSubmit={handleChangePassword} className="space-y-4">
+          {passwordTarget && isSelf(passwordTarget) && (
             <Input
-              label="Username"
-              value={newUsername}
-              onChange={(e) => setNewUsername(e.target.value)}
-              placeholder="e.g., jsmith"
+              label="Current Password"
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              placeholder="Enter your current password"
               autoFocus
               required
             />
-            <Input
-              label="Password"
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="Enter a password"
-              required
-            />
-            <Select
-              label="Role"
-              value={newRole}
-              onChange={(e) => setNewRole(e.target.value as UserRole)}
-              options={[
-                { value: 'user', label: 'User' },
-                { value: 'admin', label: 'Admin' },
-              ]}
-            />
-            <Input
-              label="Email (optional)"
-              type="email"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              placeholder="e.g., jsmith@example.com"
-            />
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={closeCreateDialog}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={!newUsername.trim() || !newPassword.trim() || createUser.isPending}
-              >
-                {createUser.isPending ? 'Creating...' : 'Create User'}
-              </Button>
-            </div>
-          </form>
-        </Dialog>
-
-        {/* Change Password Dialog */}
-        <Dialog
-          open={passwordTarget !== null}
-          onClose={closePasswordDialog}
-          title={`Change Password — ${passwordTarget?.username ?? ''}`}
-        >
-          <form onSubmit={handleChangePassword} className="space-y-4">
-            {passwordTarget && isSelf(passwordTarget) && (
-              <Input
-                label="Current Password"
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="Enter your current password"
-                autoFocus
-                required
-              />
-            )}
-            <Input
-              label="New Password"
-              type="password"
-              value={newPasswordValue}
-              onChange={(e) => setNewPasswordValue(e.target.value)}
-              placeholder="Enter a new password"
-              autoFocus={passwordTarget !== null && !isSelf(passwordTarget)}
-              required
-            />
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={closePasswordDialog}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  !newPasswordValue.trim() ||
-                  (passwordTarget !== null && isSelf(passwordTarget) && !currentPassword.trim()) ||
-                  changePassword.isPending
-                }
-              >
-                {changePassword.isPending ? 'Saving...' : 'Change Password'}
-              </Button>
-            </div>
-          </form>
-        </Dialog>
-
-        {/* Delete Confirmation Dialog */}
-        <Dialog
-          open={deleteTarget !== null}
-          onClose={() => setDeleteTarget(null)}
-          title="Delete User"
-        >
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Are you sure you want to delete{' '}
-              <span className="font-medium text-foreground">{deleteTarget?.username}</span>? This
-              action cannot be undone.
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setDeleteTarget(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={handleDelete}
-                disabled={deleteUser.isPending}
-              >
-                {deleteUser.isPending ? 'Deleting...' : 'Delete User'}
-              </Button>
-            </div>
+          )}
+          <Input
+            label="New Password"
+            type="password"
+            value={newPasswordValue}
+            onChange={(e) => setNewPasswordValue(e.target.value)}
+            placeholder="Enter a new password"
+            autoFocus={passwordTarget !== null && !isSelf(passwordTarget)}
+            required
+          />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={closePasswordDialog}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                !newPasswordValue.trim() ||
+                (passwordTarget !== null &&
+                  isSelf(passwordTarget) &&
+                  !currentPassword.trim()) ||
+                changePassword.isPending
+              }
+            >
+              {changePassword.isPending ? 'Saving...' : 'Change Password'}
+            </Button>
           </div>
-        </Dialog>
-      </CardContent>
-    </Card>
+        </form>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete Member"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to delete{' '}
+            <span className="font-medium text-foreground">{deleteTarget?.username}</span>? This
+            action cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteUser.isPending}
+            >
+              {deleteUser.isPending ? 'Deleting...' : 'Delete Member'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    </div>
   )
 }
