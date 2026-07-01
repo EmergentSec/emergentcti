@@ -26,7 +26,7 @@ This design adds proper user authentication (username/password with JWT sessions
 | Password hashing | bcrypt via passlib | Battle-tested, no extra C deps in Docker |
 | Initial user setup | Plaintext in .env, hashed on first boot | Simple Docker deployment |
 | Token storage | httpOnly, Secure, SameSite=Lax cookies | Browser-managed, not accessible to JS |
-| JWT secret | Required env var (no auto-generation) | Prevents accidental session loss on restart |
+| JWT secret | Required when ENVIRONMENT != development; auto-generated in dev | Prevents accidental session loss in prod; simple local dev |
 | Rate limiting | Redis counter on login endpoint | No new dependencies, 5 attempts per 15 min per IP |
 | Refresh tokens | Server-side in DB (hashed) | Enables session revocation |
 | API key scoping | API keys get `created_by` FK to users (nullable) | Audit trail, backwards compatible |
@@ -89,11 +89,11 @@ Add to `config.py` Settings class:
 |----------|------|---------|----------|-------|
 | ADMIN_USERNAME | str | "admin" | No | Initial admin username |
 | ADMIN_PASSWORD | SecretStr | "" | For first boot | Empty = skip seeding |
-| JWT_SECRET_KEY | SecretStr | -- | Yes, always | App refuses to start without it |
+| JWT_SECRET_KEY | SecretStr | -- | Required in non-dev | App exits if unset when ENVIRONMENT != development; auto-generated in dev |
 | JWT_ACCESS_TOKEN_EXPIRE_MINUTES | int | 15 | No | |
 | JWT_REFRESH_TOKEN_EXPIRE_DAYS | int | 7 | No | |
 
-`JWT_SECRET_KEY` is **required** in all environments. The app logs an error and exits if not set. This prevents accidental session invalidation on container restarts.
+`JWT_SECRET_KEY` is **required when `ENVIRONMENT` is not `development`** — the app logs an error and exits if it is unset. In `development` only, a random secret is auto-generated at startup (logged as a warning), so sessions are invalidated on every container restart. Set it explicitly in `.env` for any persistent deployment.
 
 ### New files
 
@@ -242,7 +242,7 @@ Client IP extracted from `X-Forwarded-For` header (set by nginx) or `request.cli
 
 Updated order:
 1. Initialize Redis
-2. **Validate JWT_SECRET_KEY is set** (exit if not)
+2. **Validate JWT_SECRET_KEY** — required when `ENVIRONMENT != "development"` (exit with a clear error if unset); in development, auto-generate and log a WARNING
 3. Seed default feeds
 4. **Seed initial admin user** (if ADMIN_PASSWORD set and no users exist)
 5. Seed initial API key (existing behavior, kept for backwards compat)
@@ -378,10 +378,10 @@ Add to `api` service environment:
 ```yaml
 ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
 ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-JWT_SECRET_KEY: ${JWT_SECRET_KEY:?required}
+JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
 ```
 
-`JWT_SECRET_KEY` uses `:?required` syntax to fail docker-compose up if not set.
+`JWT_SECRET_KEY` is passed through as optional at the compose level (`:-`); the **app** enforces it at startup — it exits when `ENVIRONMENT != development` and the key is unset. In development it is auto-generated (sessions lost on restart).
 
 ### Cookie behavior across environments
 
@@ -397,7 +397,7 @@ The `Secure` flag is toggled based on `ENVIRONMENT` setting (production vs devel
 | # | Pitfall | Risk | Mitigation |
 |---|---------|------|------------|
 | 1 | Existing deployments lose UI access | Users who don't set ADMIN_PASSWORD can't log in via UI | API keys still work for API access. Startup logs warn explicitly. Clear error on login page. |
-| 2 | JWT secret not set | Container restart with missing secret = startup failure | Required in all environments via docker-compose `:?required` syntax. App exits with clear error. |
+| 2 | JWT secret not set | Prod: startup fails; dev: sessions reset on restart | **Required in non-dev** — app exits with a clear error if unset. In dev, auto-generated with a WARNING. Set it in `.env` to persist sessions. |
 | 3 | Cookie/CORS in development | Cookies not sent cross-origin | Vite proxy makes it same-origin. No issues expected. |
 | 4 | Alembic migration on existing data | Adding FK to populated table | `created_by` is nullable. No constraint on existing rows. |
 | 5 | Token refresh race condition | Multiple 401s trigger multiple refreshes | Request queue pattern in Axios interceptor. |
