@@ -9,14 +9,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
+from cti.core.security import encrypt_config
 from cti.feeds.defaults import DEFAULT_FEEDS
-from cti.schemas.feed import FeedCreate, FeedResponse, FeedRunResponse, FeedUpdate
+from cti.schemas.feed import FeedAuthKeyUpdate, FeedCreate, FeedResponse, FeedRunResponse, FeedUpdate
 from cti.services import feed_service
 
 router = APIRouter()
 
 # Preconfigured feeds that expect an API key (from defaults.py `requires_api_key`).
 _AUTH_FEED_NAMES = {d["name"] for d in DEFAULT_FEEDS if d.get("requires_api_key")}
+
+# Full default feed definitions indexed by name (for template lookups).
+_DEFAULTS_BY_NAME = {d["name"]: d for d in DEFAULT_FEEDS}
 
 
 def _feed_to_response(feed, observable_count: int = 0) -> FeedResponse:
@@ -140,6 +144,47 @@ async def delete_feed(
 
     from cti.services.scheduler import sync_feed_jobs
     await sync_feed_jobs(db)
+
+
+@router.put("/{feed_id}/auth-key", response_model=FeedResponse)
+async def set_feed_auth_key(
+    feed_id: uuid.UUID,
+    data: FeedAuthKeyUpdate,
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(require_admin),
+) -> FeedResponse:
+    """Set or rotate the API key for a preconfigured feed that supports authentication.
+
+    The caller supplies only the raw secret; the endpoint merges it into the
+    feed's known ``auth_config_template`` from :mod:`cti.feeds.defaults` and
+    stores the result encrypted.
+
+    Returns 400 if the feed does not support API-key authentication via this
+    endpoint (i.e. it is not a preconfigured feed listed in ``_AUTH_FEED_NAMES``).
+    """
+    feed = await feed_service.get_feed(db, feed_id)
+    if not feed:
+        raise HTTPException(status_code=404, detail="Feed not found")
+
+    if not (feed.is_preconfigured and feed.name in _AUTH_FEED_NAMES):
+        raise HTTPException(
+            status_code=400,
+            detail="This feed does not support API key authentication via this endpoint",
+        )
+
+    # Merge the supplied secret into the known auth template.
+    template: dict = _DEFAULTS_BY_NAME[feed.name]["auth_config_template"]
+    auth_config = dict(template)
+    auth_config["api_key_value"] = data.api_key
+    if template.get("auth_type") == "bearer":
+        auth_config["token"] = data.api_key
+
+    feed.auth_config_encrypted = encrypt_config(auth_config)
+    await db.commit()
+    await db.refresh(feed)
+
+    count = await feed_service.get_observable_count_for_feed(db, feed.id)
+    return _feed_to_response(feed, observable_count=count)
 
 
 @router.post("/{feed_id}/trigger", response_model=FeedRunResponse)

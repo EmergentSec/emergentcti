@@ -60,3 +60,9 @@ class FeedUpdate(BaseModel):
     enabled: bool | None = None
     auth_config: dict | None = None
     default_confidence: int | None = Field(default=None, ge=0, le=100)
+
+
+class FeedAuthKeyUpdate(BaseModel):
+    """Payload for setting or rotating a feed's API key."""
+
+    api_key: str = Field(min_length=1)
