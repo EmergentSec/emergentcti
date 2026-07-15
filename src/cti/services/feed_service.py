@@ -45,11 +45,29 @@ async def create_feed(db: AsyncSession, data: dict) -> Feed:
     return feed
 
 
+def _preconfigured_auth_template(feed: Feed) -> dict | None:
+    """Return the auth_config_template for a preconfigured feed, or None."""
+    if not feed.is_preconfigured:
+        return None
+    for d in DEFAULT_FEEDS:
+        if d["name"] == feed.name:
+            return d.get("auth_config_template")
+    return None
+
+
 async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
     """Update a feed.
 
     For preconfigured feeds only ``enabled``, ``schedule_cron``,
     ``default_confidence``, and ``auth_config`` may be modified.
+
+    If ``data`` contains ``auth_config``:
+    - When ``auth_type`` is present in the payload, the supplied dict fully
+      replaces the stored auth config.
+    - Otherwise the payload is treated as a *partial* update: ``api_key_value``
+      is merged into the existing decrypted config (if any) or the feed's
+      preconfigured template.  For bearer-auth feeds ``token`` is also set.
+    - Raises ``ValueError`` if no base config structure can be determined.
     """
     auth_config = data.pop("auth_config", None)
 
@@ -62,7 +80,25 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
             setattr(feed, key, value)
 
     if auth_config:
-        feed.auth_config_encrypted = encrypt_config(auth_config)
+        if "auth_type" in auth_config:
+            # Full replace — caller supplied a complete auth config
+            merged = auth_config
+        else:
+            # Partial update: route the secret into an existing base
+            if feed.auth_config_encrypted:
+                base = decrypt_config(feed.auth_config_encrypted)
+            else:
+                tmpl = _preconfigured_auth_template(feed)
+                if tmpl is None:
+                    raise ValueError(
+                        "No auth config to merge into: supply auth_type or set one first"
+                    )
+                base = dict(tmpl)
+            merged = dict(base)
+            merged["api_key_value"] = auth_config["api_key_value"]
+            if base.get("auth_type") == "bearer":
+                merged["token"] = auth_config["api_key_value"]
+        feed.auth_config_encrypted = encrypt_config(merged)
 
     await db.flush()
     return feed

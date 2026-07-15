@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,70 +99,73 @@ async def test_custom_feed_with_reserved_name_not_auth_supported(
 
 
 # ---------------------------------------------------------------------------
-# B2 — PUT /feeds/{id}/auth-key
+# B2 — auth_config merge via PUT /feeds/{id}
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_set_auth_key_returns_200_and_has_auth(
+async def test_rotate_api_key_on_custom_feed(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """PUT auth-key on a preconfigured auth feed returns 200 with has_auth=True."""
+    """Partial auth_config on a custom feed with existing encrypted config rotates the key."""
+    old_config = {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "old"}
     feed = Feed(
-        name="AbuseIPDB",
+        name="MyCustomFeed",
         feed_type=FeedType.API,
-        is_preconfigured=True,
-        default_confidence=85,
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=encrypt_config(old_config),
     )
     db_session.add(feed)
     await db_session.commit()
 
     resp = await client.put(
-        f"/api/v1/feeds/{feed.id}/auth-key",
-        json={"api_key": "my-secret-key"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["has_auth"] is True
-    assert data["auth_supported"] is True
-    # Never expose the encrypted blob
-    assert "auth_config_encrypted" not in data
-
-
-@pytest.mark.asyncio
-async def test_set_auth_key_merges_into_template(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
-    """The stored auth config contains template fields plus api_key_value."""
-    feed = Feed(
-        name="AbuseIPDB",
-        feed_type=FeedType.API,
-        is_preconfigured=True,
-        default_confidence=85,
-    )
-    db_session.add(feed)
-    await db_session.commit()
-
-    resp = await client.put(
-        f"/api/v1/feeds/{feed.id}/auth-key",
-        json={"api_key": "my-secret-key"},
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"api_key_value": "new"}},
     )
     assert resp.status_code == 200
 
     await db_session.refresh(feed)
-    assert feed.auth_config_encrypted is not None
+    stored = decrypt_config(feed.auth_config_encrypted)
+    assert stored["api_key_header"] == "Key"
+    assert stored["api_key_value"] == "new"
+
+
+@pytest.mark.asyncio
+async def test_set_key_on_preconfigured_feed_with_no_auth(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Partial auth_config on a preconfigured feed with no existing auth uses the template."""
+    feed = Feed(
+        name="AbuseIPDB",
+        feed_type=FeedType.API,
+        is_preconfigured=True,
+        default_confidence=85,
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"api_key_value": "new-key"}},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["has_auth"] is True
+
+    await db_session.refresh(feed)
     stored = decrypt_config(feed.auth_config_encrypted)
     # AbuseIPDB template: {"auth_type": "api_key", "api_key_header": "Key"}
     assert stored["auth_type"] == "api_key"
     assert stored["api_key_header"] == "Key"
-    assert stored["api_key_value"] == "my-secret-key"
+    assert stored["api_key_value"] == "new-key"
 
 
 @pytest.mark.asyncio
-async def test_set_auth_key_bearer_feed_sets_token(
+async def test_bearer_routing_sets_token(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """For a bearer-auth feed (urlscan.io), the stored config also contains 'token'."""
+    """For a bearer-auth feed (urlscan.io), api_key_value is also mirrored into 'token'."""
     feed = Feed(
         name="urlscan.io",
         feed_type=FeedType.API,
@@ -175,8 +176,8 @@ async def test_set_auth_key_bearer_feed_sets_token(
     await db_session.commit()
 
     resp = await client.put(
-        f"/api/v1/feeds/{feed.id}/auth-key",
-        json={"api_key": "bearer-secret"},
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"api_key_value": "bearer-secret"}},
     )
     assert resp.status_code == 200
 
@@ -188,31 +189,36 @@ async def test_set_auth_key_bearer_feed_sets_token(
 
 
 @pytest.mark.asyncio
-async def test_set_auth_key_on_unsupported_feed_returns_400(
+async def test_full_replace_when_auth_type_present(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """PUT auth-key on a preconfigured feed with no auth support returns 400."""
+    """When auth_type is supplied in auth_config, the stored config is fully replaced."""
     feed = Feed(
-        name="CINSscore",
-        feed_type=FeedType.FILE,
-        is_preconfigured=True,
-        default_confidence=65,
+        name="MyFeed",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
     )
     db_session.add(feed)
     await db_session.commit()
 
+    new_auth = {"auth_type": "api_key", "api_key_header": "X-Api", "api_key_value": "z"}
     resp = await client.put(
-        f"/api/v1/feeds/{feed.id}/auth-key",
-        json={"api_key": "my-secret-key"},
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": new_auth},
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 200
+
+    await db_session.refresh(feed)
+    stored = decrypt_config(feed.auth_config_encrypted)
+    assert stored == new_auth
 
 
 @pytest.mark.asyncio
-async def test_set_auth_key_on_custom_feed_returns_400(
+async def test_partial_auth_config_on_custom_feed_with_no_base_returns_400(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """PUT auth-key on a non-preconfigured feed returns 400."""
+    """PUT with partial auth_config on a custom feed with no existing auth returns 400."""
     feed = Feed(
         name="MyCustomFeed",
         feed_type=FeedType.API,
@@ -223,46 +229,56 @@ async def test_set_auth_key_on_custom_feed_returns_400(
     await db_session.commit()
 
     resp = await client.put(
-        f"/api/v1/feeds/{feed.id}/auth-key",
-        json={"api_key": "my-secret-key"},
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"api_key_value": "x"}},
     )
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_set_auth_key_on_missing_feed_returns_404(
+async def test_update_normal_field_returns_200_with_correct_value(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """PUT auth-key on a non-existent feed returns 404."""
-    resp = await client.put(
-        f"/api/v1/feeds/{uuid.uuid4()}/auth-key",
-        json={"api_key": "my-secret-key"},
-    )
-    assert resp.status_code == 404
+    """PUT on a normal field returns 200 and the response reflects the new value.
 
-
-@pytest.mark.asyncio
-async def test_rotate_auth_key_overwrites_previous(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
-    """Calling auth-key twice replaces the previous stored key."""
-    old_config = {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "old-key"}
+    Regression for the MissingGreenlet bug: without db.refresh(feed) after
+    commit, accessing server-generated columns (e.g. updated_at) would raise
+    MissingGreenlet in a real async PostgreSQL session.
+    """
     feed = Feed(
-        name="AbuseIPDB",
+        name="MyFeed",
         feed_type=FeedType.API,
-        is_preconfigured=True,
-        default_confidence=85,
-        auth_config_encrypted=encrypt_config(old_config),
+        is_preconfigured=False,
+        default_confidence=50,
     )
     db_session.add(feed)
     await db_session.commit()
 
     resp = await client.put(
-        f"/api/v1/feeds/{feed.id}/auth-key",
-        json={"api_key": "new-key"},
+        f"/api/v1/feeds/{feed.id}",
+        json={"default_confidence": 42},
     )
     assert resp.status_code == 200
+    assert resp.json()["default_confidence"] == 42
 
-    await db_session.refresh(feed)
-    stored = decrypt_config(feed.auth_config_encrypted)
-    assert stored["api_key_value"] == "new-key"
+
+@pytest.mark.asyncio
+async def test_preconfigured_name_field_not_updated(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """PUT with 'name' on a preconfigured feed does not change the name."""
+    feed = Feed(
+        name="AbuseIPDB",
+        feed_type=FeedType.API,
+        is_preconfigured=True,
+        default_confidence=85,
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"name": "Hacked"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "AbuseIPDB"
