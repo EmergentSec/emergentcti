@@ -26,6 +26,8 @@ class FeedResponse(BaseModel):
     schedule_cron: str | None
     enabled: bool
     is_preconfigured: bool
+    has_auth: bool = False
+    auth_supported: bool = False
     default_confidence: int
     last_run_at: datetime | None
     observable_count: int = 0

@@ -9,10 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
+from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.schemas.feed import FeedCreate, FeedResponse, FeedRunResponse, FeedUpdate
 from cti.services import feed_service
 
 router = APIRouter()
+
+# Preconfigured feeds that expect an API key (from defaults.py `requires_api_key`).
+_AUTH_FEED_NAMES = {d["name"] for d in DEFAULT_FEEDS if d.get("requires_api_key")}
 
 
 def _feed_to_response(feed, observable_count: int = 0) -> FeedResponse:
@@ -39,6 +43,8 @@ def _feed_to_response(feed, observable_count: int = 0) -> FeedResponse:
         schedule_cron=feed.schedule_cron,
         enabled=feed.enabled,
         is_preconfigured=feed.is_preconfigured,
+        has_auth=feed.auth_config_encrypted is not None,
+        auth_supported=feed.name in _AUTH_FEED_NAMES,
         default_confidence=feed.default_confidence,
         last_run_at=feed.last_run_at,
         observable_count=observable_count,
