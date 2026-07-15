@@ -1,4 +1,4 @@
-"""Tests for feed API response fields: has_auth and auth_supported, and auth-key endpoint."""
+"""Tests for feed API auth fields (has_auth/auth_supported) and the PUT auth-config merge."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.security import decrypt_config, encrypt_config
+from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.models.feed import Feed, FeedType
 
 
@@ -341,3 +342,54 @@ async def test_absent_secret_in_partial_auth_config_is_noop(
     await db_session.refresh(feed)
     stored = decrypt_config(feed.auth_config_encrypted)
     assert stored["api_key_value"] == "original-secret"
+
+
+@pytest.mark.asyncio
+async def test_set_key_via_template_does_not_mutate_default_global(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Setting a key on a preconfigured feed (template path) must not write the
+    secret back into the shared DEFAULT_FEEDS module global."""
+    feed = Feed(
+        name="AbuseIPDB",
+        feed_type=FeedType.API,
+        is_preconfigured=True,
+        default_confidence=85,
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"api_key_value": "leaky-secret"}},
+    )
+    assert resp.status_code == 200
+
+    template = next(
+        d["auth_config_template"] for d in DEFAULT_FEEDS if d["name"] == "AbuseIPDB"
+    )
+    assert "api_key_value" not in template
+    assert "token" not in template
+
+
+@pytest.mark.asyncio
+async def test_preconfigured_description_can_be_edited(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Description is in the preconfigured allowed set, so edits persist (no silent no-op)."""
+    feed = Feed(
+        name="AbuseIPDB",
+        feed_type=FeedType.API,
+        is_preconfigured=True,
+        default_confidence=85,
+        description="original",
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"description": "updated by admin"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["description"] == "updated by admin"

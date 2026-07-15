@@ -51,7 +51,10 @@ def _preconfigured_auth_template(feed: Feed) -> dict | None:
         return None
     for d in DEFAULT_FEEDS:
         if d["name"] == feed.name:
-            return d.get("auth_config_template")
+            template = d.get("auth_config_template")
+            # Return a copy — callers mutate this (e.g. set api_key_value) and
+            # must never write a secret back into the shared DEFAULT_FEEDS global.
+            return dict(template) if template else None
     return None
 
 
@@ -59,7 +62,9 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
     """Update a feed.
 
     For preconfigured feeds only ``enabled``, ``schedule_cron``,
-    ``default_confidence``, and ``auth_config`` may be modified.
+    ``default_confidence``, ``description``, and ``auth_config`` may be
+    modified (``name``/``url``/``feed_type``/``config`` are managed by the
+    platform and ignored).
 
     If ``data`` contains ``auth_config``:
     - When ``auth_type`` is present in the payload, the supplied dict fully
@@ -72,7 +77,7 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
     auth_config = data.pop("auth_config", None)
 
     if feed.is_preconfigured:
-        allowed = {"enabled", "schedule_cron", "default_confidence", "auth_config"}
+        allowed = {"enabled", "schedule_cron", "default_confidence", "auth_config", "description"}
         data = {k: v for k, v in data.items() if k in allowed and v is not None}
 
     for key, value in data.items():
