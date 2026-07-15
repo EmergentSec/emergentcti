@@ -38,6 +38,8 @@ const mockFeed: Feed = {
   schedule_cron: '0 */6 * * *',
   enabled: true,
   is_preconfigured: true,
+  has_auth: false,
+  auth_supported: true,
   default_confidence: 85,
   last_run_at: '2026-06-29T00:00:00Z',
   observable_count: 312480,
