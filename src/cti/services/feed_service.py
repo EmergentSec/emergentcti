@@ -45,16 +45,39 @@ async def create_feed(db: AsyncSession, data: dict) -> Feed:
     return feed
 
 
+def _preconfigured_auth_template(feed: Feed) -> dict | None:
+    """Return the auth_config_template for a preconfigured feed, or None."""
+    if not feed.is_preconfigured:
+        return None
+    for d in DEFAULT_FEEDS:
+        if d["name"] == feed.name:
+            template = d.get("auth_config_template")
+            # Return a copy — callers mutate this (e.g. set api_key_value) and
+            # must never write a secret back into the shared DEFAULT_FEEDS global.
+            return dict(template) if template else None
+    return None
+
+
 async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
     """Update a feed.
 
     For preconfigured feeds only ``enabled``, ``schedule_cron``,
-    ``default_confidence``, and ``auth_config`` may be modified.
+    ``default_confidence``, ``description``, and ``auth_config`` may be
+    modified (``name``/``url``/``feed_type``/``config`` are managed by the
+    platform and ignored).
+
+    If ``data`` contains ``auth_config``:
+    - When ``auth_type`` is present in the payload, the supplied dict fully
+      replaces the stored auth config.
+    - Otherwise the payload is treated as a *partial* update: ``api_key_value``
+      is merged into the existing decrypted config (if any) or the feed's
+      preconfigured template.  For bearer-auth feeds ``token`` is also set.
+    - Raises ``ValueError`` if no base config structure can be determined.
     """
     auth_config = data.pop("auth_config", None)
 
     if feed.is_preconfigured:
-        allowed = {"enabled", "schedule_cron", "default_confidence", "auth_config"}
+        allowed = {"enabled", "schedule_cron", "default_confidence", "auth_config", "description"}
         data = {k: v for k, v in data.items() if k in allowed and v is not None}
 
     for key, value in data.items():
@@ -62,7 +85,27 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
             setattr(feed, key, value)
 
     if auth_config:
-        feed.auth_config_encrypted = encrypt_config(auth_config)
+        if "auth_type" in auth_config:
+            # Full auth_config supplied (custom feed defining/replacing auth) -> replace.
+            feed.auth_config_encrypted = encrypt_config(auth_config)
+        else:
+            # Partial secret from the friendly "API Key" field -> merge into known structure.
+            secret = auth_config.get("api_key_value") or auth_config.get("token")
+            if secret:
+                if feed.auth_config_encrypted is not None:
+                    base = decrypt_config(feed.auth_config_encrypted)
+                else:
+                    base = _preconfigured_auth_template(feed)
+                if not base or "auth_type" not in base:
+                    raise ValueError(
+                        "Cannot set an API key on a feed with no auth configuration; "
+                        "provide a full auth_config including auth_type."
+                    )
+                base["api_key_value"] = secret
+                if base.get("auth_type") == "bearer":
+                    base["token"] = secret
+                feed.auth_config_encrypted = encrypt_config(base)
+            # empty/absent secret -> no-op (leave existing credentials untouched)
 
     await db.flush()
     return feed

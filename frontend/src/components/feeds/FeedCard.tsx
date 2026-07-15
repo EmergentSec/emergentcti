@@ -24,6 +24,7 @@ import type { Feed, FeedRunStatus, FeedType } from '@/types/feed'
 
 interface FeedCardProps {
   feed: Feed
+  onEdit?: (feed: Feed) => void
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ function StatusDot({ status }: { status: FeedRunStatus | null | undefined }) {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function FeedCard({ feed }: FeedCardProps) {
+export function FeedCard({ feed, onEdit }: FeedCardProps) {
   const [showHistory, setShowHistory] = useState(false)
 
   const updateFeed = useUpdateFeed()
@@ -246,6 +247,15 @@ export function FeedCard({ feed }: FeedCardProps) {
                 >
                   {showHistory ? 'Hide run history' : 'Show run history'}
                 </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="rounded px-3 py-1.5 text-left text-sm hover:bg-hover"
+                    onClick={() => onEdit?.(feed)}
+                  >
+                    Edit
+                  </button>
+                )}
                 {isAdmin && !feed.is_preconfigured && (
                   <button
                     type="button"

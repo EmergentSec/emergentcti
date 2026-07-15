@@ -26,6 +26,8 @@ class FeedResponse(BaseModel):
     schedule_cron: str | None
     enabled: bool
     is_preconfigured: bool
+    has_auth: bool = False
+    auth_supported: bool = False
     default_confidence: int
     last_run_at: datetime | None
     observable_count: int = 0
@@ -58,3 +60,4 @@ class FeedUpdate(BaseModel):
     enabled: bool | None = None
     auth_config: dict | None = None
     default_confidence: int | None = Field(default=None, ge=0, le=100)
+

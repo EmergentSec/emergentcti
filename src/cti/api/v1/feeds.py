@@ -9,10 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
+from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.schemas.feed import FeedCreate, FeedResponse, FeedRunResponse, FeedUpdate
 from cti.services import feed_service
 
 router = APIRouter()
+
+# Preconfigured feeds that expect an API key (from defaults.py `requires_api_key`).
+_AUTH_FEED_NAMES = {d["name"] for d in DEFAULT_FEEDS if d.get("requires_api_key")}
 
 
 def _feed_to_response(feed, observable_count: int = 0) -> FeedResponse:
@@ -39,6 +43,8 @@ def _feed_to_response(feed, observable_count: int = 0) -> FeedResponse:
         schedule_cron=feed.schedule_cron,
         enabled=feed.enabled,
         is_preconfigured=feed.is_preconfigured,
+        has_auth=feed.auth_config_encrypted is not None,
+        auth_supported=feed.is_preconfigured and feed.name in _AUTH_FEED_NAMES,
         default_confidence=feed.default_confidence,
         last_run_at=feed.last_run_at,
         observable_count=observable_count,
@@ -102,10 +108,14 @@ async def update_feed(
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
 
-    feed = await feed_service.update_feed(
-        db, feed, data.model_dump(exclude_unset=True)
-    )
+    try:
+        feed = await feed_service.update_feed(
+            db, feed, data.model_dump(exclude_unset=True)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
+    await db.refresh(feed)
 
     # Sync scheduler after feed update
     from cti.services.scheduler import sync_feed_jobs

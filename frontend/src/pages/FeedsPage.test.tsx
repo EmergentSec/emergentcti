@@ -7,15 +7,35 @@ import type { Feed } from '@/types/feed'
 // ── Stub heavy sub-components ────────────────────────────────────────────────
 
 vi.mock('@/components/feeds/FeedCard', () => ({
-  FeedCard: ({ feed }: { feed: Feed }) => (
+  FeedCard: ({ feed, onEdit }: { feed: Feed; onEdit?: (feed: Feed) => void }) => (
     <div data-testid="feed-card" data-feed-type={feed.feed_type}>
       {feed.name}
+      {onEdit && (
+        <button onClick={() => onEdit(feed)}>trigger-edit-{feed.id}</button>
+      )}
     </div>
   ),
 }))
 
 vi.mock('@/components/feeds/FeedForm', () => ({
-  FeedForm: () => <div data-testid="feed-form" />,
+  FeedForm: ({
+    onSubmit,
+    initialValues,
+  }: {
+    onSubmit: (data: Record<string, unknown>) => void
+    initialValues?: Feed
+  }) => (
+    <div data-testid="feed-form">
+      {initialValues && (
+        <button
+          data-testid="feed-form-submit"
+          onClick={() => onSubmit({ name: initialValues.name })}
+        >
+          Save
+        </button>
+      )}
+    </div>
+  ),
 }))
 
 vi.mock('@/components/ui/Dialog', () => ({
@@ -48,6 +68,8 @@ const mockFeeds: Feed[] = [
     schedule_cron: null,
     enabled: true,
     is_preconfigured: true,
+    has_auth: false,
+    auth_supported: true,
     default_confidence: 80,
     last_run_at: null,
     observable_count: 1000,
@@ -65,6 +87,8 @@ const mockFeeds: Feed[] = [
     schedule_cron: null,
     enabled: true,
     is_preconfigured: true,
+    has_auth: false,
+    auth_supported: false,
     default_confidence: 90,
     last_run_at: null,
     observable_count: 500,
@@ -82,6 +106,8 @@ const mockFeeds: Feed[] = [
     schedule_cron: null,
     enabled: false,
     is_preconfigured: false,
+    has_auth: false,
+    auth_supported: false,
     default_confidence: 70,
     last_run_at: null,
     observable_count: 200,
@@ -103,9 +129,12 @@ const mockDashboard = {
   daily_ingest_14d: [],
 }
 
+const mockUpdateMutate = vi.fn()
+
 vi.mock('@/hooks/useFeeds', () => ({
   useFeeds: () => ({ data: mockFeeds, isLoading: false, error: null }),
   useCreateFeed: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateFeed: () => ({ mutate: mockUpdateMutate, isPending: false }),
 }))
 
 vi.mock('@/hooks/useDashboard', () => ({
@@ -220,5 +249,33 @@ describe('FeedsPage — Add Feed', () => {
     fireEvent.click(screen.getByRole('button', { name: /add feed/i }))
     expect(screen.getByTestId('dialog')).toBeTruthy()
     expect(screen.getByTestId('feed-form')).toBeTruthy()
+  })
+})
+
+describe('FeedsPage — Edit Feed', () => {
+  afterEach(() => {
+    mockUpdateMutate.mockClear()
+  })
+
+  it('opens the Edit Feed dialog when a FeedCard triggers onEdit', () => {
+    renderPage()
+    expect(screen.queryByTestId('dialog')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'trigger-edit-f1' }))
+    const dialog = screen.getByTestId('dialog')
+    expect(dialog).toBeTruthy()
+    expect(dialog.getAttribute('aria-label')).toBe('Edit Feed')
+    expect(screen.getByTestId('feed-form')).toBeTruthy()
+  })
+
+  it('submitting the edit form calls useUpdateFeed mutate with { id, data }', () => {
+    renderPage()
+    // Open the edit dialog for feed f1 (AbuseIPDB)
+    fireEvent.click(screen.getByRole('button', { name: 'trigger-edit-f1' }))
+    // Submit via the Save button rendered by the FeedForm stub when initialValues is set
+    fireEvent.click(screen.getByTestId('feed-form-submit'))
+    expect(mockUpdateMutate).toHaveBeenCalledWith(
+      { id: 'f1', data: { name: 'AbuseIPDB' } },
+      expect.anything(),
+    )
   })
 })

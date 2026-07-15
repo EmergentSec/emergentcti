@@ -21,6 +21,8 @@ export interface Feed {
   schedule_cron: string | null
   enabled: boolean
   is_preconfigured: boolean
+  has_auth: boolean
+  auth_supported: boolean
   default_confidence: number
   last_run_at: string | null
   observable_count: number
