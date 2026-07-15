@@ -75,3 +75,24 @@ async def test_plain_custom_feed_both_false(
     data = resp.json()
     assert data["has_auth"] is False
     assert data["auth_supported"] is False
+
+
+@pytest.mark.asyncio
+async def test_custom_feed_with_reserved_name_not_auth_supported(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A non-preconfigured feed sharing a preconfigured name → auth_supported stays False."""
+    feed = Feed(
+        name="AbuseIPDB",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.get(f"/api/v1/feeds/{feed.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["auth_supported"] is False
+    assert data["has_auth"] is False
