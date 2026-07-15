@@ -61,4 +61,3 @@ class FeedUpdate(BaseModel):
     auth_config: dict | None = None
     default_confidence: int | None = Field(default=None, ge=0, le=100)
 
-

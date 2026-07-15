@@ -282,3 +282,62 @@ async def test_preconfigured_name_field_not_updated(
     )
     assert resp.status_code == 200
     assert resp.json()["name"] == "AbuseIPDB"
+
+
+# ---------------------------------------------------------------------------
+# Guard tests: empty / absent secret must never wipe existing credentials
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_empty_api_key_value_leaves_stored_key_unchanged(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """PUT with api_key_value='' must return 200 and leave the stored key intact (no-op)."""
+    original_config = {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "original-secret"}
+    feed = Feed(
+        name="MyFeed",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=encrypt_config(original_config),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"api_key_value": ""}},
+    )
+    assert resp.status_code == 200
+
+    await db_session.refresh(feed)
+    stored = decrypt_config(feed.auth_config_encrypted)
+    assert stored["api_key_value"] == "original-secret"
+
+
+@pytest.mark.asyncio
+async def test_absent_secret_in_partial_auth_config_is_noop(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """PUT with auth_config containing no secret key must return 200 and leave credentials intact."""
+    original_config = {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "original-secret"}
+    feed = Feed(
+        name="MyFeed2",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=encrypt_config(original_config),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"foo": "bar"}},
+    )
+    assert resp.status_code == 200
+
+    await db_session.refresh(feed)
+    stored = decrypt_config(feed.auth_config_encrypted)
+    assert stored["api_key_value"] == "original-secret"

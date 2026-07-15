@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import secrets
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -33,13 +32,6 @@ def _register_sqlite_greatest(dbapi_connection, connection_record):
         -1,
         lambda *args: max((a for a in args if a is not None), default=None),
     )
-
-
-@pytest.fixture(autouse=True)
-def mock_scheduler() -> AsyncGenerator[None, None]:
-    """Patch sync_feed_jobs so tests don't need a running scheduler."""
-    with patch("cti.services.scheduler.sync_feed_jobs", new_callable=AsyncMock):
-        yield
 
 
 @pytest.fixture(autouse=True)

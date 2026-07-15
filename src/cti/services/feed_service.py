@@ -81,24 +81,26 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
 
     if auth_config:
         if "auth_type" in auth_config:
-            # Full replace — caller supplied a complete auth config
-            merged = auth_config
+            # Full auth_config supplied (custom feed defining/replacing auth) -> replace.
+            feed.auth_config_encrypted = encrypt_config(auth_config)
         else:
-            # Partial update: route the secret into an existing base
-            if feed.auth_config_encrypted:
-                base = decrypt_config(feed.auth_config_encrypted)
-            else:
-                tmpl = _preconfigured_auth_template(feed)
-                if tmpl is None:
+            # Partial secret from the friendly "API Key" field -> merge into known structure.
+            secret = auth_config.get("api_key_value") or auth_config.get("token")
+            if secret:
+                if feed.auth_config_encrypted is not None:
+                    base = decrypt_config(feed.auth_config_encrypted)
+                else:
+                    base = _preconfigured_auth_template(feed)
+                if not base or "auth_type" not in base:
                     raise ValueError(
-                        "No auth config to merge into: supply auth_type or set one first"
+                        "Cannot set an API key on a feed with no auth configuration; "
+                        "provide a full auth_config including auth_type."
                     )
-                base = dict(tmpl)
-            merged = dict(base)
-            merged["api_key_value"] = auth_config["api_key_value"]
-            if base.get("auth_type") == "bearer":
-                merged["token"] = auth_config["api_key_value"]
-        feed.auth_config_encrypted = encrypt_config(merged)
+                base["api_key_value"] = secret
+                if base.get("auth_type") == "bearer":
+                    base["token"] = secret
+                feed.auth_config_encrypted = encrypt_config(base)
+            # empty/absent secret -> no-op (leave existing credentials untouched)
 
     await db.flush()
     return feed
