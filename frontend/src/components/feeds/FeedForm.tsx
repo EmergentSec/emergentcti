@@ -37,7 +37,7 @@ const feedTypeOptions = [
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function FeedForm(props: FeedFormProps) {
-  const { onSubmit, onCancel, isLoading } = props
+  const { onCancel, isLoading } = props
   const isEditMode = props.initialValues != null
   const iv = isEditMode ? props.initialValues : null
 
@@ -106,7 +106,7 @@ export function FeedForm(props: FeedFormProps) {
       if (description.trim()) data.description = description.trim()
       if (scheduleCron.trim()) data.schedule_cron = scheduleCron.trim()
       if (authConfig.trim()) data.auth_config = JSON.parse(authConfig)
-      onSubmit(data)
+      props.onSubmit(data)
     } else {
       // ── Edit mode ─────────────────────────────────────────────────────────
       const data: FeedUpdate = {
@@ -135,7 +135,7 @@ export function FeedForm(props: FeedFormProps) {
         }
       }
 
-      ;(onSubmit as (data: FeedUpdate) => void)(data)
+      props.onSubmit(data)
     }
   }
 
@@ -186,7 +186,7 @@ export function FeedForm(props: FeedFormProps) {
 
       <Input
         label="Description"
-        value={description as string}
+        value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Optional description"
       />
@@ -210,13 +210,13 @@ export function FeedForm(props: FeedFormProps) {
       {isEditMode && preconfigured ? (
         <Input
           label="URL"
-          value={url as string}
+          value={url}
           disabled
         />
       ) : (
         <Input
           label="URL"
-          value={url as string}
+          value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://example.com/feed.txt"
           error={errors.url}
@@ -225,7 +225,7 @@ export function FeedForm(props: FeedFormProps) {
 
       <Input
         label="Schedule (cron)"
-        value={scheduleCron as string}
+        value={scheduleCron}
         onChange={(e) => setScheduleCron(e.target.value)}
         placeholder="0 */6 * * *"
       />
@@ -248,7 +248,8 @@ export function FeedForm(props: FeedFormProps) {
       {/* Auth section */}
       {isEditMode ? (
         // Edit mode: friendly API key when knownAuth (has_auth || auth_supported);
-        // JSON textarea when !knownAuth (lets a custom feed set or rotate raw auth)
+        // JSON textarea when !knownAuth AND custom feed (lets a custom feed set raw auth);
+        // nothing when !knownAuth AND preconfigured (no auth concept for this feed)
         knownAuth ? (
           <Input
             label="API Key"
@@ -258,7 +259,7 @@ export function FeedForm(props: FeedFormProps) {
             placeholder={apiKeyPlaceholder}
           />
         ) : (
-          authJsonTextarea
+          !preconfigured ? authJsonTextarea : null
         )
       ) : (
         // Create mode: raw JSON textarea (unchanged behaviour)

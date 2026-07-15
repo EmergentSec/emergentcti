@@ -225,20 +225,7 @@ describe('FeedForm — edit mode (with initialValues)', () => {
     expect(screen.getByLabelText(/api key/i)).toBeTruthy()
   })
 
-  it('shows API key input when has_auth is true even if auth_supported is false (key-rotation regression)', () => {
-    // Primary regression: custom feed with has_auth:true, auth_supported:false must show the API key
-    // field so the user can rotate the key
-    render(
-      <FeedForm
-        initialValues={{ ...customEditFeed, has_auth: true, auth_supported: false }}
-        onSubmit={vi.fn()}
-        onCancel={vi.fn()}
-      />,
-    )
-    expect(screen.getByLabelText(/api key/i)).toBeTruthy()
-  })
-
-  it('does not show API key input when auth_supported is false and has_auth is false', () => {
+  it('does not show API key input or JSON auth textarea for preconfigured feed with no auth', () => {
     render(
       <FeedForm
         initialValues={{ ...baseEditFeed, auth_supported: false }}
@@ -246,8 +233,9 @@ describe('FeedForm — edit mode (with initialValues)', () => {
         onCancel={vi.fn()}
       />,
     )
-    // knownAuth = false → JSON textarea shown, not API key
+    // preconfigured + knownAuth=false → no auth UI at all (neither API key nor JSON textarea)
     expect(screen.queryByLabelText(/api key/i)).toBeNull()
+    expect(screen.queryByPlaceholderText(/api_key/i)).toBeNull()
   })
 
   it('API key placeholder says "Leave blank to keep current key" when has_auth is true', () => {
@@ -416,6 +404,19 @@ describe('FeedForm — edit mode, custom feed', () => {
     const urlInput = screen.getByLabelText(/^url$/i) as HTMLInputElement
     expect(urlInput.disabled).toBe(false)
     expect(urlInput.value).toBe('https://custom.example.com/feed.txt')
+  })
+
+  it('shows API key input when has_auth is true even if auth_supported is false (key-rotation regression)', () => {
+    // Primary regression: custom feed with has_auth:true, auth_supported:false must show the API key
+    // field so the user can rotate the key
+    render(
+      <FeedForm
+        initialValues={{ ...customEditFeed, has_auth: true, auth_supported: false }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.getByLabelText(/api key/i)).toBeTruthy()
   })
 
   it('shows JSON Auth Config textarea for custom feed with has_auth:false and auth_supported:false', () => {
