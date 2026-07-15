@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Plus } from '@phosphor-icons/react'
-import { useFeeds, useCreateFeed } from '@/hooks/useFeeds'
+import { useFeeds, useCreateFeed, useUpdateFeed } from '@/hooks/useFeeds'
 import { useDashboard } from '@/hooks/useDashboard'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
@@ -12,7 +12,7 @@ import { FeedCard } from '@/components/feeds/FeedCard'
 import { FeedForm } from '@/components/feeds/FeedForm'
 import { compactNumber } from '@/lib/dashboardFormat'
 import { cn } from '@/lib/utils'
-import type { FeedCreate, FeedType } from '@/types/feed'
+import type { Feed, FeedCreate, FeedUpdate, FeedType } from '@/types/feed'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,11 +61,13 @@ export default function FeedsPage() {
   const { data: feeds, isLoading: feedsLoading, error: feedsError } = useFeeds()
   const { data: stats } = useDashboard()
   const createFeed = useCreateFeed()
+  const updateFeed = useUpdateFeed()
   const { toast } = useToast()
   const { isAdmin } = useAuth()
 
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [activeSegment, setActiveSegment] = useState<FilterSegment>('all')
+  const [editingFeed, setEditingFeed] = useState<Feed | null>(null)
 
   const handleCreate = (data: FeedCreate) => {
     createFeed.mutate(data, {
@@ -80,6 +82,25 @@ export default function FeedsPage() {
         )
       },
     })
+  }
+
+  const handleEdit = (data: FeedUpdate) => {
+    if (!editingFeed) return
+    updateFeed.mutate(
+      { id: editingFeed.id, data },
+      {
+        onSuccess: () => {
+          toast('Feed updated', 'success')
+          setEditingFeed(null)
+        },
+        onError: (err) => {
+          toast(
+            err instanceof Error ? err.message : 'Failed to update feed',
+            'error',
+          )
+        },
+      },
+    )
   }
 
   if (feedsLoading) {
@@ -196,7 +217,9 @@ export default function FeedsPage() {
               : `No ${SEGMENTS.find((s) => s.key === activeSegment)?.label ?? activeSegment} feeds.`}
           </p>
         ) : (
-          filteredFeeds.map((feed) => <FeedCard key={feed.id} feed={feed} />)
+          filteredFeeds.map((feed) => (
+            <FeedCard key={feed.id} feed={feed} onEdit={setEditingFeed} />
+          ))
         )}
       </div>
 
@@ -212,6 +235,18 @@ export default function FeedsPage() {
           isLoading={createFeed.isPending}
         />
       </Dialog>
+
+      {/* ── Edit dialog ──────────────────────────────────────────────────── */}
+      {editingFeed && (
+        <Dialog open onClose={() => setEditingFeed(null)} title="Edit Feed">
+          <FeedForm
+            initialValues={editingFeed}
+            onSubmit={handleEdit}
+            onCancel={() => setEditingFeed(null)}
+            isLoading={updateFeed.isPending}
+          />
+        </Dialog>
+      )}
     </div>
   )
 }
