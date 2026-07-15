@@ -27,6 +27,18 @@ const baseEditFeed: Feed = {
   updated_at: '',
 }
 
+// Custom (non-preconfigured) feed fixture for edit-mode tests
+const customEditFeed: Feed = {
+  ...baseEditFeed,
+  id: 'f2',
+  name: 'My Custom Feed',
+  feed_type: 'file',
+  url: 'https://custom.example.com/feed.txt',
+  is_preconfigured: false,
+  has_auth: false,
+  auth_supported: false,
+}
+
 // ── Create mode ──────────────────────────────────────────────────────────────
 
 describe('FeedForm — create mode (no initialValues)', () => {
@@ -131,7 +143,7 @@ describe('FeedForm — create mode (no initialValues)', () => {
   })
 })
 
-// ── Edit mode ────────────────────────────────────────────────────────────────
+// ── Edit mode — preconfigured feeds ─────────────────────────────────────────
 
 describe('FeedForm — edit mode (with initialValues)', () => {
   it('pre-populates description, url, schedule and confidence from initialValues', () => {
@@ -161,7 +173,7 @@ describe('FeedForm — edit mode (with initialValues)', () => {
     expect(screen.queryByRole('button', { name: /create feed/i })).toBeNull()
   })
 
-  it('displays feed name as read-only text, not an editable input', () => {
+  it('displays feed name as read-only text, not an editable input (preconfigured)', () => {
     render(
       <FeedForm
         initialValues={baseEditFeed}
@@ -171,11 +183,11 @@ describe('FeedForm — edit mode (with initialValues)', () => {
     )
     // Name is shown as static text, not an interactive input
     expect(screen.getByText('AbuseIPDB')).toBeTruthy()
-    // No input labelled "Feed Name" (it's read-only in edit mode)
+    // No input labelled "Feed Name" — preconfigured feed name is read-only
     expect(screen.queryByLabelText(/feed name/i)).toBeNull()
   })
 
-  it('does not render the raw JSON auth textarea in edit mode', () => {
+  it('shows URL as disabled (not editable) and feed type as read-only text for preconfigured feed', () => {
     render(
       <FeedForm
         initialValues={baseEditFeed}
@@ -183,6 +195,22 @@ describe('FeedForm — edit mode (with initialValues)', () => {
         onCancel={vi.fn()}
       />,
     )
+    // URL is a disabled input (seeded value, not editable)
+    const urlInput = screen.getByLabelText(/^url$/i) as HTMLInputElement
+    expect(urlInput.disabled).toBe(true)
+    // Feed Type shown as text, no select
+    expect(screen.queryByLabelText(/feed type/i)).toBeNull()
+  })
+
+  it('does not render the raw JSON auth textarea when knownAuth is true', () => {
+    render(
+      <FeedForm
+        initialValues={baseEditFeed}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    // baseEditFeed has auth_supported:true → knownAuth=true → API key shown, not JSON textarea
     expect(screen.queryByPlaceholderText(/api_key/i)).toBeNull()
   })
 
@@ -197,7 +225,20 @@ describe('FeedForm — edit mode (with initialValues)', () => {
     expect(screen.getByLabelText(/api key/i)).toBeTruthy()
   })
 
-  it('does not show API key input when auth_supported is false', () => {
+  it('shows API key input when has_auth is true even if auth_supported is false (key-rotation regression)', () => {
+    // Primary regression: custom feed with has_auth:true, auth_supported:false must show the API key
+    // field so the user can rotate the key
+    render(
+      <FeedForm
+        initialValues={{ ...customEditFeed, has_auth: true, auth_supported: false }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.getByLabelText(/api key/i)).toBeTruthy()
+  })
+
+  it('does not show API key input when auth_supported is false and has_auth is false', () => {
     render(
       <FeedForm
         initialValues={{ ...baseEditFeed, auth_supported: false }}
@@ -205,6 +246,7 @@ describe('FeedForm — edit mode (with initialValues)', () => {
         onCancel={vi.fn()}
       />,
     )
+    // knownAuth = false → JSON textarea shown, not API key
     expect(screen.queryByLabelText(/api key/i)).toBeNull()
   })
 
@@ -270,6 +312,26 @@ describe('FeedForm — edit mode (with initialValues)', () => {
     expect(payload.auth_config).toEqual({ api_key_value: 'my-secret-key-123' })
   })
 
+  it('sends auth_config.api_key_value when rotating key on custom feed (has_auth:true, auth_supported:false)', () => {
+    const handleSubmit = vi.fn()
+    render(
+      <FeedForm
+        initialValues={{ ...customEditFeed, has_auth: true, auth_supported: false }}
+        onSubmit={handleSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText(/api key/i), {
+      target: { value: 'rotate-my-key' },
+    })
+    fireEvent.submit(
+      screen.getByRole('button', { name: /save changes/i }).closest('form')!,
+    )
+    expect(handleSubmit).toHaveBeenCalledOnce()
+    const payload = handleSubmit.mock.calls[0][0]
+    expect(payload.auth_config).toEqual({ api_key_value: 'rotate-my-key' })
+  })
+
   it('calls onSubmit with FeedUpdate payload containing changed description', () => {
     const handleSubmit = vi.fn()
     render(
@@ -313,5 +375,120 @@ describe('FeedForm — edit mode (with initialValues)', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
     expect(handleCancel).toHaveBeenCalledOnce()
+  })
+})
+
+// ── Edit mode — custom (non-preconfigured) feeds ──────────────────────────────
+
+describe('FeedForm — edit mode, custom feed', () => {
+  it('shows editable Feed Name input seeded from initialValues', () => {
+    render(
+      <FeedForm
+        initialValues={customEditFeed}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    const nameInput = screen.getByLabelText(/feed name/i) as HTMLInputElement
+    expect(nameInput.value).toBe('My Custom Feed')
+  })
+
+  it('shows editable Feed Type select for custom feed', () => {
+    render(
+      <FeedForm
+        initialValues={customEditFeed}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    // Select is present (not read-only text)
+    expect(screen.getByLabelText(/feed type/i)).toBeTruthy()
+  })
+
+  it('shows editable URL input (not disabled) for custom feed', () => {
+    render(
+      <FeedForm
+        initialValues={customEditFeed}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    const urlInput = screen.getByLabelText(/^url$/i) as HTMLInputElement
+    expect(urlInput.disabled).toBe(false)
+    expect(urlInput.value).toBe('https://custom.example.com/feed.txt')
+  })
+
+  it('shows JSON Auth Config textarea for custom feed with has_auth:false and auth_supported:false', () => {
+    render(
+      <FeedForm
+        initialValues={customEditFeed}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    // knownAuth = false → JSON textarea, not the password field
+    expect(screen.queryByLabelText(/api key/i)).toBeNull()
+    expect(screen.getByPlaceholderText(/api_key/i)).toBeTruthy()
+  })
+
+  it('includes name, feed_type, and url in FeedUpdate payload for custom feed', () => {
+    const handleSubmit = vi.fn()
+    render(
+      <FeedForm
+        initialValues={customEditFeed}
+        onSubmit={handleSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText(/feed name/i), {
+      target: { value: 'Renamed Feed' },
+    })
+    fireEvent.submit(
+      screen.getByRole('button', { name: /save changes/i }).closest('form')!,
+    )
+    expect(handleSubmit).toHaveBeenCalledOnce()
+    const payload = handleSubmit.mock.calls[0][0]
+    expect(payload.name).toBe('Renamed Feed')
+    expect(payload.feed_type).toBe('file')
+    expect(payload.url).toBe('https://custom.example.com/feed.txt')
+  })
+
+  it('does not include name, feed_type, or url in FeedUpdate payload for preconfigured feed', () => {
+    const handleSubmit = vi.fn()
+    render(
+      <FeedForm
+        initialValues={baseEditFeed}
+        onSubmit={handleSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+    fireEvent.submit(
+      screen.getByRole('button', { name: /save changes/i }).closest('form')!,
+    )
+    expect(handleSubmit).toHaveBeenCalledOnce()
+    const payload = handleSubmit.mock.calls[0][0]
+    expect('name' in payload).toBe(false)
+    expect('feed_type' in payload).toBe(false)
+    expect('url' in payload).toBe(false)
+  })
+
+  it('sends auth_config from JSON textarea when filled for custom feed with !knownAuth', () => {
+    const handleSubmit = vi.fn()
+    render(
+      <FeedForm
+        initialValues={customEditFeed}
+        onSubmit={handleSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+    fireEvent.change(screen.getByPlaceholderText(/api_key/i), {
+      target: { value: '{"api_key": "abc123"}' },
+    })
+    fireEvent.submit(
+      screen.getByRole('button', { name: /save changes/i }).closest('form')!,
+    )
+    expect(handleSubmit).toHaveBeenCalledOnce()
+    const payload = handleSubmit.mock.calls[0][0]
+    expect(payload.auth_config).toEqual({ api_key: 'abc123' })
   })
 })

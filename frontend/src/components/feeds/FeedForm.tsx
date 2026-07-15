@@ -41,7 +41,12 @@ export function FeedForm(props: FeedFormProps) {
   const isEditMode = props.initialValues != null
   const iv = isEditMode ? props.initialValues : null
 
+  // Edit-mode derived flags (defined once, used for field gating throughout)
+  const preconfigured = iv?.is_preconfigured ?? false
+  const knownAuth = Boolean(iv?.has_auth || iv?.auth_supported)
+
   // ── Local state — seeded from initialValues in edit mode ─────────────────
+  const [name, setName] = useState(iv?.name ?? '')
   const [description, setDescription] = useState(iv?.description ?? '')
   const [feedType, setFeedType] = useState<FeedType>(iv?.feed_type ?? 'file')
   const [url, setUrl] = useState(iv?.url ?? '')
@@ -50,26 +55,35 @@ export function FeedForm(props: FeedFormProps) {
   const [enabled, setEnabled] = useState(iv?.enabled ?? true)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  // Create-mode only
-  const [name, setName] = useState('')
+  // Auth state — authConfig: JSON textarea (create mode + edit !knownAuth)
+  //              apiKeyValue: friendly API key field (edit mode + knownAuth)
   const [authConfig, setAuthConfig] = useState('')
-
-  // Edit-mode only — friendly API key field
   const [apiKeyValue, setApiKeyValue] = useState('')
 
   // ── Validation ────────────────────────────────────────────────────────────
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {}
-    if (!isEditMode && !name.trim()) newErrors.name = 'Name is required'
-    if (!url.trim()) newErrors.url = 'URL is required'
-    if (!isEditMode && authConfig.trim()) {
+
+    // Name required in create mode and custom edit (not preconfigured edit)
+    if (!isEditMode || (isEditMode && !preconfigured)) {
+      if (!name.trim()) newErrors.name = 'Name is required'
+    }
+
+    // URL required in create mode and custom edit (preconfigured URL is read-only)
+    if (!isEditMode || (isEditMode && !preconfigured)) {
+      if (!url.trim()) newErrors.url = 'URL is required'
+    }
+
+    // JSON auth config validation whenever the textarea is shown and non-empty
+    if (authConfig.trim()) {
       try {
         JSON.parse(authConfig)
       } catch {
         newErrors.authConfig = 'Must be valid JSON'
       }
     }
+
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
@@ -96,31 +110,66 @@ export function FeedForm(props: FeedFormProps) {
     } else {
       // ── Edit mode ─────────────────────────────────────────────────────────
       const data: FeedUpdate = {
-        url: url.trim() || undefined,
         enabled,
         default_confidence: defaultConfidence,
       }
       const trimmedDesc = description.trim()
       data.description = trimmedDesc || undefined
       if (scheduleCron.trim()) data.schedule_cron = scheduleCron.trim()
-      if (apiKeyValue.trim()) {
-        data.auth_config = { api_key_value: apiKeyValue.trim() }
+
+      // Structural fields: only send for custom (non-preconfigured) feeds
+      if (!preconfigured) {
+        data.name = name.trim() || undefined
+        data.feed_type = feedType
+        data.url = url.trim() || undefined
       }
+
+      // Auth: friendly API key field when knownAuth; JSON textarea otherwise
+      if (knownAuth) {
+        if (apiKeyValue.trim()) {
+          data.auth_config = { api_key_value: apiKeyValue.trim() }
+        }
+      } else {
+        if (authConfig.trim()) {
+          data.auth_config = JSON.parse(authConfig)
+        }
+      }
+
       ;(onSubmit as (data: FeedUpdate) => void)(data)
     }
   }
 
-  // ── API key field label / placeholder (edit mode) ─────────────────────────
+  // ── API key field placeholder (edit mode) ─────────────────────────────────
   const apiKeyPlaceholder = iv?.has_auth
     ? 'Leave blank to keep current key'
     : 'Enter API key'
+
+  // ── Shared auth JSON textarea markup ─────────────────────────────────────
+  const authJsonTextarea = (
+    <div className="space-y-1.5">
+      <label className="text-sm font-medium text-foreground">
+        Auth Config (JSON, optional)
+      </label>
+      <textarea
+        value={authConfig}
+        onChange={(e) => setAuthConfig(e.target.value)}
+        placeholder='{"api_key": "your-key-here"}'
+        rows={3}
+        className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      {errors.authConfig && (
+        <p className="text-xs text-destructive">{errors.authConfig}</p>
+      )}
+    </div>
+  )
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Feed Name: editable in create mode, read-only label in edit mode */}
-      {isEditMode ? (
+
+      {/* Feed Name: read-only text for preconfigured edit; editable input otherwise */}
+      {isEditMode && preconfigured ? (
         <div className="space-y-1.5">
           <span className="text-sm font-medium text-foreground">Feed Name</span>
           <p className="text-sm text-foreground">{iv!.name}</p>
@@ -142,8 +191,13 @@ export function FeedForm(props: FeedFormProps) {
         placeholder="Optional description"
       />
 
-      {/* Feed Type: editable in create mode, read-only in edit mode */}
-      {!isEditMode && (
+      {/* Feed Type: read-only text for preconfigured edit; select otherwise */}
+      {isEditMode && preconfigured ? (
+        <div className="space-y-1.5">
+          <span className="text-sm font-medium text-foreground">Feed Type</span>
+          <p className="text-sm text-foreground">{iv!.feed_type}</p>
+        </div>
+      ) : (
         <Select
           label="Feed Type"
           options={feedTypeOptions}
@@ -152,13 +206,22 @@ export function FeedForm(props: FeedFormProps) {
         />
       )}
 
-      <Input
-        label="URL"
-        value={url as string}
-        onChange={(e) => setUrl(e.target.value)}
-        placeholder="https://example.com/feed.txt"
-        error={errors.url}
-      />
+      {/* URL: disabled input for preconfigured edit; editable input otherwise */}
+      {isEditMode && preconfigured ? (
+        <Input
+          label="URL"
+          value={url as string}
+          disabled
+        />
+      ) : (
+        <Input
+          label="URL"
+          value={url as string}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://example.com/feed.txt"
+          error={errors.url}
+        />
+      )}
 
       <Input
         label="Schedule (cron)"
@@ -184,8 +247,9 @@ export function FeedForm(props: FeedFormProps) {
 
       {/* Auth section */}
       {isEditMode ? (
-        // Edit mode: friendly API key field (only when auth_supported)
-        iv!.auth_supported && (
+        // Edit mode: friendly API key when knownAuth (has_auth || auth_supported);
+        // JSON textarea when !knownAuth (lets a custom feed set or rotate raw auth)
+        knownAuth ? (
           <Input
             label="API Key"
             type="password"
@@ -193,24 +257,12 @@ export function FeedForm(props: FeedFormProps) {
             onChange={(e) => setApiKeyValue(e.target.value)}
             placeholder={apiKeyPlaceholder}
           />
+        ) : (
+          authJsonTextarea
         )
       ) : (
         // Create mode: raw JSON textarea (unchanged behaviour)
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-foreground">
-            Auth Config (JSON, optional)
-          </label>
-          <textarea
-            value={authConfig}
-            onChange={(e) => setAuthConfig(e.target.value)}
-            placeholder='{"api_key": "your-key-here"}'
-            rows={3}
-            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-          {errors.authConfig && (
-            <p className="text-xs text-destructive">{errors.authConfig}</p>
-          )}
-        </div>
+        authJsonTextarea
       )}
 
       <Toggle checked={enabled} onChange={setEnabled} label="Enabled" />
