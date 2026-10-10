@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from urllib.parse import quote
 
-from pydantic import SecretStr, computed_field, field_validator
+from pydantic import Field, SecretStr, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # ── Instance / display settings (read-only, env-driven) ──────────────
     INSTANCE_NAME: str = "EmergentCTI"
-    OBSERVABLE_RETENTION_DAYS: int = 180
+    OBSERVABLE_RETENTION_DAYS: int = Field(default=180, ge=0)
     DEFAULT_EXPORT_FORMAT: str = "text"
 
     # ── CORS ─────────────────────────────────────────────────────────────

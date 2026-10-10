@@ -125,7 +125,21 @@ async def delete_feed(
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
 
-    deleted = await feed_service.delete_feed(db, feed)
+    try:
+        deleted = await feed_service.delete_feed(db, feed)
+    except feed_service.FeedInUseError as exc:
+        used_by = (
+            f"export profile(s): {', '.join(exc.profile_names)}"
+            if exc.profile_names
+            else "an export profile"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Feed is used by {used_by}. "
+                "Update or delete those profiles before deleting the feed."
+            ),
+        ) from None
     if not deleted:
         raise HTTPException(
             status_code=400, detail="Cannot delete pre-configured feeds. Disable them instead."

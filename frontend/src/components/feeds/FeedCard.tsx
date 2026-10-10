@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
 import { Popover } from '@/components/ui/Popover'
 import { FeedRunHistory } from './FeedRunHistory'
+import { apiErrorMessage } from '@/lib/apiError'
 import { useUpdateFeed, useTriggerFeed, useDeleteFeed } from '@/hooks/useFeeds'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
@@ -116,7 +117,8 @@ export function FeedCard({ feed }: FeedCardProps) {
     if (!window.confirm(`Delete feed "${feed.name}"? This cannot be undone.`)) return
     deleteFeed.mutate(feed.id, {
       onSuccess: () => toast(`${feed.name} deleted`, 'success'),
-      onError: () => toast(`Failed to delete ${feed.name}`, 'error'),
+      // Deletion is refused while an export profile references the feed — show why.
+      onError: (err) => toast(apiErrorMessage(err, `Failed to delete ${feed.name}`), 'error'),
     })
   }
 

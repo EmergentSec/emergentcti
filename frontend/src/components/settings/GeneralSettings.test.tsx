@@ -2,6 +2,7 @@ import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { getConfig } from '@/api/settings'
 import { GeneralSettings } from './GeneralSettings'
 
 vi.mock('@/api/settings', () => ({
@@ -46,6 +47,24 @@ describe('GeneralSettings', () => {
   it('renders observable retention days', async () => {
     render(<GeneralSettings />, { wrapper: makeWrapper() })
     expect(await screen.findByText('90 days')).toBeTruthy()
+  })
+
+  it('describes retention as irreversible daily deletion that includes allowlisted rows', async () => {
+    render(<GeneralSettings />, { wrapper: makeWrapper() })
+    expect(
+      await screen.findByText(
+        'A daily job permanently deletes observables not seen for more than 90 days, including manually added and allowlisted ones. Deleted observables cannot be restored.',
+      ),
+    ).toBeTruthy()
+  })
+
+  it('shows retention as Disabled when configured as 0', async () => {
+    const config = await getConfig()
+    vi.mocked(getConfig).mockResolvedValueOnce({ ...config, observable_retention_days: 0 })
+    render(<GeneralSettings />, { wrapper: makeWrapper() })
+    expect(await screen.findByText('Disabled')).toBeTruthy()
+    expect(screen.queryByText('0 days')).toBeNull()
+    expect(screen.getByText(/No observables are deleted by age/)).toBeTruthy()
   })
 
   it('renders default export format', async () => {

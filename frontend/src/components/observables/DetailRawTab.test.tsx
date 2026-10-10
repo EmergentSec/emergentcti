@@ -14,6 +14,8 @@ const OBS: Observable = {
   last_seen: '2026-06-29T00:00:00Z',
   source_count: 1,
   sources: [],
+  allowlisted: false,
+  allowlist_entry_ids: [],
   created_at: '2026-06-27T00:00:00Z',
   updated_at: '2026-06-29T00:00:00Z',
 }

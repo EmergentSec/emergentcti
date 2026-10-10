@@ -2,15 +2,18 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { FeedCard } from './FeedCard'
 import type { Feed } from '@/types/feed'
+import { AxiosError, type AxiosResponse } from 'axios'
 
 // ── Mock mutable refs so we can inspect calls ──────────────────────────────
 const mockUpdateMutate = vi.fn()
 const mockTriggerMutate = vi.fn()
+const mockDeleteMutate = vi.fn()
+const mockToast = vi.fn()
 
 vi.mock('@/hooks/useFeeds', () => ({
   useUpdateFeed: () => ({ mutate: mockUpdateMutate, isPending: false }),
   useTriggerFeed: () => ({ mutate: mockTriggerMutate, isPending: false }),
-  useDeleteFeed: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteFeed: () => ({ mutate: mockDeleteMutate, isPending: false }),
 }))
 
 const mockIsAdmin = { isAdmin: true }
@@ -20,7 +23,7 @@ vi.mock('@/contexts/AuthContext', () => ({
 }))
 
 vi.mock('@/contexts/ToastContext', () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast: mockToast }),
 }))
 
 vi.mock('./FeedRunHistory', () => ({
@@ -60,6 +63,10 @@ describe('FeedCard', () => {
     cleanup()
     mockUpdateMutate.mockClear()
     mockTriggerMutate.mockClear()
+    mockDeleteMutate.mockReset()
+    mockToast.mockReset()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     mockIsAdmin.isAdmin = true
   })
 
@@ -98,6 +105,19 @@ describe('FeedCard', () => {
       { id: '1', data: { enabled: false } },
       expect.anything(),
     )
+  })
+
+  it('explains why a feed referenced by an export profile cannot be deleted', () => {
+    const detail = 'Feed is referenced by export profiles. Update or delete them first.'
+    const error = new AxiosError('Request failed with status code 409')
+    error.response = { status: 409, data: { detail } } as AxiosResponse
+    mockDeleteMutate.mockImplementation((_id, callbacks) => callbacks.onError(error))
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+    render(<FeedCard feed={{ ...mockFeed, is_preconfigured: false }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Feed options' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    expect(mockDeleteMutate).toHaveBeenCalledWith('1', expect.anything())
+    expect(mockToast).toHaveBeenCalledWith(detail, 'error')
   })
 
   it('disables Run now and Toggle for non-admin users', () => {

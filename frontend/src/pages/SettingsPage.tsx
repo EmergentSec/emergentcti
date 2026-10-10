@@ -1,13 +1,15 @@
-import { useState } from 'react'
-import { Key, Users, SlidersHorizontal, UserCircle } from '@phosphor-icons/react'
+import { useSearchParams } from 'react-router-dom'
+import { Export, Key, ShieldCheck, Users, SlidersHorizontal, UserCircle } from '@phosphor-icons/react'
 import { AccountSettings } from '@/components/settings/AccountSettings'
+import { AllowlistManager } from '@/components/settings/AllowlistManager'
 import { ApiKeyManager } from '@/components/settings/ApiKeyManager'
+import { ExportProfileManager } from '@/components/settings/ExportProfileManager'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { UserManager } from '@/components/settings/UserManager'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 
-type Tab = 'apikeys' | 'members' | 'account' | 'general'
+type Tab = 'apikeys' | 'members' | 'allowlist' | 'exportprofiles' | 'account' | 'general'
 
 interface NavItem {
   id: Tab
@@ -19,15 +21,27 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'apikeys', label: 'API keys', Icon: Key, adminOnly: true },
   { id: 'members', label: 'Members', Icon: Users, adminOnly: true },
+  // Readable by every signed-in user; the panes hide mutation controls from non-admins.
+  { id: 'allowlist', label: 'Allowlist', Icon: ShieldCheck, adminOnly: false },
+  { id: 'exportprofiles', label: 'Export profiles', Icon: Export, adminOnly: false },
   { id: 'account', label: 'Account', Icon: UserCircle, adminOnly: false },
   { id: 'general', label: 'General', Icon: SlidersHorizontal, adminOnly: false },
 ]
 
 export default function SettingsPage() {
   const { isAdmin } = useAuth()
-  const [activeTab, setActiveTab] = useState<Tab>(isAdmin ? 'apikeys' : 'account')
-
   const visibleItems = NAV_ITEMS.filter(item => !item.adminOnly || isAdmin)
+
+  // Follow router navigation, including deep links while Settings stays mounted.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requested = searchParams.get('tab')
+  const activeTab: Tab = visibleItems.find(item => item.id === requested)?.id
+    ?? (isAdmin ? 'apikeys' : 'account')
+  const setActiveTab = (tab: Tab) => {
+    const params = new URLSearchParams(searchParams)
+    params.set('tab', tab)
+    setSearchParams(params)
+  }
 
   return (
     <div className="flex gap-6">
@@ -65,6 +79,8 @@ export default function SettingsPage() {
       <div className="min-w-0 flex-1">
         {activeTab === 'apikeys' && isAdmin && <ApiKeyManager />}
         {activeTab === 'members' && isAdmin && <UserManager />}
+        {activeTab === 'allowlist' && <AllowlistManager />}
+        {activeTab === 'exportprofiles' && <ExportProfileManager />}
         {activeTab === 'account' && <AccountSettings />}
         {activeTab === 'general' && <GeneralSettings />}
       </div>

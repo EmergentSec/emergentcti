@@ -66,6 +66,16 @@ async def cache_set(key: str, value: str, ttl_seconds: int = 300) -> None:
         logger.warning("cache_set failed for %s; skipping cache", key)
 
 
+async def cache_delete(key: str) -> None:
+    """Delete a cached entry; best-effort like the read/write cache helpers."""
+    if _redis_client is None:
+        return
+    try:
+        await _redis_client.delete(key)
+    except Exception:  # noqa: BLE001 — cache is best-effort
+        logger.warning("cache_delete failed for %s; stale entry expires by TTL", key)
+
+
 async def invalidate_blocklist_cache() -> None:
     """Delete all cached blocklist entries (keys matching ``blocklist:*``).
 

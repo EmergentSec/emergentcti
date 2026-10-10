@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from cti.api.v1.allowlist import router as allowlist_router
 from cti.api.v1.auth import router as auth_router
 from cti.api.v1.export import router as export_router
 from cti.api.v1.feeds import router as feeds_router
@@ -17,5 +18,6 @@ api_router.include_router(health_router, prefix="/health", tags=["health"])
 api_router.include_router(observables_router, prefix="/observables", tags=["observables"])
 api_router.include_router(feeds_router, prefix="/feeds", tags=["feeds"])
 api_router.include_router(export_router, prefix="/export", tags=["export"])
+api_router.include_router(allowlist_router, prefix="/allowlist", tags=["allowlist"])
 api_router.include_router(settings_router, prefix="/settings", tags=["settings"])
 api_router.include_router(stats_router, prefix="/stats", tags=["stats"])

@@ -26,6 +26,11 @@ function decayLabel(config: InstanceConfig): string {
   return `-${config.confidence_decay_rate}/wk after ${config.confidence_decay_days}d, floor ${config.confidence_decay_floor}`
 }
 
+function retentionLabel(days: number): string {
+  if (days <= 0) return 'Disabled'
+  return `${days} ${days === 1 ? 'day' : 'days'}`
+}
+
 export function GeneralSettings() {
   const { data: config, isLoading, error } = useQuery({
     queryKey: ['config'],
@@ -50,9 +55,14 @@ export function GeneralSettings() {
             <SettingRow label="Confidence decay" value={decayLabel(config)} mono />
             <SettingRow
               label="Observable retention"
-              value={`${config.observable_retention_days} days`}
+              value={retentionLabel(config.observable_retention_days)}
               mono
             />
+            <p className="border-b border-border py-3 text-xs text-muted-foreground">
+              {config.observable_retention_days > 0
+                ? `A daily job permanently deletes observables not seen for more than ${config.observable_retention_days} days, including manually added and allowlisted ones. Deleted observables cannot be restored.`
+                : 'No observables are deleted by age. When enabled, retention deletion is permanent and also applies to manually added and allowlisted observables.'}
+            </p>
             <SettingRow label="Default export format" value={config.default_export_format} />
 
             <p className="mt-4 text-xs text-muted-foreground">
