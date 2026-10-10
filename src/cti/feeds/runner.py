@@ -99,11 +99,8 @@ async def run_feed(
         )
         await db.commit()
 
-        # Invalidate blocklist cache after successful ingestion.
-        try:
-            await invalidate_blocklist_cache()
-        except Exception:
-            logger.warning("Failed to invalidate blocklist cache", exc_info=True)
+        # Invalidate blocklist cache after successful ingestion (best-effort).
+        await invalidate_blocklist_cache()
 
         logger.info(
             "Feed %s completed: %d ingested, %d new",

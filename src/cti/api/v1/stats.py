@@ -150,9 +150,6 @@ async def get_stats(
         "feeds_health": feeds_health,
     }
 
-    try:
-        await cache_set("stats:dashboard", json.dumps(result, default=str), ttl_seconds=60)
-    except Exception:
-        pass
+    await cache_set("stats:dashboard", json.dumps(result, default=str), ttl_seconds=60)
 
     return result

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cti.api.v1.auth import _set_refresh_cookie
 from cti.core.config import get_settings
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
@@ -16,7 +17,12 @@ from cti.models.api_key import ApiKey
 from cti.models.user import User, UserRole
 from cti.schemas.api_key import ApiKeyCreate, ApiKeyCreateResponse, ApiKeyResponse
 from cti.schemas.user import PasswordChange, UserCreate, UserResponse, UserUpdate
-from cti.services.auth_service import hash_password, revoke_all_user_tokens, verify_password
+from cti.services.auth_service import (
+    create_refresh_token,
+    hash_password,
+    revoke_all_user_tokens,
+    verify_password,
+)
 
 router = APIRouter()
 
@@ -244,6 +250,7 @@ async def delete_user(
 async def change_user_password(
     user_id: uuid.UUID,
     data: PasswordChange,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     _auth: AuthSubject = Depends(get_current_auth),
 ) -> None:
@@ -261,13 +268,29 @@ async def change_user_password(
     if not is_admin and not is_self:
         raise HTTPException(status_code=403, detail="Cannot change another user's password")
 
-    if not is_admin and is_self:
+    # Changing your own password always requires the current one, admins included.
+    if is_self:
         if not data.current_password:
             raise HTTPException(status_code=400, detail="current_password required")
         if not await verify_password(data.current_password, user.password_hash):
             raise HTTPException(status_code=400, detail="Current password is incorrect")
 
     user.password_hash = await hash_password(data.new_password)
-    # Always revoke sessions — forces re-login with the new password
+    # Revoke existing sessions so other devices must log in with the new password.
     await revoke_all_user_tokens(db, user.id)
+    if is_self:
+        # Keep the session that made the change signed in: issue it a fresh
+        # refresh token (the cookie is not sent to this path, so it cannot be spared).
+        settings = get_settings()
+        refresh_token = await create_refresh_token(
+            db=db,
+            user_id=user.id,
+            expire_days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS,
+        )
+        _set_refresh_cookie(
+            response,
+            refresh_token,
+            secure=settings.ENVIRONMENT != "development",
+            max_age=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        )
     await db.flush()

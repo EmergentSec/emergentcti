@@ -15,7 +15,6 @@ export function Slider({ value, min = 0, max = 100, step = 1, onChange, classNam
   return (
     <input
       type="range"
-      role="slider"
       min={min}
       max={max}
       step={step}
