@@ -40,7 +40,7 @@ docker compose logs api | grep -A1 "INITIAL API KEY"
 
 - **Web Dashboard** — Aggregation health, 14-day ingestion trend, observable-type breakdown, feed status, and confidence distribution; dark/light themes with a toggle
 - **User Authentication** — JWT session login for the web UI with `admin` / `user` roles; `X-API-Key` auth for programmatic access
-- **Feed Aggregation** — Ingest from 13 pre-configured feeds (AbuseIPDB, abuse.ch, CINSscore, DShield, etc.) plus custom feeds
+- **Feed Aggregation** — Ingest from 12 pre-configured feeds (AbuseIPDB, abuse.ch, CINSscore, DShield, etc.) plus custom feeds
 - **Blocklist Export** — Plain-text exports for direct firewall integration (pfSense, PAN EDLs, etc.) and full JSON export
 - **Confidence Scoring** — Dual-mode scoring with native feed scores and linear time decay; native-vs-decayed surfaced per observable
 - **Observable Types** — IP addresses, domains, URLs, file hashes, emails, command lines

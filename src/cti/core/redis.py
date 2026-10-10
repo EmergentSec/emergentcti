@@ -69,12 +69,17 @@ async def cache_set(key: str, value: str, ttl_seconds: int = 300) -> None:
 async def invalidate_blocklist_cache() -> None:
     """Delete all cached blocklist entries (keys matching ``blocklist:*``).
 
-    Uses async SCAN to avoid blocking Redis on large key spaces.
+    Uses async SCAN to avoid blocking Redis on large key spaces. Best-effort
+    (no-op if Redis unavailable).
     """
-    client = get_redis()
+    if _redis_client is None:
+        return
     deleted = 0
-    async for key in client.scan_iter(match="blocklist:*", count=200):
-        await client.delete(key)
-        deleted += 1
+    try:
+        async for key in _redis_client.scan_iter(match="blocklist:*", count=200):
+            await _redis_client.delete(key)
+            deleted += 1
+    except Exception:  # noqa: BLE001 — cache is best-effort
+        logger.warning("invalidate_blocklist_cache failed; stale entries expire by TTL")
     if deleted:
         logger.info("Invalidated %d blocklist cache entries", deleted)

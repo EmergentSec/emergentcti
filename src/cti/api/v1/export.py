@@ -50,10 +50,7 @@ async def get_blocklist(
 
     text = "\n".join(values)
 
-    try:
-        await cache_set(cache_key, text, ttl_seconds=300)
-    except Exception:
-        pass  # Cache failure is non-fatal
+    await cache_set(cache_key, text, ttl_seconds=300)
 
     return PlainTextResponse(
         content=text,

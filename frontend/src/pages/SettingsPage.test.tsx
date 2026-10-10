@@ -15,6 +15,10 @@ vi.mock('@/components/settings/UserManager', () => ({
   UserManager: () => <div>UserManager</div>,
 }))
 
+vi.mock('@/components/settings/AccountSettings', () => ({
+  AccountSettings: () => <div>AccountSettings</div>,
+}))
+
 vi.mock('@/components/settings/GeneralSettings', () => ({
   GeneralSettings: () => <div>GeneralSettings</div>,
 }))
@@ -24,28 +28,46 @@ const mockUseAuth = vi.mocked(useAuth)
 afterEach(cleanup)
 
 describe('SettingsPage', () => {
-  it('admin sees all 3 tabs and defaults to API keys pane', () => {
+  it('admin sees all 4 tabs and defaults to API keys pane', () => {
     mockUseAuth.mockReturnValue({ isAdmin: true } as ReturnType<typeof useAuth>)
 
     render(<SettingsPage />)
 
     expect(screen.getByText('API keys')).toBeTruthy()
     expect(screen.getByText('Members')).toBeTruthy()
+    expect(screen.getByText('Account')).toBeTruthy()
     expect(screen.getByText('General')).toBeTruthy()
     expect(screen.getByText('ApiKeyManager')).toBeTruthy()
+    expect(screen.queryByText('AccountSettings')).toBeNull()
     expect(screen.queryByText('GeneralSettings')).toBeNull()
     expect(screen.queryByText('UserManager')).toBeNull()
   })
 
-  it('non-admin sees only General tab and defaults to it', () => {
+  it('non-admin sees only Account and General tabs and defaults to Account', () => {
     mockUseAuth.mockReturnValue({ isAdmin: false } as ReturnType<typeof useAuth>)
 
     render(<SettingsPage />)
 
     expect(screen.queryByText('API keys')).toBeNull()
     expect(screen.queryByText('Members')).toBeNull()
+    expect(screen.getByText('Account')).toBeTruthy()
     expect(screen.getByText('General')).toBeTruthy()
+    expect(screen.getByText('AccountSettings')).toBeTruthy()
+    expect(screen.queryByText('GeneralSettings')).toBeNull()
+    expect(screen.queryByText('ApiKeyManager')).toBeNull()
+
+    fireEvent.click(screen.getByText('General'))
     expect(screen.getByText('GeneralSettings')).toBeTruthy()
+    expect(screen.queryByText('AccountSettings')).toBeNull()
+  })
+
+  it('admin can open the Account tab', () => {
+    mockUseAuth.mockReturnValue({ isAdmin: true } as ReturnType<typeof useAuth>)
+
+    render(<SettingsPage />)
+
+    fireEvent.click(screen.getByText('Account'))
+    expect(screen.getByText('AccountSettings')).toBeTruthy()
     expect(screen.queryByText('ApiKeyManager')).toBeNull()
   })
 

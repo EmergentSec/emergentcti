@@ -61,7 +61,8 @@ async def apply_confidence_decay(
         return 0
 
     # Use a timezone-naive UTC "now" so arithmetic works with the naive
-    # datetimes that SQLite returns when it reads stored values back.
+    # datetimes read back from ``last_seen_by_feed``; the column is
+    # timezone-naive in both SQLite and Postgres.
     now = datetime.now(UTC).replace(tzinfo=None)
     stale_cutoff = now - timedelta(days=settings.decay_days)
 

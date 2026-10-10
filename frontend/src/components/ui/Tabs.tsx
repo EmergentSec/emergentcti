@@ -19,7 +19,7 @@ export function Tabs({ tabs, active, onChange, className }: TabsProps) {
             key={t.key}
             role="tab"
             aria-selected={selected}
-            onClick={() => onChange(t.key)}
+            onClick={() => { if (!selected) onChange(t.key); }}
             className={cn(
               '-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors',
               selected

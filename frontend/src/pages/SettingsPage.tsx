@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { Key, Users, SlidersHorizontal } from '@phosphor-icons/react'
+import { Key, Users, SlidersHorizontal, UserCircle } from '@phosphor-icons/react'
+import { AccountSettings } from '@/components/settings/AccountSettings'
 import { ApiKeyManager } from '@/components/settings/ApiKeyManager'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { UserManager } from '@/components/settings/UserManager'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 
-type Tab = 'apikeys' | 'members' | 'general'
+type Tab = 'apikeys' | 'members' | 'account' | 'general'
 
 interface NavItem {
   id: Tab
@@ -18,12 +19,13 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'apikeys', label: 'API keys', Icon: Key, adminOnly: true },
   { id: 'members', label: 'Members', Icon: Users, adminOnly: true },
+  { id: 'account', label: 'Account', Icon: UserCircle, adminOnly: false },
   { id: 'general', label: 'General', Icon: SlidersHorizontal, adminOnly: false },
 ]
 
 export default function SettingsPage() {
   const { isAdmin } = useAuth()
-  const [activeTab, setActiveTab] = useState<Tab>(isAdmin ? 'apikeys' : 'general')
+  const [activeTab, setActiveTab] = useState<Tab>(isAdmin ? 'apikeys' : 'account')
 
   const visibleItems = NAV_ITEMS.filter(item => !item.adminOnly || isAdmin)
 
@@ -63,6 +65,7 @@ export default function SettingsPage() {
       <div className="min-w-0 flex-1">
         {activeTab === 'apikeys' && isAdmin && <ApiKeyManager />}
         {activeTab === 'members' && isAdmin && <UserManager />}
+        {activeTab === 'account' && <AccountSettings />}
         {activeTab === 'general' && <GeneralSettings />}
       </div>
     </div>
