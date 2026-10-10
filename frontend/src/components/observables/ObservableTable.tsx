@@ -10,6 +10,7 @@ import {
   TerminalWindow,
   Trash,
 } from '@phosphor-icons/react'
+import { Badge } from '@/components/ui/Badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table'
 import { useDeleteObservable } from '@/hooks/useObservables'
 import { useAuth } from '@/contexts/AuthContext'
@@ -172,8 +173,19 @@ export function ObservableTable({ observables }: ObservableTableProps) {
             </TableCell>
 
             {/* VALUE — mono, truncated */}
-            <TableCell className="font-mono text-sm max-w-[22rem] truncate">
-              {obs.value}
+            <TableCell className="max-w-[22rem]">
+              <div className="flex items-center gap-2">
+                <span className="truncate font-mono text-sm">{obs.value}</span>
+                {obs.allowlisted && (
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 text-muted-foreground"
+                    title="Allowlisted — excluded from exports"
+                  >
+                    Allowlisted
+                  </Badge>
+                )}
+              </div>
             </TableCell>
 
             {/* CONFIDENCE */}

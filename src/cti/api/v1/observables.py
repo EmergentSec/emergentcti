@@ -12,12 +12,14 @@ from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
 from cti.models.observable import ObservableType
 from cti.schemas.observable import ObservableCreate, ObservableListResponse, ObservableResponse, ObservableSourceResponse
-from cti.services import observable_service
+from cti.services import allowlist_service, observable_service
+from cti.services.allowlist_service import AllowlistMatcher
 
 router = APIRouter()
 
 
-def _obs_to_response(obs) -> ObservableResponse:
+def _obs_to_response(obs, allowlist: AllowlistMatcher) -> ObservableResponse:
+    entry_ids = allowlist.match(obs.type, obs.value)
     return ObservableResponse(
         id=obs.id,
         type=obs.type,
@@ -37,6 +39,8 @@ def _obs_to_response(obs) -> ObservableResponse:
             )
             for s in obs.sources
         ],
+        allowlisted=bool(entry_ids),
+        allowlist_entry_ids=entry_ids,
         created_at=obs.created_at,
         updated_at=obs.updated_at,
     )
@@ -82,9 +86,10 @@ async def list_observables(
     )
 
     pages = (total + size - 1) // size if total > 0 else 0
+    allowlist = await allowlist_service.load_matcher(db)
 
     return ObservableListResponse(
-        items=[_obs_to_response(obs) for obs in items],
+        items=[_obs_to_response(obs, allowlist) for obs in items],
         total=total,
         page=page,
         size=size,
@@ -105,7 +110,7 @@ async def create_observable(
         confidence_score=data.confidence_score,
     )
     await db.commit()
-    return _obs_to_response(obs)
+    return _obs_to_response(obs, await allowlist_service.load_matcher(db))
 
 
 @router.get("/{observable_id}", response_model=ObservableResponse)
@@ -117,7 +122,7 @@ async def get_observable(
     obs = await observable_service.get_observable(db, observable_id)
     if not obs:
         raise HTTPException(status_code=404, detail="Observable not found")
-    return _obs_to_response(obs)
+    return _obs_to_response(obs, await allowlist_service.load_matcher(db))
 
 
 @router.delete("/{observable_id}", status_code=204)

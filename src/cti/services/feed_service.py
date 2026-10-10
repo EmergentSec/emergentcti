@@ -8,14 +8,35 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.security import decrypt_config, encrypt_config
 from cti.feeds.defaults import DEFAULT_FEEDS
+from cti.models.export_profile import ExportProfile
 from cti.models.feed import Feed, FeedRun, FeedRunStatus, FeedType
 from cti.models.observable_source import ObservableSource
 
 logger = logging.getLogger(__name__)
+
+
+class FeedInUseError(Exception):
+    """The feed is referenced by saved export profiles and cannot be deleted."""
+
+    def __init__(self, profile_names: list[str]) -> None:
+        super().__init__(
+            f"Feed is referenced by export profiles: {', '.join(profile_names) or 'unknown'}"
+        )
+        self.profile_names = profile_names
+
+
+async def _referencing_profile_names(db: AsyncSession, feed_id: uuid.UUID) -> list[str]:
+    result = await db.execute(
+        select(ExportProfile.name)
+        .where(ExportProfile.feed_id == feed_id)
+        .order_by(ExportProfile.name)
+    )
+    return [row[0] for row in result.all()]
 
 
 async def list_feeds(db: AsyncSession) -> list[Feed]:
@@ -37,7 +58,9 @@ async def create_feed(db: AsyncSession, data: dict) -> Feed:
     separately from the plain-text columns.
     """
     auth_config = data.pop("auth_config", None)
-    feed = Feed(**data, is_preconfigured=False)
+    # New feeds have no run history. Initialize it so response serialization
+    # after commit never attempts relationship IO outside an async context.
+    feed = Feed(**data, is_preconfigured=False, runs=[])
     if auth_config:
         feed.auth_config_encrypted = encrypt_config(auth_config)
     db.add(feed)
@@ -65,6 +88,8 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
         feed.auth_config_encrypted = encrypt_config(auth_config)
 
     await db.flush()
+    # SQL-expression onupdate expires this field; load it while IO is awaited.
+    await db.refresh(feed, attribute_names=["updated_at"])
     return feed
 
 
@@ -72,11 +97,25 @@ async def delete_feed(db: AsyncSession, feed: Feed) -> bool:
     """Delete a custom feed.
 
     Returns ``False`` (and does nothing) if the feed is preconfigured.
+
+    Raises:
+        FeedInUseError: a saved export profile filters on this feed. Deleting
+            it would otherwise silently change what that profile exports.
     """
     if feed.is_preconfigured:
         return False
+    profile_names = await _referencing_profile_names(db, feed.id)
+    if profile_names:
+        raise FeedInUseError(profile_names)
+    feed_id = feed.id
     await db.delete(feed)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # A profile started referencing the feed after the check above; the
+        # database's ON DELETE RESTRICT refused the delete. Nothing was removed.
+        await db.rollback()
+        raise FeedInUseError(await _referencing_profile_names(db, feed_id)) from None
     return True
 
 
@@ -246,12 +285,16 @@ async def update_preconfigured_feeds(db: AsyncSession) -> int:
     default_names = set(defaults_by_name.keys())
     for feed in feeds:
         if feed.name not in default_names:
-            if not feed.enabled:
+            if not feed.enabled and not await _referencing_profile_names(db, feed.id):
                 await db.delete(feed)
                 logger.info("Removed deprecated preconfigured feed: %s", feed.name)
             else:
                 feed.is_preconfigured = False
-                logger.info("Deprecated feed %s is enabled; converting to custom feed", feed.name)
+                logger.info(
+                    "Deprecated feed %s is enabled or referenced by an export profile; "
+                    "converting to custom feed",
+                    feed.name,
+                )
 
     if updated:
         await db.flush()

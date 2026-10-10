@@ -41,6 +41,8 @@ const OBSERVABLES: Observable[] = [
         last_seen_by_feed: '2026-06-28T00:00:00Z',
       },
     ],
+    allowlisted: false,
+    allowlist_entry_ids: [],
     created_at: '2026-06-27T00:00:00Z',
     updated_at: '2026-06-28T00:00:00Z',
   },
@@ -78,6 +80,8 @@ const OBSERVABLES: Observable[] = [
         last_seen_by_feed: '2026-06-29T20:00:00Z',
       },
     ],
+    allowlisted: false,
+    allowlist_entry_ids: [],
     created_at: '2026-06-29T00:00:00Z',
     updated_at: '2026-06-29T20:00:00Z',
   },
@@ -186,5 +190,29 @@ describe('ObservableTable', () => {
       </MemoryRouter>,
     )
     expect(screen.queryAllByRole('button', { name: /delete/i })).toHaveLength(0)
+  })
+
+  it('shows an Allowlisted badge only on allowlisted observables', () => {
+    const rows: Observable[] = [
+      { ...OBSERVABLES[0], allowlisted: true, allowlist_entry_ids: ['al-1'] },
+      OBSERVABLES[1],
+    ]
+    render(
+      <MemoryRouter>
+        <ObservableTable observables={rows} />
+      </MemoryRouter>,
+    )
+    const badges = screen.getAllByText('Allowlisted')
+    expect(badges).toHaveLength(1)
+    expect(badges[0].closest('tr')?.textContent).toContain('5.188.206.18')
+  })
+
+  it('shows no Allowlisted badge when nothing is allowlisted', () => {
+    render(
+      <MemoryRouter>
+        <ObservableTable observables={OBSERVABLES} />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByText('Allowlisted')).toBeNull()
   })
 })

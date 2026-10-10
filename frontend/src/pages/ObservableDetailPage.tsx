@@ -11,13 +11,19 @@ import {
   GlobeHemisphereWest,
   Icon,
   LinkSimple,
-  Prohibit,
+  ShieldCheck,
   TerminalWindow,
 } from '@phosphor-icons/react'
 import { useObservable } from '@/hooks/useObservables'
+import { useCreateAllowlistEntry } from '@/hooks/useAllowlist'
 import { useConfig } from '@/hooks/useConfig'
+import { useAuth } from '@/contexts/AuthContext'
+import { useToast } from '@/contexts/ToastContext'
+import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { Dialog } from '@/components/ui/Dialog'
+import { Input } from '@/components/ui/Input'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Tabs } from '@/components/ui/Tabs'
 import { ConfidenceRing } from '@/components/observables/ConfidenceRing'
@@ -25,6 +31,8 @@ import { DecayChart } from '@/components/observables/DecayChart'
 import { DetailSourcesTab } from '@/components/observables/DetailSourcesTab'
 import { DetailRawTab } from '@/components/observables/DetailRawTab'
 import { jsonExportUrl } from '@/api/export'
+import { apiErrorMessage, apiErrorStatus } from '@/lib/apiError'
+import { REASON_MAX_LENGTH } from '@/lib/policyValidation'
 import { cn, formatDate, formatRelativeTime, typeLabels } from '@/lib/utils'
 import type { ObservableType } from '@/types/observable'
 
@@ -70,6 +78,51 @@ export default function ObservableDetailPage() {
   const { data: cfg } = useConfig()
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState('sources')
+  const { isAdmin } = useAuth()
+  const { toast } = useToast()
+  const createAllowlistEntry = useCreateAllowlistEntry()
+  const [showAllowlist, setShowAllowlist] = useState(false)
+  const [allowlistReason, setAllowlistReason] = useState('')
+  const [allowlistError, setAllowlistError] = useState<string | null>(null)
+
+  const closeAllowlistDialog = () => {
+    setShowAllowlist(false)
+    setAllowlistReason('')
+    setAllowlistError(null)
+  }
+
+  const handleAllowlist = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!obs) return
+    const reason = allowlistReason.trim()
+    if (!reason) {
+      setAllowlistError('Reason is required')
+      return
+    }
+    setAllowlistError(null)
+    createAllowlistEntry.mutate(
+      {
+        kind: obs.type === 'ip-addr' && obs.value.includes('/') ? 'cidr' : 'exact',
+        value: obs.value,
+        observable_type: obs.type,
+        reason,
+      },
+      {
+        onSuccess: () => {
+          toast(`${obs.value} added to the allowlist`, 'success')
+          closeAllowlistDialog()
+        },
+        onError: (err) => {
+          const message =
+            apiErrorStatus(err) === 409
+              ? 'This value is already on the allowlist.'
+              : apiErrorMessage(err, 'Failed to add allowlist entry')
+          setAllowlistError(message)
+          toast(message, 'error')
+        },
+      },
+    )
+  }
 
   const handleCopy = () => {
     if (!obs) return
@@ -147,6 +200,15 @@ export default function ObservableDetailPage() {
               >
                 {band.label} confidence
               </span>
+              {obs.allowlisted && (
+                <Badge
+                  variant="outline"
+                  className="rounded-md text-muted-foreground"
+                  title="Allowlisted — excluded from exports"
+                >
+                  Allowlisted
+                </Badge>
+              )}
             </div>
 
             {/* Value + copy button */}
@@ -167,15 +229,21 @@ export default function ObservableDetailPage() {
 
           {/* Right-aligned action buttons */}
           <div className="flex shrink-0 items-center gap-2 pt-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled
-              title="Blocklisting is handled via blocklist export"
-            >
-              <Prohibit size={14} className="mr-1.5" />
-              Block
-            </Button>
+            {obs.allowlisted ? (
+              <Link
+                to="/settings?tab=allowlist"
+                className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              >
+                Manage allowlist
+              </Link>
+            ) : (
+              isAdmin && (
+                <Button variant="outline" size="sm" onClick={() => setShowAllowlist(true)}>
+                  <ShieldCheck size={14} className="mr-1.5" />
+                  Allowlist
+                </Button>
+              )
+            )}
             <a
               href={jsonExportUrl({ type: obs.type })}
               download
@@ -274,6 +342,45 @@ export default function ObservableDetailPage() {
         {activeTab === 'sources' && <DetailSourcesTab sources={obs.sources} />}
         {activeTab === 'raw' && <DetailRawTab observable={obs} />}
       </Card>
+
+      {/* ── Allowlist exact value dialog (admin) ────────────────────── */}
+      <Dialog open={showAllowlist} onClose={closeAllowlistDialog} title="Allowlist this value">
+        <form onSubmit={handleAllowlist} noValidate className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Adds {obs.type === 'ip-addr' && obs.value.includes('/') ? 'a CIDR entry' : 'an exact-value entry'} for{' '}
+            <span className="break-all font-mono font-medium text-foreground">{obs.value}</span>{' '}
+            ({typeLabels[obs.type] ?? obs.type}). The observable and its sources are kept; it is
+            only left out of exports, and removing the entry in Settings reverses this
+            immediately. Allowlisting does not protect it from retention deletion.
+            {obs.type === 'ip-addr' && obs.value.includes('/') && (
+              <> The CIDR policy also suppresses other IP indicators overlapping this range.</>
+            )}
+          </p>
+          <Input
+            id="allowlist-reason"
+            label="Reason"
+            value={allowlistReason}
+            onChange={(e) => setAllowlistReason(e.target.value)}
+            placeholder="e.g., Corporate DNS resolver"
+            maxLength={REASON_MAX_LENGTH}
+            aria-invalid={allowlistError ? true : undefined}
+            autoFocus
+          />
+          {allowlistError && (
+            <p role="alert" className="text-sm text-destructive">
+              {allowlistError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={closeAllowlistDialog}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={createAllowlistEntry.isPending}>
+              {createAllowlistEntry.isPending ? 'Adding...' : 'Add to allowlist'}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   )
 }

@@ -30,6 +30,9 @@ class ObservableResponse(BaseModel):
     last_seen: datetime | None
     source_count: int = 0
     sources: list[ObservableSourceResponse] = []
+    # Derived at read time from the current allowlist; never persisted.
+    allowlisted: bool = False
+    allowlist_entry_ids: list[uuid.UUID] = []
     created_at: datetime
     updated_at: datetime
 
