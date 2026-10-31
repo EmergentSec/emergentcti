@@ -7,7 +7,7 @@ import {
   YAxis,
   ReferenceLine,
 } from 'recharts'
-import { Card, CardContent, CardHeader } from '@/components/ui/Card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 
 interface DecayChartProps {
   nativeMax: number
@@ -60,13 +60,13 @@ export function DecayChart({
 
   return (
     <Card>
-      <CardHeader className="pb-2 p-5">
-        <div className="flex items-start justify-between gap-4">
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold text-foreground">Confidence decay</h3>
-            <p className="mt-0.5 text-[12px] text-muted-foreground">
+            <CardTitle>Confidence decay</CardTitle>
+            <CardDescription className="mt-1">
               Score decays from native as the indicator ages without re-sighting
-            </p>
+            </CardDescription>
           </div>
           <span
             className="shrink-0 font-mono text-[11px] text-muted-foreground"

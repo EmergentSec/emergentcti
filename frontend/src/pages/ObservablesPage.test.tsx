@@ -6,7 +6,14 @@ import type { ObservableFilters as Filters } from '@/types/observable'
 
 // Stub heavy sub-components to isolate the page shell
 vi.mock('@/components/observables/ObservableFilters', () => ({
-  ObservableFilters: () => <div data-testid="observable-filters" />,
+  ObservableFilters: ({ filters, onChange }: { filters: Filters; onChange: (filters: Filters) => void }) => (
+    <input
+      data-testid="observable-filters"
+      aria-label="Search observables by value"
+      value={filters.q ?? ''}
+      onChange={(event) => onChange({ ...filters, q: event.target.value || undefined, page: 1 })}
+    />
+  ),
 }))
 
 vi.mock('@/components/observables/ObservableTable', () => ({
@@ -72,6 +79,20 @@ describe('ObservablesPage', () => {
       </MemoryRouter>,
     )
     expect(screen.getByTestId('observable-filters')).toBeTruthy()
+  })
+
+  it('hydrates search from ?q= and keeps URL-driven search in sync', () => {
+    mockUseObservables.mockReturnValue({ data: DEFAULT_DATA, isLoading: false, error: null })
+    render(
+      <MemoryRouter initialEntries={['/observables?q=evil.example']}>
+        <ObservablesPage />
+      </MemoryRouter>,
+    )
+
+    expect((screen.getByLabelText('Search observables by value') as HTMLInputElement).value).toBe('evil.example')
+    expect(mockUseObservables).toHaveBeenCalledWith(
+      expect.objectContaining({ q: 'evil.example', page: 1 }),
+    )
   })
 
   it('renders count header with total observables', () => {

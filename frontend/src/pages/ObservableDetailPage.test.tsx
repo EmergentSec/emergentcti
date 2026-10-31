@@ -62,6 +62,16 @@ function renderWithRoute(id = 'obs-abc-123') {
   )
 }
 
+function renderWithEntry(entry: string) {
+  return render(
+    <MemoryRouter initialEntries={[entry]}>
+      <Routes>
+        <Route path="/observables/:id" element={<ObservableDetailPage />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
 afterEach(() => {
   cleanup()
   mockAuth.isAdmin = true
@@ -266,5 +276,13 @@ describe('ObservableDetailPage', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Raw JSON' }))
     expect(screen.getByText(/GET \/api\/v1\/observables\/:id/)).toBeTruthy()
     expect(screen.getByText(/"id"/)).toBeTruthy()
+  })
+
+  it('opens Raw JSON from the ?tab=raw deep link', () => {
+    mockUseObservable.mockReturnValue({ data: MOCK_OBS, isLoading: false, error: null })
+    mockUseConfig.mockReturnValue({ data: MOCK_CONFIG })
+    renderWithEntry('/observables/obs-abc-123?tab=raw')
+    expect(screen.getByRole('tab', { name: 'Raw JSON' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByText(/GET \/api\/v1\/observables\/:id/)).toBeTruthy()
   })
 })

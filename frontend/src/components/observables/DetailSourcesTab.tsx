@@ -7,6 +7,7 @@ import {
   TableRow,
 } from '@/components/ui/Table'
 import { formatDate, formatRelativeTime } from '@/lib/utils'
+import { EmptyState } from '@/components/common/EmptyState'
 import type { ObservableSource } from '@/types/observable'
 
 interface DetailSourcesTabProps {
@@ -22,11 +23,7 @@ function getConfColor(score: number): string {
 
 export function DetailSourcesTab({ sources }: DetailSourcesTabProps) {
   if (sources.length === 0) {
-    return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        Manually added — no feed sources
-      </p>
-    )
+    return <EmptyState title="Manually added — no feed sources" description="This indicator was added directly and has no feed sightings." />
   }
 
   return (
