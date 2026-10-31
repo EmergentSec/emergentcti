@@ -29,7 +29,7 @@ function statusBadge(status: FeedRun['status']) {
     case 'running':
       return (
         <Badge variant="secondary">
-          <span className="mr-1 inline-block h-2 w-2 animate-pulse-dot rounded-full bg-blue-400" />
+          <span className="mr-1 inline-block h-2 w-2 animate-pulse-dot rounded-full bg-primary" />
           Running
         </Badge>
       )
@@ -54,9 +54,7 @@ export function FeedRunHistory({ feedId }: FeedRunHistoryProps) {
   }
 
   if (!runs || runs.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">No runs recorded yet</p>
-    )
+    return <p className="text-sm text-muted-foreground">No runs recorded yet</p>
   }
 
   // Show last 20 runs
@@ -67,7 +65,8 @@ export function FeedRunHistory({ feedId }: FeedRunHistoryProps) {
       <h4 className="mb-2 text-sm font-medium text-foreground">
         Run History ({runs.length} total)
       </h4>
-      <Table>
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <Table className="min-w-[720px]">
         <TableHeader>
           <TableRow>
             <TableHead>Status</TableHead>
@@ -82,16 +81,16 @@ export function FeedRunHistory({ feedId }: FeedRunHistoryProps) {
           {recentRuns.map((run) => (
             <TableRow key={run.id}>
               <TableCell>{statusBadge(run.status)}</TableCell>
-              <TableCell className="text-sm text-muted-foreground">
+              <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
                 {formatDate(run.started_at)}
               </TableCell>
-              <TableCell className="text-sm tabular-nums">
+              <TableCell className="whitespace-nowrap font-mono text-xs tabular-nums">
                 {formatDuration(run.started_at, run.completed_at)}
               </TableCell>
-              <TableCell className="text-right tabular-nums">
+              <TableCell className="text-right font-mono tabular-nums">
                 {run.observables_ingested}
               </TableCell>
-              <TableCell className="text-right tabular-nums">
+              <TableCell className="text-right font-mono tabular-nums">
                 {run.observables_new}
               </TableCell>
               <TableCell className="max-w-[200px] truncate text-sm text-destructive">
@@ -101,6 +100,7 @@ export function FeedRunHistory({ feedId }: FeedRunHistoryProps) {
           ))}
         </TableBody>
       </Table>
+      </div>
     </div>
   )
 }

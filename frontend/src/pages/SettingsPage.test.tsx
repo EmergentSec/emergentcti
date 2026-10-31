@@ -54,12 +54,12 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />)
 
-    expect(screen.getByText('API keys')).toBeTruthy()
-    expect(screen.getByText('Members')).toBeTruthy()
-    expect(screen.getByText('Allowlist')).toBeTruthy()
-    expect(screen.getByText('Export profiles')).toBeTruthy()
-    expect(screen.getByText('Account')).toBeTruthy()
-    expect(screen.getByText('General')).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'API keys' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Members' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Allowlist' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Export profiles' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Account' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy()
     expect(screen.getByText('ApiKeyManager')).toBeTruthy()
     expect(screen.queryByText('AccountSettings')).toBeNull()
     expect(screen.queryByText('GeneralSettings')).toBeNull()
@@ -71,15 +71,15 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />)
 
-    expect(screen.queryByText('API keys')).toBeNull()
-    expect(screen.queryByText('Members')).toBeNull()
-    expect(screen.getByText('Account')).toBeTruthy()
-    expect(screen.getByText('General')).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: 'API keys' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Members' })).toBeNull()
+    expect(screen.getByRole('tab', { name: 'Account' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy()
     expect(screen.getByText('AccountSettings')).toBeTruthy()
     expect(screen.queryByText('GeneralSettings')).toBeNull()
     expect(screen.queryByText('ApiKeyManager')).toBeNull()
 
-    fireEvent.click(screen.getByText('General'))
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }))
     expect(screen.getByText('GeneralSettings')).toBeTruthy()
     expect(screen.queryByText('AccountSettings')).toBeNull()
   })
@@ -89,7 +89,7 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />)
 
-    fireEvent.click(screen.getByText('Account'))
+    fireEvent.click(screen.getByRole('tab', { name: 'Account' }))
     expect(screen.getByText('AccountSettings')).toBeTruthy()
     expect(screen.queryByText('ApiKeyManager')).toBeNull()
   })
@@ -103,12 +103,12 @@ describe('SettingsPage', () => {
     expect(screen.getByText('ApiKeyManager')).toBeTruthy()
 
     // click General
-    fireEvent.click(screen.getByText('General'))
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }))
     expect(screen.getByText('GeneralSettings')).toBeTruthy()
     expect(screen.queryByText('ApiKeyManager')).toBeNull()
 
     // click Members
-    fireEvent.click(screen.getByText('Members'))
+    fireEvent.click(screen.getByRole('tab', { name: 'Members' }))
     expect(screen.getByText('UserManager')).toBeTruthy()
     expect(screen.queryByText('GeneralSettings')).toBeNull()
   })
@@ -118,11 +118,11 @@ describe('SettingsPage', () => {
 
     render(<SettingsPage />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Allowlist' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Allowlist' }))
     expect(screen.getByText('AllowlistManager')).toBeTruthy()
     expect(screen.queryByText('AccountSettings')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Export profiles' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Export profiles' }))
     expect(screen.getByText('ExportProfileManager')).toBeTruthy()
     expect(screen.queryByText('AllowlistManager')).toBeNull()
   })
@@ -135,7 +135,7 @@ describe('SettingsPage', () => {
 
     expect(screen.getByText('AllowlistManager')).toBeTruthy()
     expect(screen.queryByText('ApiKeyManager')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Allowlist' }).getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('tab', { name: 'Allowlist' }).getAttribute('aria-selected')).toBe('true')
   })
 
   it('follows a deep link while the Settings page is already mounted', () => {

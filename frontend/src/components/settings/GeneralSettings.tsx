@@ -38,17 +38,24 @@ export function GeneralSettings() {
   })
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>General</CardTitle>
-      </CardHeader>
-      <CardContent>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold text-foreground">General</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Review instance-wide ingestion and export defaults
+        </p>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Instance configuration</CardTitle>
+        </CardHeader>
+        <CardContent>
         {isLoading ? (
           <div className="flex justify-center py-8">
             <LoadingSpinner />
           </div>
         ) : error ? (
-          <p className="text-sm text-destructive">Failed to load configuration</p>
+          <p role="alert" className="text-sm text-destructive">Failed to load configuration</p>
         ) : config ? (
           <div>
             <SettingRow label="Instance name" value={config.instance_name} />
@@ -70,7 +77,8 @@ export function GeneralSettings() {
             </p>
           </div>
         ) : null}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   )
 }
