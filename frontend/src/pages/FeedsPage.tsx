@@ -93,7 +93,7 @@ export default function FeedsPage() {
   if (feedsError) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
-        <p className="text-destructive-foreground">Failed to load feeds</p>
+        <p className="text-destructive">Failed to load feeds</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {feedsError instanceof Error ? feedsError.message : 'Unknown error'}
         </p>

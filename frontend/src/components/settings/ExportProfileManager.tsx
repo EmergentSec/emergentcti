@@ -68,7 +68,7 @@ function ProfilePreview({ profile }: { profile: ExportProfile }) {
           <LoadingSpinner />
         </div>
       ) : error || !data ? (
-        <p role="alert" className="text-sm text-destructive-foreground">
+        <p role="alert" className="text-sm text-destructive">
           {apiErrorMessage(error, 'Failed to load preview')}
         </p>
       ) : (
@@ -298,7 +298,7 @@ export function ExportProfileManager() {
           <LoadingSpinner />
         </div>
       ) : error ? (
-        <p role="alert" className="text-sm text-destructive-foreground">
+        <p role="alert" className="text-sm text-destructive">
           Failed to load export profiles
         </p>
       ) : !profiles || profiles.length === 0 ? (

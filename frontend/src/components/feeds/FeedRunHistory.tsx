@@ -49,7 +49,7 @@ export function FeedRunHistory({ feedId }: FeedRunHistoryProps) {
 
   if (error) {
     return (
-      <p className="text-sm text-destructive-foreground">Failed to load run history</p>
+      <p className="text-sm text-destructive">Failed to load run history</p>
     )
   }
 

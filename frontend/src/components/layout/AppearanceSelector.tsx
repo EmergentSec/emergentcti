@@ -62,15 +62,16 @@ export function AppearanceSelector({ className }: AppearanceSelectorProps) {
             onClick={() => setPreference(opt)}
             onKeyDown={(e) => onKeyDown(e, i)}
             className={cn(
-              'flex h-8 min-w-0 items-center justify-center gap-1 rounded-md px-1.5 text-xs font-medium transition-colors',
+              'flex h-8 min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-md px-1 text-xs font-medium transition-colors',
               'focus-ring-inset',
               checked
                 ? 'bg-card text-foreground shadow-card ring-1 ring-border'
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            <OptionIcon size={14} weight={checked ? 'fill' : 'regular'} aria-hidden="true" className="shrink-0" />
-            <span className="truncate">{label}</span>
+            <OptionIcon size={12} weight={checked ? 'fill' : 'regular'} aria-hidden="true" className="shrink-0" />
+            {/* Never truncated: labels must stay fully legible at the sidebar's w-64. */}
+            <span>{label}</span>
           </button>
         );
       })}

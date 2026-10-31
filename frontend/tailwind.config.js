@@ -25,6 +25,8 @@ export default {
           action: { DEFAULT: 'var(--masthead-action)', hover: 'var(--masthead-action-hover)', foreground: 'var(--masthead-action-foreground)' },
         },
         text3: 'var(--text-3)',
+        overlay: 'var(--overlay)',
+        'toggle-thumb': 'var(--toggle-thumb)',
         border: 'var(--border)',
         borderStrong: 'var(--border-strong)',
         input: 'var(--surface-2)',

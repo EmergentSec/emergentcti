@@ -143,7 +143,7 @@ export default function ObservableDetailPage() {
   if (error || !obs) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
-        <p className="text-destructive-foreground">Failed to load observable</p>
+        <p className="text-destructive">Failed to load observable</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {error instanceof Error ? error.message : 'Observable not found'}
         </p>

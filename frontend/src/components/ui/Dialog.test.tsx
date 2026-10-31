@@ -53,11 +53,29 @@ describe('Dialog', () => {
   });
 
   it('does not steal focus back when the parent re-renders', () => {
-    render(<Harness />);
-    fireEvent.click(screen.getByText('Open'));
+    // Controlled field: every keystroke re-renders the parent, which passes a
+    // fresh inline onClose to Dialog each time.
+    let renders = 0;
+    function ControlledHarness() {
+      const [value, setValue] = useState('');
+      renders += 1;
+      return (
+        <Dialog open onClose={() => setValue('')} title="Edit">
+          <input aria-label="Value" value={value} onChange={(e) => setValue(e.target.value)} />
+          <button>Save</button>
+        </Dialog>
+      );
+    }
+    render(<ControlledHarness />);
+    const input = screen.getByLabelText('Value') as HTMLInputElement;
+    expect(document.activeElement).toBe(input);
+
     const save = screen.getByRole('button', { name: 'Save' });
     save.focus();
-    fireEvent.change(screen.getByLabelText('Value'), { target: { value: 'x' } });
+    const before = renders;
+    fireEvent.change(input, { target: { value: 'x' } });
+    expect(renders).toBeGreaterThan(before);
+    expect(input.value).toBe('x');
     expect(document.activeElement).toBe(save);
   });
 });

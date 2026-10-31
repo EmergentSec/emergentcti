@@ -11,9 +11,9 @@ const variants = {
   outline: 'border border-borderStrong bg-card text-foreground hover:bg-hover',
   ghost: 'text-muted-foreground hover:bg-hover hover:text-foreground',
   destructive: 'bg-destructive text-destructive-foreground hover:opacity-90',
-  /** Light button for use on the dark page-header band. */
+  /** Light button for the dark page-header band; light focus ring (>=16:1 on --masthead). */
   masthead:
-    'bg-masthead-action text-masthead-action-foreground hover:bg-masthead-action-hover focus-visible:ring-offset-masthead',
+    'bg-masthead-action text-masthead-action-foreground hover:bg-masthead-action-hover focus-visible:ring-masthead-action focus-visible:ring-offset-masthead',
 } as const;
 
 const sizes = {

@@ -196,7 +196,7 @@ export function AllowlistManager() {
           <LoadingSpinner />
         </div>
       ) : error ? (
-        <p role="alert" className="text-sm text-destructive-foreground">
+        <p role="alert" className="text-sm text-destructive">
           Failed to load the allowlist
         </p>
       ) : !entries || entries.length === 0 ? (

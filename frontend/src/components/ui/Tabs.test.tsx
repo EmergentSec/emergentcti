@@ -1,5 +1,6 @@
 // frontend/src/components/ui/Tabs.test.tsx
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Tabs } from './Tabs';
 
@@ -49,22 +50,49 @@ describe('Tabs keyboard support', () => {
 
   it('moves focus and selects with Arrow keys, wrapping, and Home/End', () => {
     const onChange = vi.fn();
-    render(<Tabs tabs={tabs} active="sources" onChange={onChange} />);
-    const sources = screen.getByRole('tab', { name: 'Sources' });
+    function Stateful() {
+      const [active, setActive] = useState('sources');
+      return (
+        <Tabs
+          tabs={tabs}
+          active={active}
+          onChange={(k) => {
+            onChange(k);
+            setActive(k);
+          }}
+        />
+      );
+    }
+    render(<Stateful />);
+    const tab = (name: string) => screen.getByRole('tab', { name });
+    const press = (key: string) => fireEvent.keyDown(document.activeElement as Element, { key });
 
-    fireEvent.keyDown(sources, { key: 'ArrowRight' });
-    expect(onChange).toHaveBeenLastCalledWith('raw');
-    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Raw JSON' }));
+    tab('Sources').focus();
+    press('ArrowRight');
+    expect(document.activeElement).toBe(tab('Raw JSON'));
+    expect(tab('Raw JSON').getAttribute('aria-selected')).toBe('true');
+    expect(tab('Raw JSON').tabIndex).toBe(0);
 
-    fireEvent.keyDown(sources, { key: 'ArrowLeft' });
+    press('ArrowRight');
+    expect(document.activeElement).toBe(tab('History'));
+
+    press('ArrowRight'); // wraps
+    expect(document.activeElement).toBe(tab('Sources'));
+
+    press('ArrowLeft'); // wraps back
+    expect(document.activeElement).toBe(tab('History'));
     expect(onChange).toHaveBeenLastCalledWith('history');
 
-    fireEvent.keyDown(sources, { key: 'End' });
+    press('Home');
+    expect(document.activeElement).toBe(tab('Sources'));
+    expect(tab('Sources').getAttribute('aria-selected')).toBe('true');
+
+    press('End');
+    expect(document.activeElement).toBe(tab('History'));
     expect(onChange).toHaveBeenLastCalledWith('history');
 
     onChange.mockClear();
-    fireEvent.keyDown(sources, { key: 'Home' });
-    expect(onChange).not.toHaveBeenCalled(); // already selected
-    expect(document.activeElement).toBe(sources);
+    press('End'); // already selected
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

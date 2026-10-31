@@ -149,7 +149,7 @@ describe('ObservablesPage', () => {
     expect(screen.queryByTestId('observable-table')).toBeNull()
   })
 
-  it('opens the create dialog when routed with ?create=1 as admin (topbar Add Observable)', () => {
+  it('opens the create dialog when routed with ?create=1 as admin (page-header Add Observable)', () => {
     mockAuth.isAdmin = true
     mockUseObservables.mockReturnValue({ data: DEFAULT_DATA, isLoading: false, error: null })
     render(
@@ -158,6 +158,17 @@ describe('ObservablesPage', () => {
       </MemoryRouter>,
     )
     expect(screen.getByTestId('observable-form')).toBeTruthy()
+  })
+
+  it('has no in-page Add Observable button (it lives in the page header)', () => {
+    mockAuth.isAdmin = true
+    mockUseObservables.mockReturnValue({ data: DEFAULT_DATA, isLoading: false, error: null })
+    render(
+      <MemoryRouter initialEntries={['/observables']}>
+        <ObservablesPage />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByRole('button', { name: /add observable/i })).toBeNull()
   })
 
   it('does not open the create dialog from ?create=1 for non-admins', () => {

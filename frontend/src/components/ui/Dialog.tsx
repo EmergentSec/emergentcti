@@ -54,7 +54,7 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Overlay */}
       <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-[2px]"
+        className="fixed inset-0 bg-overlay backdrop-blur-[2px]"
         aria-hidden="true"
         onClick={() => onCloseRef.current()}
       />

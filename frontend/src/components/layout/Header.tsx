@@ -1,8 +1,25 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
+import { flushSync } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
-import { List, MagnifyingGlass, X } from '@phosphor-icons/react';
+import { CircleHalf, List, MagnifyingGlass, X } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
 import { EmergentLogo } from '../common/EmergentLogo';
+import { Popover } from '../ui/Popover';
+import { AppearanceSelector } from './AppearanceSelector';
+import { useMediaQuery } from './useMediaQuery';
+
+/** Tailwind `md`: the search field is always visible at and above. */
+const WIDE_SEARCH_QUERY = '(min-width: 768px)';
+
+/** Marks the app's navigation drawer so the ⌘K guard can tell it from dialogs. */
+export const DRAWER_ATTR = 'data-app-drawer';
+
+/** Spread onto controls the mobile search overlay covers (React 18 has no `inert` prop). */
+function coveredProps(covered: boolean) {
+  return covered
+    ? ({ inert: '', 'aria-hidden': true, tabIndex: -1 } as unknown as Record<string, never>)
+    : {};
+}
 
 function isApplePlatform(): boolean {
   if (typeof navigator === 'undefined') return false;
@@ -17,6 +34,12 @@ interface HeaderProps {
   /** id of the element the menu button controls. */
   menuControls?: string;
   menuButtonRef?: RefObject<HTMLButtonElement>;
+  /** Whether the mobile navigation drawer is open. */
+  drawerOpen?: boolean;
+  /** Closes the drawer without moving focus (⌘K takes focus to search instead). */
+  onDismissDrawer?: () => void;
+  /** Show a compact Appearance button (used while the desktop sidebar is collapsed). */
+  showAppearance?: boolean;
   /** @deprecated — the shell reads useAuth() directly; kept for back-compat with App.tsx */
   username?: string;
   /** @deprecated — the shell reads useAuth() directly; kept for back-compat with App.tsx */
@@ -25,7 +48,16 @@ interface HeaderProps {
 }
 
 /** Full-width top bar: menu button, wordmark, global observable search (⌘K / Ctrl+K). */
-export function Header({ onMenuClick, menuExpanded, menuControls, menuButtonRef, className }: HeaderProps) {
+export function Header({
+  onMenuClick,
+  menuExpanded,
+  menuControls,
+  menuButtonRef,
+  drawerOpen = false,
+  onDismissDrawer,
+  showAppearance = false,
+  className,
+}: HeaderProps) {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   // Below `md` the search field collapses to an icon button.
@@ -34,15 +66,29 @@ export function Header({ onMenuClick, menuExpanded, menuControls, menuButtonRef,
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const shortcut = isApplePlatform() ? '⌘K' : 'Ctrl K';
 
+  const wideSearch = useMediaQuery(WIDE_SEARCH_QUERY);
+  const wideRef = useRef(wideSearch);
+  wideRef.current = wideSearch;
+  const drawerRef = useRef({ open: drawerOpen, dismiss: onDismissDrawer });
+  drawerRef.current = { open: drawerOpen, dismiss: onDismissDrawer };
+
+  // The mobile overlay only exists below `md`.
+  useEffect(() => {
+    if (wideSearch) setSearchOpen(false);
+  }, [wideSearch]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setSearchOpen(true);
-        // Focus after the collapsed field (if any) has been revealed.
-        requestAnimationFrame(() => inputRef.current?.focus());
-        inputRef.current?.focus();
-      }
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== 'k') return;
+      // Never pull focus out from under an open dialog.
+      if (document.querySelector(`[aria-modal="true"]:not([${DRAWER_ATTR}])`)) return;
+      e.preventDefault();
+      const { open, dismiss } = drawerRef.current;
+      if (open) dismiss?.();
+      if (!wideRef.current) setSearchOpen(true);
+      inputRef.current?.focus();
+      // Below `md` the field is revealed on the next render; focus again then.
+      requestAnimationFrame(() => inputRef.current?.focus());
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -54,7 +100,8 @@ export function Header({ onMenuClick, menuExpanded, menuControls, menuButtonRef,
   };
 
   const closeSearch = () => {
-    setSearchOpen(false);
+    // Commit first so the button is no longer inert when it takes focus.
+    flushSync(() => setSearchOpen(false));
     searchButtonRef.current?.focus();
   };
 
@@ -63,8 +110,12 @@ export function Header({ onMenuClick, menuExpanded, menuControls, menuButtonRef,
       navigate(`/observables?q=${encodeURIComponent(search.trim())}`);
       setSearchOpen(false);
     } else if (e.key === 'Escape') {
-      if (searchOpen) closeSearch();
-      else inputRef.current?.blur();
+      // The search button is md:hidden, so only return focus to it below `md`.
+      if (searchOpen && !wideSearch) closeSearch();
+      else {
+        setSearchOpen(false);
+        inputRef.current?.blur();
+      }
     }
   };
 
@@ -77,6 +128,7 @@ export function Header({ onMenuClick, menuExpanded, menuControls, menuButtonRef,
     >
       <button
         ref={menuButtonRef}
+        {...coveredProps(searchOpen)}
         type="button"
         aria-label="Toggle navigation"
         aria-expanded={menuExpanded}
@@ -87,15 +139,16 @@ export function Header({ onMenuClick, menuExpanded, menuControls, menuButtonRef,
         <List size={20} aria-hidden="true" />
       </button>
 
-      <Link to="/" className="flex min-w-0 items-center gap-2.5 rounded-md">
+      <Link to="/" {...coveredProps(searchOpen)} className="flex min-w-0 items-center gap-2.5 rounded-md">
         <EmergentLogo size={26} className="shrink-0 text-foreground" />
         <span className="truncate text-[15px] font-semibold tracking-tight text-foreground">EmergentCTI</span>
       </Link>
 
-      <div className="ml-auto flex items-center">
+      <div className="ml-auto flex items-center gap-1">
         {/* Narrow screens: icon that expands the search field over the bar */}
         <button
           ref={searchButtonRef}
+          {...coveredProps(searchOpen)}
           type="button"
           aria-label="Search"
           onClick={openSearch}
@@ -150,6 +203,29 @@ export function Header({ onMenuClick, menuExpanded, menuControls, menuButtonRef,
             </button>
           )}
         </div>
+
+        {showAppearance && (
+          <Popover
+            align="end"
+            className="w-64 p-3"
+            trigger={
+              <button
+                type="button"
+                aria-label="Appearance"
+                title="Appearance"
+                {...coveredProps(searchOpen)}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+              >
+                <CircleHalf size={18} aria-hidden="true" />
+              </button>
+            }
+          >
+            <p aria-hidden="true" className="mb-2 text-xs font-medium text-muted-foreground">
+              Appearance
+            </p>
+            <AppearanceSelector />
+          </Popover>
+        )}
       </div>
     </header>
   );

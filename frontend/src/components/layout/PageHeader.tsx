@@ -11,7 +11,13 @@ interface PageHeaderProps {
   className?: string;
 }
 
-/** Full-bleed dark page-header band (dark in both themes). */
+/** id of the page `h1`; the shell focuses it after drawer navigation. */
+export const PAGE_HEADING_ID = 'page-heading';
+
+/**
+ * Full-bleed dark page-header band (dark in both themes). Below `sm` the
+ * subtitle is visually hidden (kept for screen readers) so the title row fits.
+ */
 export function PageHeader({ title, subtitle, icon: HeaderIcon, actions, className }: PageHeaderProps) {
   return (
     <section className={cn('border-b border-masthead-border bg-masthead text-masthead-foreground', className)}>
@@ -25,8 +31,14 @@ export function PageHeader({ title, subtitle, icon: HeaderIcon, actions, classNa
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-semibold leading-tight text-masthead-foreground">{title}</h1>
-          {subtitle && <p className="mt-0.5 text-sm text-masthead-muted">{subtitle}</p>}
+          <h1
+            id={PAGE_HEADING_ID}
+            tabIndex={-1}
+            className="truncate text-xl font-semibold leading-tight text-masthead-foreground focus:outline-none"
+          >
+            {title}
+          </h1>
+          {subtitle && <p className="sr-only text-sm text-masthead-muted sm:not-sr-only sm:mt-0.5">{subtitle}</p>}
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>

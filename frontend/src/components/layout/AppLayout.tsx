@@ -5,9 +5,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '../ui/Button';
 import { getFocusable, trapTab } from '../ui/focus';
 import { EmergentLogo } from '../common/EmergentLogo';
-import { Header } from './Header';
+import { DRAWER_ATTR, Header } from './Header';
 import { Sidebar } from './Sidebar';
-import { PageHeader } from './PageHeader';
+import { PAGE_HEADING_ID, PageHeader } from './PageHeader';
 import { getPageMeta } from './navigation';
 import { DESKTOP_QUERY, useMediaQuery } from './useMediaQuery';
 
@@ -41,6 +41,22 @@ export function AppLayout(_props: AppLayoutProps) {
     menuButtonRef.current?.focus();
   }, []);
 
+  // Closing the drawer by navigating unmounts the focused link; send focus to
+  // the new page's heading instead of letting it fall to <body>.
+  const drawerOpenRef = useRef(drawerOpen);
+  drawerOpenRef.current = drawerOpen;
+  const [headingFocusTick, setHeadingFocusTick] = useState(0);
+  const closeDrawerToContent = useCallback(() => {
+    setDrawerOpen(false);
+    setHeadingFocusTick((t) => t + 1);
+  }, []);
+
+  useEffect(() => {
+    if (headingFocusTick === 0) return;
+    const target = document.getElementById(PAGE_HEADING_ID) ?? document.getElementById('main-content');
+    target?.focus();
+  }, [headingFocusTick]);
+
   const onMenuClick = () => {
     if (isDesktop) setCollapsed((c) => !c);
     else setDrawerOpen((o) => !o);
@@ -53,8 +69,8 @@ export function AppLayout(_props: AppLayoutProps) {
 
   // Navigating (including browser back/forward) closes the drawer.
   useEffect(() => {
-    setDrawerOpen(false);
-  }, [location.pathname]);
+    if (drawerOpenRef.current) closeDrawerToContent();
+  }, [location.pathname, closeDrawerToContent]);
 
   // Drawer: move focus in, trap Tab, close on Esc, lock page scroll.
   useEffect(() => {
@@ -82,6 +98,8 @@ export function AppLayout(_props: AppLayoutProps) {
 
   const meta = getPageMeta(location.pathname);
   const showSidebar = isDesktop && !collapsed;
+  // Add Observable belongs to the Observables list only (not detail pages).
+  const onObservablesList = location.pathname.replace(/\/+$/, '') === '/observables';
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -97,6 +115,9 @@ export function AppLayout(_props: AppLayoutProps) {
         menuExpanded={isDesktop ? !collapsed : drawerOpen}
         menuControls={SIDEBAR_ID}
         menuButtonRef={menuButtonRef}
+        drawerOpen={drawerOpen}
+        onDismissDrawer={() => setDrawerOpen(false)}
+        showAppearance={isDesktop && collapsed}
       />
 
       <div className="flex">
@@ -114,10 +135,15 @@ export function AppLayout(_props: AppLayoutProps) {
               subtitle={meta.subtitle}
               icon={meta.icon}
               actions={
-                isAdmin ? (
-                  <Button variant="masthead" onClick={() => navigate('/observables?create=1')}>
+                isAdmin && onObservablesList ? (
+                  <Button
+                    variant="masthead"
+                    title="Add Observable"
+                    className="w-9 px-0 sm:w-auto sm:px-3.5"
+                    onClick={() => navigate('/observables?create=1')}
+                  >
                     <Plus size={14} weight="bold" aria-hidden="true" />
-                    Add Observable
+                    <span className="sr-only sm:not-sr-only">Add Observable</span>
                   </Button>
                 ) : null
               }
@@ -134,7 +160,7 @@ export function AppLayout(_props: AppLayoutProps) {
           <div
             data-testid="drawer-backdrop"
             aria-hidden="true"
-            className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+            className="absolute inset-0 bg-overlay backdrop-blur-[2px]"
             onClick={closeDrawer}
           />
           <div
@@ -142,6 +168,7 @@ export function AppLayout(_props: AppLayoutProps) {
             role="dialog"
             aria-modal="true"
             aria-label="Navigation"
+            {...{ [DRAWER_ATTR]: '' }}
             tabIndex={-1}
             className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-card shadow-2xl focus:outline-none"
           >
@@ -157,7 +184,7 @@ export function AppLayout(_props: AppLayoutProps) {
                 <X size={18} aria-hidden="true" />
               </button>
             </div>
-            <Sidebar id={SIDEBAR_ID} className="min-h-0 w-full flex-1" onNavigate={() => setDrawerOpen(false)} />
+            <Sidebar id={SIDEBAR_ID} className="min-h-0 w-full flex-1" onNavigate={closeDrawerToContent} />
           </div>
         </div>
       )}

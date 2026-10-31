@@ -192,7 +192,7 @@ export function UserManager() {
           <LoadingSpinner />
         </div>
       ) : error ? (
-        <p className="text-sm text-destructive-foreground">Failed to load users</p>
+        <p className="text-sm text-destructive">Failed to load users</p>
       ) : !users || users.length === 0 ? (
         <p className="text-sm text-muted-foreground">No members found.</p>
       ) : (

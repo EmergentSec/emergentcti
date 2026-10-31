@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppLayout } from './AppLayout';
 
@@ -77,16 +77,31 @@ describe('AppLayout page header', () => {
     expect(heading().textContent).toBe(title);
   });
 
-  it('shows Add Observable for admins and routes to the create dialog', () => {
-    renderAt('/feeds');
-    fireEvent.click(screen.getByRole('button', { name: /add observable/i }));
+  it('shows Add Observable on the Observables list for admins and opens the create dialog route', () => {
+    renderAt('/observables');
+    const add = screen.getByRole('button', { name: 'Add Observable' });
+    fireEvent.click(add);
     expect(screen.getByTestId('location').textContent).toBe('/observables?create=1');
   });
 
+  it.each(['/', '/feeds', '/settings', '/observables/42'])(
+    'does not show Add Observable on %s',
+    (path) => {
+      renderAt(path);
+      expect(screen.queryByRole('button', { name: /add observable/i })).toBeNull();
+    },
+  );
+
   it('hides Add Observable for non-admins', () => {
     auth.isAdmin = false;
-    renderAt('/');
+    renderAt('/observables');
     expect(screen.queryByRole('button', { name: /add observable/i })).toBeNull();
+  });
+
+  it('gives the page heading an id and makes it programmatically focusable', () => {
+    renderAt('/feeds');
+    expect(heading().id).toBe('page-heading');
+    expect(heading().getAttribute('tabindex')).toBe('-1');
   });
 });
 
@@ -143,5 +158,70 @@ describe('AppLayout sidebar', () => {
     });
     expect(screen.queryByRole('dialog', { name: 'Navigation' })).toBeNull();
     expect(heading().textContent).toBe('Settings');
+    // Focus lands on the new page's heading, not <body>.
+    expect(document.activeElement).toBe(heading());
+  });
+
+  it('moves focus to the heading when the route changes while the drawer is open', () => {
+    setViewport(false);
+    function BackButton() {
+      const navigate = useNavigate();
+      return <button onClick={() => navigate('/feeds')}>external-nav</button>;
+    }
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <BackButton />
+        <Routes>
+          <Route path="/" element={<AppLayout />}>
+            <Route index element={<div>dashboard-page</div>} />
+            <Route path="feeds" element={<div>feeds-page</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle navigation' }));
+    expect(screen.getByRole('dialog', { name: 'Navigation' })).toBeTruthy();
+    // e.g. browser Back: the pathname changes without a drawer link click.
+    act(() => {
+      fireEvent.click(screen.getByText('external-nav'));
+    });
+    expect(screen.queryByRole('dialog', { name: 'Navigation' })).toBeNull();
+    expect(heading().textContent).toBe('Feeds');
+    expect(document.activeElement).toBe(heading());
+  });
+
+  it('Ctrl+K closes the open drawer and focuses search', () => {
+    setViewport(false);
+    renderAt('/');
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle navigation' }));
+    expect(screen.getByRole('dialog', { name: 'Navigation' })).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+    expect(screen.queryByRole('dialog', { name: 'Navigation' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: 'Search observables' }));
+  });
+});
+
+describe('AppLayout appearance access', () => {
+  it('keeps Appearance reachable from the top bar while the desktop sidebar is collapsed', () => {
+    renderAt('/');
+    expect(screen.getAllByRole('radiogroup', { name: 'Appearance' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Appearance' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle navigation' }));
+    expect(screen.queryByRole('radiogroup', { name: 'Appearance' })).toBeNull();
+
+    const trigger = screen.getByRole('button', { name: 'Appearance' });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('radiogroup', { name: 'Appearance' })).toBeTruthy();
+    expect(screen.getAllByRole('radio').map((r) => r.textContent)).toEqual(['System', 'Light', 'Dark']);
+  });
+
+  it('does not add the top-bar Appearance button below lg (it lives in the drawer)', () => {
+    setViewport(false);
+    renderAt('/');
+    expect(screen.queryByRole('button', { name: 'Appearance' })).toBeNull();
   });
 });

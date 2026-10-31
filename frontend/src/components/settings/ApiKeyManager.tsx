@@ -115,7 +115,7 @@ export function ApiKeyManager() {
           <LoadingSpinner />
         </div>
       ) : error ? (
-        <p className="text-sm text-destructive-foreground">Failed to load API keys</p>
+        <p className="text-sm text-destructive">Failed to load API keys</p>
       ) : !keys || keys.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No API keys found. Create one to get started.

@@ -8,7 +8,6 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Pagination } from '@/components/common/Pagination'
 import { Card, CardContent } from '@/components/ui/Card'
-import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { Dialog } from '@/components/ui/Dialog'
 import { ObservableFilters } from '@/components/observables/ObservableFilters'
@@ -38,7 +37,7 @@ export default function ObservablesPage() {
   const { isAdmin } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // The topbar "Add Observable" button routes here with ?create=1 — open the
+  // The page-header "Add Observable" button routes here with ?create=1 — open the
   // create dialog once (admin only), then strip the param so it doesn't re-fire.
   useEffect(() => {
     if (searchParams.get('create') === '1') {
@@ -72,19 +71,8 @@ export default function ObservablesPage() {
   return (
     <div className="space-y-4">
       {/* ── Filter toolbar ─────────────────────────────────────────── */}
-      <div className="flex items-start gap-3">
-        <div className="flex-1">
-          <ObservableFilters filters={filters} onChange={setFilters} />
-        </div>
-        {isAdmin && (
-          <Button
-            onClick={() => setShowCreateDialog(true)}
-            className="mt-0 shrink-0 self-start h-9"
-          >
-            Add Observable
-          </Button>
-        )}
-      </div>
+      {/* Admins add observables from the page-header "Add Observable" button. */}
+      <ObservableFilters filters={filters} onChange={setFilters} />
 
       {/* ── Results card ───────────────────────────────────────────── */}
       {isLoading ? (
@@ -93,7 +81,7 @@ export default function ObservablesPage() {
         </div>
       ) : error ? (
         <div className="flex flex-col items-center justify-center py-24 text-center">
-          <p className="text-destructive-foreground">Failed to load observables</p>
+          <p className="text-destructive">Failed to load observables</p>
           <p className="mt-1 text-sm text-muted-foreground">
             {error instanceof Error ? error.message : 'Unknown error'}
           </p>

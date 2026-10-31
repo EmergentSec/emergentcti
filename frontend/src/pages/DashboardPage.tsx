@@ -20,7 +20,7 @@ export default function DashboardPage() {
   if (error || !data) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
-        <p className="text-destructive-foreground">Failed to load dashboard stats</p>
+        <p className="text-destructive">Failed to load dashboard stats</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {error instanceof Error ? error.message : 'Unknown error'}
         </p>

@@ -32,7 +32,7 @@ export function Toggle({ checked, onChange, disabled = false, label, className }
       >
         <span
           className={cn(
-            'pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
+            'pointer-events-none block h-4 w-4 rounded-full bg-toggle-thumb shadow-sm transition-transform',
             checked ? 'translate-x-4' : 'translate-x-0',
           )}
         />

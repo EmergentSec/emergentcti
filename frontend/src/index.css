@@ -72,9 +72,14 @@
     --cat-yellow: #a87a06;
 
     --conf-critical: #c8323a;
-    --conf-high: #d06a08;
-    --conf-medium: #a87a06;
+    /* >=4.5:1 on card and surface-2 (high 5.01 / 4.63, medium 5.38 / 4.98) */
+    --conf-high: #b25500;
+    --conf-medium: #8a6400;
     --conf-low: #6b7585;
+
+    /* Modal / drawer scrim and switch thumb */
+    --overlay: rgb(16 24 40 / 0.5);
+    --toggle-thumb: #ffffff;
 
     --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04);
     --radius: 0.875rem;
@@ -140,6 +145,9 @@
     --conf-high: #ff8a3d;
     --conf-medium: #ffc24b;
     --conf-low: #8b95a6;
+
+    --overlay: rgb(3 6 14 / 0.65);
+    --toggle-thumb: #f2f5fc;
 
     --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25);
   }

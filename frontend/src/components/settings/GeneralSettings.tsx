@@ -48,7 +48,7 @@ export function GeneralSettings() {
             <LoadingSpinner />
           </div>
         ) : error ? (
-          <p className="text-sm text-destructive-foreground">Failed to load configuration</p>
+          <p className="text-sm text-destructive">Failed to load configuration</p>
         ) : config ? (
           <div>
             <SettingRow label="Instance name" value={config.instance_name} />
