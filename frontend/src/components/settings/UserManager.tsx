@@ -8,6 +8,8 @@ import { Select } from '@/components/ui/Select'
 import { Dialog } from '@/components/ui/Dialog'
 import { Badge } from '@/components/ui/Badge'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { EmptyState } from '@/components/common/EmptyState'
+import { Card } from '@/components/ui/Card'
 import { formatRelativeTime } from '@/lib/utils'
 import type { User, UserRole } from '@/types/user'
 
@@ -20,28 +22,11 @@ function getInitials(username: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase()
 }
 
-/** Deterministic background colour from username. */
-const AVATAR_PALETTE = [
-  'bg-cat-blue',
-  'bg-cat-green',
-  'bg-cat-purple',
-  'bg-cat-orange',
-  'bg-cat-pink',
-] as const
-
-function avatarBg(username: string): string {
-  let h = 0
-  for (let i = 0; i < username.length; i++) {
-    h = ((h * 31) + username.charCodeAt(i)) >>> 0
-  }
-  return AVATAR_PALETTE[h % AVATAR_PALETTE.length]
-}
-
 function UserAvatar({ username }: { username: string }) {
   return (
     <div
       aria-hidden="true"
-      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ${avatarBg(username)}`}
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-sm font-semibold text-primary"
     >
       {getInitials(username)}
     </div>
@@ -174,9 +159,9 @@ export function UserManager() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-foreground">Members</h2>
+          <h2 className="text-base font-semibold text-foreground">Members</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Manage who can access this instance
           </p>
@@ -194,14 +179,21 @@ export function UserManager() {
       ) : error ? (
         <p className="text-sm text-destructive">Failed to load users</p>
       ) : !users || users.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No members found.</p>
+        <Card>
+          <EmptyState
+            title="No members found"
+            description="Invite a member to grant access to this instance."
+          >
+            <Button onClick={() => setShowCreate(true)}>Invite member</Button>
+          </EmptyState>
+        </Card>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
+        <Card className="overflow-hidden">
           {users.map((user, idx) => (
             <div
               key={user.id}
               className={[
-                'flex items-center gap-4 px-5 py-3.5 transition-colors hover:bg-muted/30',
+                'flex flex-col items-stretch gap-3 px-4 py-4 transition-colors hover:bg-hover sm:flex-row sm:items-center sm:gap-4 sm:px-5',
                 !user.is_active ? 'opacity-60' : '',
                 idx < users.length - 1 ? 'border-b border-border' : '',
               ]
@@ -227,18 +219,18 @@ export function UserManager() {
               {/* Role chip — real backend roles only: admin | user */}
               <Badge
                 variant={user.role === 'admin' ? 'default' : 'secondary'}
-                className={user.role === 'admin' ? 'bg-brand text-brand-foreground' : ''}
+                className="self-start"
               >
                 {user.role === 'admin' ? 'Admin' : 'User'}
               </Badge>
 
               {/* Last login */}
-              <span className="w-20 shrink-0 text-right font-mono text-xs text-muted-foreground">
+              <span className="shrink-0 font-mono text-xs text-muted-foreground sm:w-20 sm:text-right">
                 {user.last_login_at ? formatRelativeTime(user.last_login_at) : 'Never'}
               </span>
 
               {/* Actions */}
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="flex shrink-0 flex-wrap items-center gap-1">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -274,7 +266,7 @@ export function UserManager() {
               </div>
             </div>
           ))}
-        </div>
+        </Card>
       )}
 
       {/* Invite / Create User Dialog */}

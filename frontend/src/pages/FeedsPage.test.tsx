@@ -164,10 +164,10 @@ describe('FeedsPage — summary cards', () => {
 describe('FeedsPage — segmented filter', () => {
   it('renders all 4 filter segments', () => {
     renderPage()
-    expect(screen.getByRole('button', { name: 'All' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'API' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'File' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Scraper' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'All' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'API' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'File' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Scraper' })).toBeTruthy()
   })
 
   it('shows all feeds by default', () => {
@@ -177,7 +177,7 @@ describe('FeedsPage — segmented filter', () => {
 
   it('selecting "API" filters to only api feeds', () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: 'API' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'API' }))
     const cards = screen.getAllByTestId('feed-card')
     expect(cards).toHaveLength(2)
     cards.forEach((card) =>
@@ -187,7 +187,7 @@ describe('FeedsPage — segmented filter', () => {
 
   it('selecting "File" filters to file feeds only', () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: 'File' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'File' }))
     const cards = screen.getAllByTestId('feed-card')
     expect(cards).toHaveLength(1)
     expect(cards[0].getAttribute('data-feed-type')).toBe('file')
@@ -195,15 +195,15 @@ describe('FeedsPage — segmented filter', () => {
 
   it('selecting "Scraper" shows empty state when no scraper feeds', () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: 'Scraper' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Scraper' }))
     expect(screen.queryAllByTestId('feed-card')).toHaveLength(0)
     expect(screen.getByText(/no scraper feeds/i)).toBeTruthy()
   })
 
   it('switching back to "All" restores full list', () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: 'API' }))
-    fireEvent.click(screen.getByRole('button', { name: 'All' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'API' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'All' }))
     expect(screen.getAllByTestId('feed-card')).toHaveLength(3)
   })
 })
@@ -218,6 +218,16 @@ describe('FeedsPage — Add Feed', () => {
     renderPage()
     expect(screen.queryByTestId('dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /add feed/i }))
+    expect(screen.getByTestId('dialog')).toBeTruthy()
+    expect(screen.getByTestId('feed-form')).toBeTruthy()
+  })
+
+  it('opens the create dialog from the ?create=1 deep link', () => {
+    render(
+      <MemoryRouter initialEntries={['/feeds?create=1']}>
+        <FeedsPage />
+      </MemoryRouter>,
+    )
     expect(screen.getByTestId('dialog')).toBeTruthy()
     expect(screen.getByTestId('feed-form')).toBeTruthy()
   })

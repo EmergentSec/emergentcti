@@ -85,8 +85,7 @@ describe('FeedCard', () => {
 
   it('renders failure status line', () => {
     render(<FeedCard feed={mockFeed} />)
-    // Status display for 'failure' is 'Failed'
-    expect(screen.getByText(/failed/i)).toBeTruthy()
+    expect(screen.getByText('Error')).toBeTruthy()
   })
 
   it('Run now button calls useTriggerFeed.mutate with feed id', () => {
@@ -112,10 +111,11 @@ describe('FeedCard', () => {
     const error = new AxiosError('Request failed with status code 409')
     error.response = { status: 409, data: { detail } } as AxiosResponse
     mockDeleteMutate.mockImplementation((_id, callbacks) => callbacks.onError(error))
-    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
     render(<FeedCard feed={{ ...mockFeed, is_preconfigured: false }} />)
     fireEvent.click(screen.getByRole('button', { name: 'Feed options' }))
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    expect(mockDeleteMutate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete feed' }))
     expect(mockDeleteMutate).toHaveBeenCalledWith('1', expect.anything())
     expect(mockToast).toHaveBeenCalledWith(detail, 'error')
   })

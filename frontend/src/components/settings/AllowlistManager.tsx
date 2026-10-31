@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { EmptyState } from '@/components/common/EmptyState'
 import { apiErrorMessage, apiErrorStatus } from '@/lib/apiError'
 import {
   REASON_MAX_LENGTH,
@@ -144,9 +145,9 @@ export function AllowlistManager() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-foreground">Allowlist</h2>
+          <h2 className="text-base font-semibold text-foreground">Allowlist</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Keep known-good values out of every export without deleting them
           </p>
@@ -200,11 +201,15 @@ export function AllowlistManager() {
           Failed to load the allowlist
         </p>
       ) : !entries || entries.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No allowlist entries. Every observable is eligible for export.
-        </p>
+        <Card>
+          <EmptyState
+            title="No allowlist entries"
+            description="Every observable is currently eligible for export."
+          />
+        </Card>
       ) : (
-        <Table>
+        <Card className="overflow-hidden">
+          <Table className="min-w-[720px]">
           <TableHeader>
             <TableRow>
               <TableHead>KIND</TableHead>
@@ -249,7 +254,8 @@ export function AllowlistManager() {
               </TableRow>
             ))}
           </TableBody>
-        </Table>
+          </Table>
+        </Card>
       )}
 
       {/* Create dialog */}

@@ -68,9 +68,15 @@ export function AccountSettings() {
 
   return (
     <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold text-foreground">Account</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Review your account details and update your password
+        </p>
+      </div>
       <Card>
         <CardHeader>
-          <CardTitle>Account</CardTitle>
+          <CardTitle>Profile</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between border-b border-border py-3">
@@ -81,7 +87,6 @@ export function AccountSettings() {
             <p className="text-sm text-muted-foreground">Role</p>
             <Badge
               variant={user.role === 'admin' ? 'default' : 'secondary'}
-              className={user.role === 'admin' ? 'bg-brand text-brand-foreground' : ''}
             >
               {user.role === 'admin' ? 'Admin' : 'User'}
             </Badge>

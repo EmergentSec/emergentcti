@@ -18,6 +18,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { EmptyState } from '@/components/common/EmptyState'
 import { apiErrorMessage, apiErrorStatus } from '@/lib/apiError'
 import {
   PROFILE_DESCRIPTION_MAX_LENGTH,
@@ -61,7 +62,7 @@ function ProfilePreview({ profile }: { profile: ExportProfile }) {
   return (
     <section
       aria-label={`Preview of ${profile.name}`}
-      className="mt-4 rounded-md border border-border bg-surface2 p-4"
+      className="mt-4 rounded-xl border border-border bg-surface2 p-4"
     >
       {isLoading ? (
         <div className="flex justify-center py-4">
@@ -258,9 +259,9 @@ export function ExportProfileManager() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-foreground">Export profiles</h2>
+          <h2 className="text-base font-semibold text-foreground">Export profiles</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Saved export filters with a stable download URL, shared by everyone on this instance
           </p>
@@ -302,7 +303,14 @@ export function ExportProfileManager() {
           Failed to load export profiles
         </p>
       ) : !profiles || profiles.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No export profiles yet.</p>
+        <Card>
+          <EmptyState
+            title="No export profiles yet."
+            description="Save a filter set to create a stable download URL."
+          >
+            {isAdmin && <Button onClick={openCreate}>New profile</Button>}
+          </EmptyState>
+        </Card>
       ) : (
         <ul className="space-y-3">
           {profiles.map((profile) => {
@@ -319,7 +327,7 @@ export function ExportProfileManager() {
                         </p>
                       )}
                     </div>
-                    <div className="flex shrink-0 flex-wrap items-center gap-1">
+                    <div className="flex w-full flex-wrap items-center gap-1 sm:w-auto sm:justify-end">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -346,8 +354,8 @@ export function ExportProfileManager() {
                           'inline-flex items-center justify-center font-medium transition-colors',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                           'focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                          'hover:bg-accent hover:text-accent-foreground',
-                          'h-8 rounded-sm px-3 text-xs',
+                          'border border-borderStrong bg-card text-foreground hover:bg-hover',
+                          'h-8 rounded-lg px-3 text-xs',
                         )}
                       >
                         <DownloadSimple size={14} className="mr-1.5" />
@@ -431,7 +439,7 @@ export function ExportProfileManager() {
             error={formErrors.description}
             aria-invalid={formErrors.description ? true : undefined}
           />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Select
               id="profile-format"
               label="Format"
