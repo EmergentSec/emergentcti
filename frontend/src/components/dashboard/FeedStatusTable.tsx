@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Table, TableBody, TableCell, TableRow } from '@/components/ui/Table';
 import { compactNumber } from '@/lib/dashboardFormat';
 import { formatRelativeTime } from '@/lib/utils';
 import type { FeedHealth } from '@/types/dashboard';
@@ -49,29 +50,29 @@ export function FeedStatusTable({ feeds }: FeedStatusTableProps) {
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <table className="w-full text-[13px]">
-          <tbody>
+        <Table className="text-sm">
+          <TableBody>
             {feeds.map((feed) => (
-              <tr
+              <TableRow
                 key={feed.id}
-                className="flex items-center gap-3 border-t border-border px-5 py-2.5 hover:bg-hover"
+                className="hover:bg-hover"
               >
-                <td className="flex-none">
+                <TableCell className="w-8 pl-5 pr-0">
                   <StatusDot status={feed.last_run_status} />
-                </td>
-                <td className="min-w-0 flex-1 truncate font-medium text-foreground">
+                </TableCell>
+                <TableCell className="max-w-0 truncate font-medium text-foreground">
                   {feed.name}
-                </td>
-                <td className="flex-none font-mono text-[12px] text-muted-foreground">
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-right font-mono text-xs text-muted-foreground">
                   {compactNumber(feed.observable_count)}
-                </td>
-                <td className="flex-none text-[12px] text-muted-foreground">
+                </TableCell>
+                <TableCell className="whitespace-nowrap pr-5 text-right text-xs text-muted-foreground">
                   {formatRelativeTime(feed.last_run_at)}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </CardContent>
     </Card>
   );

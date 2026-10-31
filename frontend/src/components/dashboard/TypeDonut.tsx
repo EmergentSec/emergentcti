@@ -1,6 +1,6 @@
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
-import { Card, CardContent, CardHeader } from '@/components/ui/Card'
-import { pct } from '@/lib/dashboardFormat'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
+import { compactNumber, pct } from '@/lib/dashboardFormat'
 import { typeLabels } from '@/lib/utils'
 
 interface TypeDonutProps {
@@ -48,14 +48,19 @@ export function TypeDonut({ byType, total }: TypeDonutProps) {
 
   return (
     <Card>
-      <CardHeader className="pb-2 p-5">
-        <h3 className="text-base font-semibold text-foreground">Observable types</h3>
-        <p className="text-[12px] text-muted-foreground">By indicator class</p>
+      <CardHeader className="pb-2">
+        <CardTitle>Observable types</CardTitle>
+        <CardDescription>By indicator class</CardDescription>
       </CardHeader>
       <CardContent className="p-5 pt-0">
-        <div className="flex items-center gap-6">
+        <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)] items-center gap-4">
           {/* Donut chart with center label */}
-          <div className="relative h-[180px] w-[180px] shrink-0">
+          <div
+            className="relative aspect-square w-full max-w-[170px] justify-self-center"
+            role="img"
+            aria-label={`${total.toLocaleString()} total observables by type`}
+            title={`${total.toLocaleString()} total observables`}
+          >
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -78,8 +83,8 @@ export function TypeDonut({ byType, total }: TypeDonutProps) {
             </ResponsiveContainer>
             {/* Center label — positioned absolutely over the chart */}
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <span className="font-mono text-[20px] font-extrabold leading-none text-foreground">
-                {total.toLocaleString()}
+              <span className="max-w-[5rem] truncate font-mono text-lg font-bold leading-none text-foreground">
+                {compactNumber(total)}
               </span>
               <span className="mt-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                 total

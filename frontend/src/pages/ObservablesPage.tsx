@@ -7,7 +7,8 @@ import { useToast } from '@/contexts/ToastContext'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Pagination } from '@/components/common/Pagination'
-import { Card, CardContent } from '@/components/ui/Card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { Dialog } from '@/components/ui/Dialog'
 import { ObservableFilters } from '@/components/observables/ObservableFilters'
@@ -28,6 +29,7 @@ export default function ObservablesPage() {
     size: 10,
     sort: 'last_seen',
     order: 'desc',
+    q: undefined,
   })
   const [showCreateDialog, setShowCreateDialog] = useState(false)
 
@@ -40,6 +42,11 @@ export default function ObservablesPage() {
   // The page-header "Add Observable" button routes here with ?create=1 — open the
   // create dialog once (admin only), then strip the param so it doesn't re-fire.
   useEffect(() => {
+    const query = searchParams.get('q')?.trim() || undefined
+    setFilters((current) =>
+      current.q === query ? current : { ...current, q: query, page: 1 },
+    )
+
     if (searchParams.get('create') === '1') {
       if (isAdmin) setShowCreateDialog(true)
       const next = new URLSearchParams(searchParams)
@@ -47,6 +54,14 @@ export default function ObservablesPage() {
       setSearchParams(next, { replace: true })
     }
   }, [searchParams, isAdmin, setSearchParams])
+
+  const handleFilterChange = (next: Filters) => {
+    setFilters(next)
+    const params = new URLSearchParams(searchParams)
+    if (next.q) params.set('q', next.q)
+    else params.delete('q')
+    setSearchParams(params, { replace: true })
+  }
 
   /** Update filter fields and reset to page 1 */
   const updateFilters = (partial: Partial<Filters>) => {
@@ -72,7 +87,7 @@ export default function ObservablesPage() {
     <div className="space-y-4">
       {/* ── Filter toolbar ─────────────────────────────────────────── */}
       {/* Admins add observables from the page-header "Add Observable" button. */}
-      <ObservableFilters filters={filters} onChange={setFilters} />
+      <ObservableFilters filters={filters} onChange={handleFilterChange} />
 
       {/* ── Results card ───────────────────────────────────────────── */}
       {isLoading ? (
@@ -80,46 +95,47 @@ export default function ObservablesPage() {
           <LoadingSpinner size="lg" />
         </div>
       ) : error ? (
-        <div className="flex flex-col items-center justify-center py-24 text-center">
-          <p className="text-destructive">Failed to load observables</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {error instanceof Error ? error.message : 'Unknown error'}
-          </p>
-        </div>
+        <EmptyState
+          className="[&_h3]:text-destructive"
+          title="Failed to load observables"
+          description={error instanceof Error ? error.message : 'Unknown error'}
+        />
       ) : (
         <>
           <Card>
             {/* Card header: count (left) + sort controls (right) */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <span className="font-mono text-sm font-semibold tabular-nums">
+            <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 border-b border-border py-4">
+              <CardTitle className="font-mono text-sm tabular-nums">
                 {data?.total ?? 0} observables
-              </span>
+              </CardTitle>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-muted-foreground select-none">Sort</span>
                 <Select
                   aria-label="Sort"
                   options={SORT_OPTIONS}
                   value={filters.sort ?? 'last_seen'}
                   onChange={(e) => updateFilters({ sort: e.target.value })}
-                  className="w-36 h-8 text-xs"
+                  className="h-9 w-36 text-xs"
                 />
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="default"
                   aria-label="Toggle sort order"
                   onClick={() =>
                     updateFilters({ order: filters.order === 'asc' ? 'desc' : 'asc' })
                   }
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-9 px-0 text-muted-foreground"
                 >
                   {filters.order === 'asc' ? (
                     <SortAscending size={16} weight="bold" />
                   ) : (
                     <SortDescending size={16} weight="bold" />
                   )}
-                </button>
+                </Button>
               </div>
-            </div>
+            </CardHeader>
 
             {/* Table or empty state */}
             <CardContent className="p-0">

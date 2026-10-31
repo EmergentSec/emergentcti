@@ -11,10 +11,12 @@ import {
   Trash,
 } from '@phosphor-icons/react'
 import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { ConfidenceMeter } from '@/components/common/ConfidenceMeter'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table'
 import { useDeleteObservable } from '@/hooks/useObservables'
 import { useAuth } from '@/contexts/AuthContext'
-import { typeLabels, formatRelativeTime } from '@/lib/utils'
+import { typeColors, typeLabels, formatRelativeTime } from '@/lib/utils'
 import type { Observable, ObservableSource, ObservableType } from '@/types/observable'
 
 interface ObservableTableProps {
@@ -34,62 +36,15 @@ const TYPE_ICONS: Record<string, Icon> = {
   'command-line': TerminalWindow,
 }
 
-// CSS variable for each type's categorical token
-const TYPE_CAT_VAR: Record<string, string> = {
-  'ip-addr': 'var(--cat-blue)',
-  'domain-name': 'var(--cat-purple)',
-  'url': 'var(--cat-green)',
-  'file-hash': 'var(--cat-orange)',
-  'email-addr': 'var(--cat-pink)',
-  'command-line': 'var(--cat-yellow)',
-}
-
 function TypeChip({ type }: { type: ObservableType }) {
   const Icon = TYPE_ICONS[type]
-  const catColor = TYPE_CAT_VAR[type] ?? 'var(--cat-blue)'
   const label = typeLabels[type] ?? type
 
   return (
-    <span
-      className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap"
-      style={{
-        background: `color-mix(in srgb, ${catColor} 14%, transparent)`,
-        color: catColor,
-      }}
-    >
+    <Badge variant="outline" className={typeColors[type]}>
       {Icon && <Icon size={12} weight="bold" />}
       {label}
-    </span>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Confidence band helpers
-// ---------------------------------------------------------------------------
-
-function getBand(score: number): { label: string; color: string } {
-  if (score >= 80) return { label: 'Critical', color: 'var(--conf-critical)' }
-  if (score >= 60) return { label: 'High', color: 'var(--conf-high)' }
-  if (score >= 40) return { label: 'Medium', color: 'var(--conf-medium)' }
-  return { label: 'Low', color: 'var(--conf-low)' }
-}
-
-function ConfidenceBar({ score }: { score: number }) {
-  const { label, color } = getBand(score)
-
-  return (
-    <div className="flex items-center gap-2">
-      <div className="h-1.5 w-16 flex-shrink-0 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${score}%`, background: color }}
-        />
-      </div>
-      <span className="font-mono text-xs tabular-nums" style={{ color }}>
-        {score}
-      </span>
-      <span className="text-xs" style={{ color }}>{label}</span>
-    </div>
+    </Badge>
   )
 }
 
@@ -100,9 +55,9 @@ function ConfidenceBar({ score }: { score: number }) {
 function SourceChips({ sources }: { sources: ObservableSource[] }) {
   if (sources.length === 0) {
     return (
-      <span className="inline-flex items-center rounded border border-border px-1.5 py-0.5 text-xs text-muted-foreground">
+      <Badge variant="outline" className="text-muted-foreground">
         Manual
-      </span>
+      </Badge>
     )
   }
 
@@ -112,17 +67,14 @@ function SourceChips({ sources }: { sources: ObservableSource[] }) {
   return (
     <span className="inline-flex flex-wrap gap-1">
       {shown.map((s) => (
-        <span
-          key={s.feed_id}
-          className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-xs"
-        >
+        <Badge key={s.feed_id} variant="secondary">
           {s.feed_name}
-        </span>
+        </Badge>
       ))}
       {overflowCount > 0 && (
-        <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+        <Badge variant="secondary">
           +{overflowCount}
-        </span>
+        </Badge>
       )}
     </span>
   )
@@ -190,7 +142,7 @@ export function ObservableTable({ observables }: ObservableTableProps) {
 
             {/* CONFIDENCE */}
             <TableCell>
-              <ConfidenceBar score={obs.confidence_score} />
+              <ConfidenceMeter score={obs.confidence_score} />
             </TableCell>
 
             {/* SOURCES */}
@@ -206,8 +158,11 @@ export function ObservableTable({ observables }: ObservableTableProps) {
             {/* DELETE — admin-only, hover-only, stops propagation */}
             <TableCell className="text-right">
               {isAdmin && (
-                <button
-                  className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-muted-foreground hover:text-destructive focus:opacity-100"
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-8 px-0 text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus:opacity-100 group-hover:opacity-100"
                   aria-label={`Delete ${obs.value}`}
                   disabled={deleteObservable.isPending}
                   onClick={(e) => {
@@ -217,7 +172,7 @@ export function ObservableTable({ observables }: ObservableTableProps) {
                   }}
                 >
                   <Trash size={14} />
-                </button>
+                </Button>
               )}
             </TableCell>
 

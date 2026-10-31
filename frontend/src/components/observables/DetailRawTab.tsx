@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Check, Copy } from '@phosphor-icons/react'
+import { Button } from '@/components/ui/Button'
 import type { Observable } from '@/types/observable'
 
 interface DetailRawTabProps {
@@ -27,18 +28,21 @@ export function DetailRawTab({ observable }: DetailRawTabProps) {
         <span className="font-mono text-xs text-muted-foreground">
           GET /api/v1/observables/:id
         </span>
-        <button
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
           onClick={handleCopy}
           aria-label="Copy JSON"
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-hover hover:text-foreground transition-colors"
+          className="text-muted-foreground"
         >
           {copied ? <Check size={13} weight="bold" /> : <Copy size={13} />}
           {copied ? 'Copied' : 'Copy'}
-        </button>
+        </Button>
       </div>
 
       {/* Scrollable JSON block */}
-      <div className="rounded-lg bg-surface2 dark:bg-surface3 overflow-auto p-4 max-h-[28rem]">
+      <div className="max-h-[28rem] overflow-auto rounded-lg border border-border bg-surface2 p-4">
         <pre className="font-mono text-xs leading-relaxed text-foreground whitespace-pre">
           {json}
         </pre>

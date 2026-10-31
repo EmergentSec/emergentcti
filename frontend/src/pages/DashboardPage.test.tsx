@@ -24,7 +24,9 @@ vi.mock('@/hooks/useDashboard', () => ({
 describe('DashboardPage', () => {
   it('renders the redesigned sections', () => {
     render(<MemoryRouter><DashboardPage /></MemoryRouter>);
-    expect(screen.getAllByText('1,482,930').length).toBeGreaterThan(0); // KPI + donut center
+    expect(screen.getByText('1,482,930')).toBeTruthy(); // full KPI value
+    expect(screen.getByRole('img', { name: '1,482,930 total observables by type' })).toBeTruthy();
+    expect(screen.getByText('1.48M')).toBeTruthy(); // compact donut centre cannot overflow
     expect(screen.getByText('Ingestion volume')).toBeTruthy();    // chart card
     expect(screen.getByText('Observable types')).toBeTruthy();    // donut card
     expect(screen.getByText('Confidence distribution')).toBeTruthy();

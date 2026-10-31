@@ -11,29 +11,25 @@ interface KpiCardProps {
   label: string
   value: string
   icon: React.ReactNode
-  iconBg: string
-  iconColor: string
+  iconTone: string
   subtitle?: React.ReactNode
 }
 
-function KpiCard({ label, value, icon, iconBg, iconColor, subtitle }: KpiCardProps) {
+function KpiCard({ label, value, icon, iconTone, subtitle }: KpiCardProps) {
   return (
     <Card>
       <CardContent className="p-5">
         <div className="flex items-start justify-between">
-          <p className="text-[13px] text-muted-foreground">{label}</p>
-          <div
-            className="flex h-8 w-8 items-center justify-center rounded-lg"
-            style={{ background: iconBg, color: iconColor }}
-          >
+          <p className="text-sm text-muted-foreground">{label}</p>
+          <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${iconTone}`}>
             {icon}
           </div>
         </div>
-        <p className="mt-2 font-mono text-[26px] font-extrabold leading-none tracking-tight text-foreground">
+        <p className="mt-3 font-mono text-2xl font-bold leading-none tracking-tight text-foreground">
           {value}
         </p>
         {subtitle && (
-          <div className="mt-1.5 text-[12px]">{subtitle}</div>
+          <div className="mt-2 text-xs">{subtitle}</div>
         )}
       </CardContent>
     </Card>
@@ -77,13 +73,12 @@ export function KpiCards({ stats }: KpiCardsProps) {
     )
 
   return (
-    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <KpiCard
         label="Total observables"
         value={total_observables.toLocaleString()}
         icon={<CrosshairSimple size={16} weight="bold" />}
-        iconBg="color-mix(in srgb, var(--brand) 20%, transparent)"
-        iconColor="var(--brand)"
+        iconTone="bg-primary-soft text-primary"
         subtitle={
           <span className="text-muted-foreground">indicators tracked</span>
         }
@@ -92,8 +87,7 @@ export function KpiCards({ stats }: KpiCardsProps) {
         label="Active feeds"
         value={`${feeds_enabled} / ${total_feeds}`}
         icon={<Rss size={16} weight="bold" />}
-        iconBg="color-mix(in srgb, var(--cat-blue) 20%, transparent)"
-        iconColor="var(--cat-blue)"
+        iconTone="bg-cat-blue/10 text-cat-blue"
         subtitle={
           <span className="text-muted-foreground">
             {total_feeds - feeds_enabled} disabled
@@ -104,16 +98,14 @@ export function KpiCards({ stats }: KpiCardsProps) {
         label="Ingested (24h)"
         value={last_24h_ingested.toLocaleString()}
         icon={<DownloadSimple size={16} weight="bold" />}
-        iconBg="color-mix(in srgb, var(--cat-green) 20%, transparent)"
-        iconColor="var(--cat-green)"
+        iconTone="bg-success-soft text-success-ink"
         subtitle={deltaSubtitle}
       />
       <KpiCard
         label="Feed errors (24h)"
         value={String(feed_errors_24h)}
         icon={<Warning size={16} weight="bold" />}
-        iconBg="color-mix(in srgb, var(--conf-critical) 20%, transparent)"
-        iconColor="var(--conf-critical)"
+        iconTone="bg-destructive-soft text-destructive-ink"
         subtitle={errorSubtitle}
       />
     </div>
