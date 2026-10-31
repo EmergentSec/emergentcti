@@ -40,14 +40,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const mql = window.matchMedia(DARK_QUERY);
     const onChange = (e: MediaQueryListEvent) => setOsDark(e.matches);
     setOsDark(mql.matches);
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    }
+    mql.addListener(onChange);
+    return () => mql.removeListener(onChange);
   }, []);
 
   // Keep other tabs in sync when the preference changes elsewhere.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === APPEARANCE_STORAGE_KEY) setPreferenceState(readPreference());
+      if (e.key === null || e.key === APPEARANCE_STORAGE_KEY) {
+        setPreferenceState(readPreference());
+      }
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);

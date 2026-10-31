@@ -17,19 +17,33 @@
     <script id="appearance-boot">
       (function () {
         var pref = 'system';
+        var currentRead = true;
         try {
           var s = localStorage.getItem('emergentcti.appearance');
           if (s === 'system' || s === 'light' || s === 'dark') {
             pref = s;
-          } else {
-            var legacy = localStorage.getItem('theme');
-            if (legacy === 'light' || legacy === 'dark') {
-              pref = legacy;
+            try {
+              localStorage.removeItem('theme');
+            } catch (e) {}
+          }
+        } catch (e) {
+          currentRead = false;
+        }
+        if (currentRead && !(s === 'system' || s === 'light' || s === 'dark')) {
+          var legacy;
+          try {
+            legacy = localStorage.getItem('theme');
+          } catch (e) {
+            legacy = null;
+          }
+          if (legacy === 'light' || legacy === 'dark') {
+            pref = legacy;
+            try {
               localStorage.setItem('emergentcti.appearance', legacy);
               localStorage.removeItem('theme');
-            }
+            } catch (e) {}
           }
-        } catch (e) {}
+        }
         var dark = pref === 'dark' ||
           (pref === 'system' && !!window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
         var root = document.documentElement;

@@ -34,19 +34,38 @@ function safeStorage(): Storage | null {
 export function readPreference(): AppearancePreference {
   const store = safeStorage();
   if (!store) return 'system';
+
   try {
     const current = store.getItem(APPEARANCE_STORAGE_KEY);
-    if (isPreference(current)) return current;
-
-    const legacy = store.getItem(LEGACY_THEME_KEY);
-    if (legacy === 'light' || legacy === 'dark') {
-      store.setItem(APPEARANCE_STORAGE_KEY, legacy);
-      store.removeItem(LEGACY_THEME_KEY);
-      return legacy;
+    if (isPreference(current)) {
+      try {
+        store.removeItem(LEGACY_THEME_KEY);
+      } catch {
+        /* stale legacy cleanup is best effort */
+      }
+      return current;
     }
   } catch {
-    /* ignore quota / access errors */
+    return 'system';
   }
+
+  let legacy: string | null;
+  try {
+    legacy = store.getItem(LEGACY_THEME_KEY);
+  } catch {
+    return 'system';
+  }
+
+  if (legacy === 'light' || legacy === 'dark') {
+    try {
+      store.setItem(APPEARANCE_STORAGE_KEY, legacy);
+      store.removeItem(LEGACY_THEME_KEY);
+    } catch {
+      /* migration writes are best effort; keep the valid legacy preference */
+    }
+    return legacy;
+  }
+
   return 'system';
 }
 
