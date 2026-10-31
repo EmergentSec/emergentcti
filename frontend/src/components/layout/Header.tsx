@@ -24,7 +24,9 @@ interface HeaderProps {
 export function Header({ className }: HeaderProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { theme, toggle } = useTheme();
+  // TEMP: replaced by the Appearance selector in the shell task.
+  const { resolvedTheme: theme, setPreference } = useTheme();
+  const toggle = () => setPreference(theme === 'dark' ? 'light' : 'dark');
   const { isAdmin } = useAuth();
   const [search, setSearch] = useState('');
 
