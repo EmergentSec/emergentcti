@@ -65,6 +65,7 @@ describe('FeedCard', () => {
     mockTriggerMutate.mockClear()
     mockDeleteMutate.mockReset()
     mockToast.mockReset()
+    vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     mockIsAdmin.isAdmin = true
@@ -86,6 +87,30 @@ describe('FeedCard', () => {
   it('renders failure status line', () => {
     render(<FeedCard feed={mockFeed} />)
     expect(screen.getByText('Error')).toBeTruthy()
+  })
+
+  it.each([
+    { label: 'daily at 25h', schedule: '0 0 * * *', ageHours: 25, expected: 'OK' },
+    { label: 'daily at 49h', schedule: '0 0 * * *', ageHours: 49, expected: 'Stale' },
+    { label: 'every 2h at 5h', schedule: '0 */2 * * *', ageHours: 5, expected: 'Stale' },
+    { label: 'no schedule at 25h', schedule: null, ageHours: 25, expected: 'Stale' },
+  ])('derives staleness from the schedule: $label', ({ schedule, ageHours, expected }) => {
+    const now = new Date('2026-06-30T12:00:00Z')
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+
+    render(
+      <FeedCard
+        feed={{
+          ...mockFeed,
+          schedule_cron: schedule,
+          last_run_at: new Date(now.getTime() - ageHours * 60 * 60 * 1000).toISOString(),
+          latest_run: { ...mockFeed.latest_run!, status: 'success' },
+        }}
+      />,
+    )
+
+    expect(screen.getByText(expected)).toBeTruthy()
   })
 
   it('Run now button calls useTriggerFeed.mutate with feed id', () => {

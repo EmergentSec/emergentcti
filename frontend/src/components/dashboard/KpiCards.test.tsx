@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, it, expect } from 'vitest';
 import { KpiCards } from './KpiCards';
 
 const stats = {
@@ -11,11 +11,21 @@ const stats = {
 } as any;
 
 describe('KpiCards', () => {
+  afterEach(cleanup);
+
   it('renders the four KPIs with real values', () => {
     render(<KpiCards stats={stats} />);
     expect(screen.getByText('1,482,930')).toBeTruthy();
     expect(screen.getByText('11 / 13')).toBeTruthy();
     expect(screen.getByText('12,408')).toBeTruthy();
     expect(screen.getByText(/AbuseIPDB/)).toBeTruthy();   // failing-feed subtitle
+  });
+
+  it('uses category ink for positive and healthy status text', () => {
+    const { rerender } = render(<KpiCards stats={stats} />);
+    expect(screen.getByText(/vs avg/).className).toContain('text-cat-ink-green');
+
+    rerender(<KpiCards stats={{ ...stats, feed_errors_24h: 0 }} />);
+    expect(screen.getByText('all healthy').className).toContain('text-cat-ink-green');
   });
 });

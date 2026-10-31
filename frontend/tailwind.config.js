@@ -37,6 +37,18 @@ export default {
           green: 'var(--cat-green)', blue: 'var(--cat-blue)', purple: 'var(--cat-purple)',
           orange: 'var(--cat-orange)', pink: 'var(--cat-pink)', yellow: 'var(--cat-yellow)',
         },
+        'cat-ink': {
+          green: 'var(--cat-green-ink)', blue: 'var(--cat-blue-ink)', purple: 'var(--cat-purple-ink)',
+          orange: 'var(--cat-orange-ink)', pink: 'var(--cat-pink-ink)', yellow: 'var(--cat-yellow-ink)',
+        },
+        'cat-soft': {
+          green: 'color-mix(in srgb, var(--cat-green) 10%, transparent)',
+          blue: 'color-mix(in srgb, var(--cat-blue) 10%, transparent)',
+          purple: 'color-mix(in srgb, var(--cat-purple) 10%, transparent)',
+          orange: 'color-mix(in srgb, var(--cat-orange) 10%, transparent)',
+          pink: 'color-mix(in srgb, var(--cat-pink) 10%, transparent)',
+          yellow: 'color-mix(in srgb, var(--cat-yellow) 10%, transparent)',
+        },
         conf: {
           critical: 'var(--conf-critical)', high: 'var(--conf-high)',
           medium: 'var(--conf-medium)', low: 'var(--conf-low)',

@@ -26,12 +26,12 @@ export function formatRelativeTime(date: string | Date | null | undefined): stri
 }
 
 export const typeColors: Record<string, string> = {
-  'ip-addr': 'border-cat-blue/30 bg-cat-blue/10 text-cat-blue',
-  'domain-name': 'border-cat-purple/30 bg-cat-purple/10 text-cat-purple',
-  'url': 'border-cat-green/30 bg-cat-green/10 text-cat-green',
-  'file-hash': 'border-cat-orange/30 bg-cat-orange/10 text-cat-orange',
-  'email-addr': 'border-cat-pink/30 bg-cat-pink/10 text-cat-pink',
-  'command-line': 'border-cat-yellow/30 bg-cat-yellow/10 text-cat-yellow',
+  'ip-addr': 'border-cat-blue/30 bg-cat-soft-blue text-cat-ink-blue',
+  'domain-name': 'border-cat-purple/30 bg-cat-soft-purple text-cat-ink-purple',
+  'url': 'border-cat-green/30 bg-cat-soft-green text-cat-ink-green',
+  'file-hash': 'border-cat-orange/30 bg-cat-soft-orange text-cat-ink-orange',
+  'email-addr': 'border-cat-pink/30 bg-cat-soft-pink text-cat-ink-pink',
+  'command-line': 'border-cat-yellow/30 bg-cat-soft-yellow text-cat-ink-yellow',
 }
 
 export const typeLabels: Record<string, string> = {
@@ -41,11 +41,4 @@ export const typeLabels: Record<string, string> = {
   'file-hash': 'File Hash',
   'email-addr': 'Email',
   'command-line': 'Command Line',
-}
-
-export function confidenceColor(score: number): string {
-  if (score >= 80) return 'text-conf-critical'
-  if (score >= 60) return 'text-conf-high'
-  if (score >= 40) return 'text-conf-medium'
-  return 'text-conf-low'
 }

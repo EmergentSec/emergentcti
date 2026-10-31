@@ -70,6 +70,13 @@
     --cat-orange: #d06a08;
     --cat-pink: #c94a8c;
     --cat-yellow: #a87a06;
+    /* AA text counterparts for category fills, including on 10% category badges */
+    --cat-green-ink: #0f6f47;
+    --cat-blue-ink: #2458b8;
+    --cat-purple-ink: #6540b5;
+    --cat-orange-ink: #934700;
+    --cat-pink-ink: #a73570;
+    --cat-yellow-ink: #765500;
 
     --conf-critical: #c8323a;
     /* >=4.5:1 on card and surface-2 (high 5.01 / 4.63, medium 5.38 / 4.98) */
@@ -140,6 +147,12 @@
     --cat-orange: #f0883e;
     --cat-pink: #ec6aa6;
     --cat-yellow: #e0a92a;
+    --cat-green-ink: var(--cat-green);
+    --cat-blue-ink: var(--cat-blue);
+    --cat-purple-ink: var(--cat-purple);
+    --cat-orange-ink: var(--cat-orange);
+    --cat-pink-ink: var(--cat-pink);
+    --cat-yellow-ink: var(--cat-yellow);
 
     --conf-critical: #f0605f;
     --conf-high: #ff8a3d;

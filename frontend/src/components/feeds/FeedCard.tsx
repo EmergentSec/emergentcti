@@ -46,13 +46,51 @@ function humanizeCron(cron: string): string {
   return cron
 }
 
+const MINUTE_MS = 60 * 1000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
+
+function scheduledIntervalMs(cron: string | null): number | null {
+  if (!cron) return null
+
+  const fields = cron.trim().split(/\s+/)
+  if (fields.length !== 5) return null
+
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = fields
+  if (dayOfMonth !== '*' || month !== '*' || dayOfWeek !== '*') return null
+
+  const everyMinutes = minute.match(/^\*\/(\d+)$/)
+  if (everyMinutes && hour === '*') {
+    const minutes = Number(everyMinutes[1])
+    return minutes >= 1 && minutes <= 59 ? minutes * MINUTE_MS : null
+  }
+
+  const fixedMinute = Number(minute)
+  if (!/^\d+$/.test(minute) || fixedMinute < 0 || fixedMinute > 59) return null
+
+  if (hour === '*') return HOUR_MS
+
+  const everyHours = hour.match(/^\*\/(\d+)$/)
+  if (everyHours) {
+    const hours = Number(everyHours[1])
+    return hours >= 1 && hours <= 23 ? hours * HOUR_MS : null
+  }
+
+  const fixedHour = Number(hour)
+  if (/^\d+$/.test(hour) && fixedHour >= 0 && fixedHour <= 23) return DAY_MS
+
+  return null
+}
+
 function FeedStatus({ feed }: { feed: Feed }) {
   if (!feed.enabled) return <Badge variant="secondary">Disabled</Badge>
   if (feed.latest_run?.status === 'failure') return <Badge variant="destructive">Error</Badge>
   if (feed.latest_run?.status === 'running') return <Badge variant="default">Running</Badge>
 
-  const isStale = !feed.last_run_at
-    || Date.now() - new Date(feed.last_run_at).getTime() > 24 * 60 * 60 * 1000
+  const interval = scheduledIntervalMs(feed.schedule_cron)
+  const staleAfter = interval === null ? DAY_MS : interval * 2
+  const lastRunAt = feed.last_run_at ? new Date(feed.last_run_at).getTime() : Number.NaN
+  const isStale = !Number.isFinite(lastRunAt) || Date.now() - lastRunAt > staleAfter
   if (isStale) return <Badge variant="warning">Stale</Badge>
   return <Badge variant="success">OK</Badge>
 }

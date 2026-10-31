@@ -50,7 +50,13 @@ export function FeedStatusTable({ feeds }: FeedStatusTableProps) {
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <Table className="text-sm">
+        <Table className="table-fixed text-sm">
+          <colgroup>
+            <col className="w-8" />
+            <col />
+            <col className="w-20" />
+            <col className="w-20" />
+          </colgroup>
           <TableBody>
             {feeds.map((feed) => (
               <TableRow
@@ -60,7 +66,10 @@ export function FeedStatusTable({ feeds }: FeedStatusTableProps) {
                 <TableCell className="w-8 pl-5 pr-0">
                   <StatusDot status={feed.last_run_status} />
                 </TableCell>
-                <TableCell className="max-w-0 truncate font-medium text-foreground">
+                <TableCell
+                  className="truncate font-medium text-foreground"
+                  title={feed.name}
+                >
                   {feed.name}
                 </TableCell>
                 <TableCell className="whitespace-nowrap text-right font-mono text-xs text-muted-foreground">

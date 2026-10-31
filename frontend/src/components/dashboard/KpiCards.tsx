@@ -51,7 +51,7 @@ export function KpiCards({ stats }: KpiCardsProps) {
   const delta = vsAvgDelta(last_24h_ingested, daily_ingest_14d)
   const deltaSubtitle =
     delta !== null ? (
-      <span className={delta >= 0 ? 'text-cat-green' : 'text-conf-critical'}>
+      <span className={delta >= 0 ? 'text-cat-ink-green' : 'text-conf-critical'}>
         {delta >= 0 ? '▲' : '▼'} {Math.abs(delta)}% vs avg
       </span>
     ) : null
@@ -69,7 +69,7 @@ export function KpiCards({ stats }: KpiCardsProps) {
         <span className="text-muted-foreground">{feed_errors_24h} feed error(s)</span>
       )
     ) : (
-      <span className="text-cat-green">all healthy</span>
+      <span className="text-cat-ink-green">all healthy</span>
     )
 
   return (
