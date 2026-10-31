@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 const sizes = {
   sm: 'h-4 w-4 border-2',
   default: 'h-8 w-8 border-2',
-  lg: 'h-12 w-12 border-3',
+  lg: 'h-12 w-12 border-[3px]',
 } as const;
 
 interface LoadingSpinnerProps {
@@ -15,7 +15,7 @@ export function LoadingSpinner({ size = 'default', className }: LoadingSpinnerPr
   return (
     <div
       className={cn(
-        'animate-spin rounded-full border-muted border-t-primary',
+        'animate-spin rounded-full border-surface3 border-t-primary',
         sizes[size],
         className,
       )}

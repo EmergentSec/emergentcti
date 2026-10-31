@@ -80,7 +80,7 @@ export function Popover({ trigger, children, align = 'start', className }: Popov
       {open && (
         <div
           className={cn(
-            'absolute z-50 mt-2 min-w-[14rem] rounded-md border border-border bg-popover p-1 shadow-lg',
+            'absolute z-50 mt-2 min-w-[14rem] rounded-lg border border-border bg-popover p-1 text-foreground shadow-lg',
             align === 'end' ? 'right-0' : 'left-0',
             className,
           )}

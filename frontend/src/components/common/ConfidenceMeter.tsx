@@ -7,10 +7,10 @@ interface ConfidenceMeterProps {
 }
 
 function getColor(score: number) {
-  if (score >= 80) return { text: 'text-red-400', bg: 'bg-red-500', bar: 'bg-red-500/20' };
-  if (score >= 60) return { text: 'text-orange-400', bg: 'bg-orange-500', bar: 'bg-orange-500/20' };
-  if (score >= 40) return { text: 'text-yellow-400', bg: 'bg-yellow-500', bar: 'bg-yellow-500/20' };
-  return { text: 'text-gray-400', bg: 'bg-gray-500', bar: 'bg-gray-500/20' };
+  if (score >= 80) return { text: 'text-conf-critical', bg: 'bg-conf-critical' };
+  if (score >= 60) return { text: 'text-conf-high', bg: 'bg-conf-high' };
+  if (score >= 40) return { text: 'text-conf-medium', bg: 'bg-conf-medium' };
+  return { text: 'text-conf-low', bg: 'bg-conf-low' };
 }
 
 function getLabel(score: number) {
@@ -27,7 +27,7 @@ export function ConfidenceMeter({ score, showBar = true, className }: Confidence
   return (
     <div className={cn('flex items-center gap-2', className)}>
       {showBar && (
-        <div className={cn('h-2 w-16 rounded-full', color.bar)}>
+        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface3">
           <div
             className={cn('h-full rounded-full transition-all', color.bg)}
             style={{ width: `${clamped}%` }}

@@ -33,3 +33,38 @@ describe('Tabs', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+describe('Tabs keyboard support', () => {
+  const tabs = [
+    { key: 'sources', label: 'Sources' },
+    { key: 'raw', label: 'Raw JSON' },
+    { key: 'history', label: 'History' },
+  ];
+
+  it('uses a roving tabindex on the selected tab', () => {
+    render(<Tabs tabs={tabs} active="raw" onChange={() => {}} />);
+    expect(screen.getByRole('tab', { name: 'Raw JSON' }).tabIndex).toBe(0);
+    expect(screen.getByRole('tab', { name: 'Sources' }).tabIndex).toBe(-1);
+  });
+
+  it('moves focus and selects with Arrow keys, wrapping, and Home/End', () => {
+    const onChange = vi.fn();
+    render(<Tabs tabs={tabs} active="sources" onChange={onChange} />);
+    const sources = screen.getByRole('tab', { name: 'Sources' });
+
+    fireEvent.keyDown(sources, { key: 'ArrowRight' });
+    expect(onChange).toHaveBeenLastCalledWith('raw');
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Raw JSON' }));
+
+    fireEvent.keyDown(sources, { key: 'ArrowLeft' });
+    expect(onChange).toHaveBeenLastCalledWith('history');
+
+    fireEvent.keyDown(sources, { key: 'End' });
+    expect(onChange).toHaveBeenLastCalledWith('history');
+
+    onChange.mockClear();
+    fireEvent.keyDown(sources, { key: 'Home' });
+    expect(onChange).not.toHaveBeenCalled(); // already selected
+    expect(document.activeElement).toBe(sources);
+  });
+});

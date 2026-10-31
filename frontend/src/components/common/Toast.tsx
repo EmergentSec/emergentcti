@@ -9,10 +9,11 @@ export interface ToastData {
   variant: ToastVariant;
 }
 
-const variantStyles: Record<ToastVariant, string> = {
-  success: 'border-emerald-500/50 bg-emerald-950/80 text-emerald-200',
-  error: 'border-red-500/50 bg-red-950/80 text-red-200',
-  info: 'border-blue-500/50 bg-blue-950/80 text-blue-200',
+/** Neutral card surface; the variant shows in the icon and the left accent bar. */
+const variantStyles: Record<ToastVariant, { accent: string; icon: string }> = {
+  success: { accent: 'bg-success', icon: 'text-success' },
+  error: { accent: 'bg-destructive', icon: 'text-destructive' },
+  info: { accent: 'bg-primary', icon: 'text-primary' },
 };
 
 const variantIcons: Record<ToastVariant, JSX.Element> = {
@@ -60,21 +61,25 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
   return (
     <div
       className={cn(
-        'flex items-center gap-2 rounded-md border px-4 py-3 text-sm shadow-lg transition-all duration-200',
-        variantStyles[toast.variant],
+        'relative flex w-[min(24rem,calc(100vw-2rem))] items-center gap-2.5 overflow-hidden rounded-lg border border-border bg-popover py-3 pl-4 pr-3 text-sm text-foreground shadow-lg transition-all duration-200',
         visible ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0',
       )}
     >
-      {variantIcons[toast.variant]}
+      <span aria-hidden="true" className={cn('absolute inset-y-0 left-0 w-1', variantStyles[toast.variant].accent)} />
+      <span aria-hidden="true" className={cn('shrink-0', variantStyles[toast.variant].icon)}>
+        {variantIcons[toast.variant]}
+      </span>
       <span className="flex-1">{toast.message}</span>
       <button
+        type="button"
+        aria-label="Dismiss notification"
         onClick={() => {
           setVisible(false);
           setTimeout(() => onDismiss(toast.id), 200);
         }}
-        className="ml-2 shrink-0 rounded p-0.5 hover:bg-white/10 transition-colors"
+        className="ml-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M3 3l8 8M11 3l-8 8" />
         </svg>
       </button>
@@ -88,10 +93,9 @@ interface ToastContainerProps {
 }
 
 export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
-  if (toasts.length === 0) return null;
-
+  // Keep the live region mounted so the first toast is announced.
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+    <div aria-live="polite" role="region" aria-label="Notifications" className="fixed bottom-4 right-4 z-[60] flex flex-col items-end gap-2">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}

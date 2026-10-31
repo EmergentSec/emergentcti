@@ -1,100 +1,155 @@
-import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { MagnifyingGlass, Sun, Moon, Plus } from '@phosphor-icons/react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { List, MagnifyingGlass, X } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
-import { useTheme } from '@/contexts/ThemeContext';
-import { useAuth } from '@/contexts/AuthContext';
-import { Button } from '../ui/Button';
+import { EmergentLogo } from '../common/EmergentLogo';
 
-const PAGE_META: Record<string, { title: string; subtitle: string }> = {
-  '/': { title: 'Dashboard', subtitle: 'Aggregation overview & feed health' },
-  '/observables': { title: 'Observables', subtitle: 'Search and manage threat indicators' },
-  '/feeds': { title: 'Feeds', subtitle: 'Manage intelligence feed sources' },
-  '/settings': { title: 'Settings', subtitle: 'Platform configuration' },
-};
+function isApplePlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
+}
 
 interface HeaderProps {
-  /** @deprecated — Header reads useAuth() directly; kept for back-compat with App.tsx */
+  /** Toggles the sidebar (drawer below `lg`, collapse at `lg`+). */
+  onMenuClick?: () => void;
+  /** Whether the navigation the menu button controls is currently shown. */
+  menuExpanded?: boolean;
+  /** id of the element the menu button controls. */
+  menuControls?: string;
+  menuButtonRef?: RefObject<HTMLButtonElement>;
+  /** @deprecated — the shell reads useAuth() directly; kept for back-compat with App.tsx */
   username?: string;
-  /** @deprecated — Header reads useAuth() directly; kept for back-compat with App.tsx */
+  /** @deprecated — the shell reads useAuth() directly; kept for back-compat with App.tsx */
   onLogout?: () => void;
   className?: string;
 }
 
-export function Header({ className }: HeaderProps) {
-  const location = useLocation();
+/** Full-width top bar: menu button, wordmark, global observable search (⌘K / Ctrl+K). */
+export function Header({ onMenuClick, menuExpanded, menuControls, menuButtonRef, className }: HeaderProps) {
   const navigate = useNavigate();
-  // TEMP: replaced by the Appearance selector in the shell task.
-  const { resolvedTheme: theme, setPreference } = useTheme();
-  const toggle = () => setPreference(theme === 'dark' ? 'light' : 'dark');
-  const { isAdmin } = useAuth();
   const [search, setSearch] = useState('');
+  // Below `md` the search field collapses to an icon button.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const shortcut = isApplePlatform() ? '⌘K' : 'Ctrl K';
 
-  const page = PAGE_META[location.pathname] ?? { title: 'EmergentCTI', subtitle: '' };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+        // Focus after the collapsed field (if any) has been revealed.
+        requestAnimationFrame(() => inputRef.current?.focus());
+        inputRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  const openSearch = () => {
+    setSearchOpen(true);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    searchButtonRef.current?.focus();
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && search.trim()) {
       navigate(`/observables?q=${encodeURIComponent(search.trim())}`);
+      setSearchOpen(false);
+    } else if (e.key === 'Escape') {
+      if (searchOpen) closeSearch();
+      else inputRef.current?.blur();
     }
   };
 
   return (
     <header
       className={cn(
-        'sticky top-0 z-30 flex h-[60px] items-center justify-between border-b border-border bg-background/80 px-6 backdrop-blur',
+        'sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-card px-3 sm:px-4',
         className,
       )}
     >
-      {/* Left: title + subtitle */}
-      <div className="flex flex-col justify-center">
-        <h1 className="text-[16.5px] font-bold leading-tight text-foreground">{page.title}</h1>
-        {page.subtitle && (
-          <p className="text-xs text-muted-foreground">{page.subtitle}</p>
-        )}
-      </div>
+      <button
+        ref={menuButtonRef}
+        type="button"
+        aria-label="Toggle navigation"
+        aria-expanded={menuExpanded}
+        aria-controls={menuControls}
+        onClick={onMenuClick}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+      >
+        <List size={20} aria-hidden="true" />
+      </button>
 
-      {/* Right: search + theme toggle + add */}
-      <div className="flex items-center gap-3">
-        {/* Search input */}
-        <div className="relative flex items-center">
-          <MagnifyingGlass
-            size={15}
-            className="absolute left-3 text-muted-foreground pointer-events-none"
-          />
-          <input
-            type="text"
-            className="h-8 w-56 rounded-md border border-border bg-surface pl-9 pr-12 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-brand"
-            placeholder="Search observables, feeds, ha..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={handleKeyDown}
-          />
-          <span className="absolute right-2 rounded border border-border px-1 py-0.5 font-mono text-[10px] text-muted-foreground select-none">
-            ⌘K
-          </span>
-        </div>
+      <Link to="/" className="flex min-w-0 items-center gap-2.5 rounded-md">
+        <EmergentLogo size={26} className="shrink-0 text-foreground" />
+        <span className="truncate text-[15px] font-semibold tracking-tight text-foreground">EmergentCTI</span>
+      </Link>
 
-        {/* Theme toggle */}
+      <div className="ml-auto flex items-center">
+        {/* Narrow screens: icon that expands the search field over the bar */}
         <button
+          ref={searchButtonRef}
           type="button"
-          aria-label="Toggle theme"
-          onClick={toggle}
-          className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:text-foreground"
+          aria-label="Search"
+          onClick={openSearch}
+          className={cn(
+            'flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground md:hidden',
+            searchOpen && 'invisible',
+          )}
         >
-          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          <MagnifyingGlass size={18} aria-hidden="true" />
         </button>
 
-        {/* Add Observable — opens the create dialog on the Observables page (admin-only) */}
-        {isAdmin && (
-          <Button
-            variant="brand"
-            className="gap-1.5"
-            onClick={() => navigate('/observables?create=1')}
-          >
-            <Plus size={14} weight="bold" />
-            Add Observable
-          </Button>
-        )}
+        <div
+          role="search"
+          className={cn(
+            'items-center gap-2',
+            searchOpen ? 'absolute inset-0 z-10 flex bg-card px-3' : 'hidden',
+            'md:static md:flex md:bg-transparent md:p-0',
+          )}
+        >
+          <div className="relative flex flex-1 items-center">
+            <MagnifyingGlass
+              size={15}
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3 text-text3"
+            />
+            <input
+              ref={inputRef}
+              type="search"
+              aria-label="Search observables"
+              aria-keyshortcuts="Meta+K Control+K"
+              className="h-9 w-full rounded-lg border border-borderStrong bg-surface2 pl-9 pr-16 text-sm text-foreground placeholder:text-text3 focus-visible:border-primary focus-visible:bg-card focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary md:w-72 lg:w-80"
+              placeholder="Search observables, feeds, hashes…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+            <kbd
+              aria-hidden="true"
+              className="pointer-events-none absolute right-2 hidden select-none rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:block"
+            >
+              {shortcut}
+            </kbd>
+          </div>
+          {searchOpen && (
+            <button
+              type="button"
+              aria-label="Close search"
+              onClick={closeSearch}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-hover hover:text-foreground md:hidden"
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          )}
+        </div>
       </div>
     </header>
   );

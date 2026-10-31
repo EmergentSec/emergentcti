@@ -9,26 +9,29 @@ interface EmptyStateProps {
   className?: string;
 }
 
+const defaultIcon = (
+  <svg
+    aria-hidden="true"
+    className="h-6 w-6"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z" />
+    <polyline points="13 2 13 9 20 9" />
+  </svg>
+);
+
 export function EmptyState({ icon, title, description, children, className }: EmptyStateProps) {
   return (
-    <div className={cn('flex flex-col items-center justify-center py-12 text-center', className)}>
-      {icon ? (
-        <div className="mb-4 text-muted-foreground">{icon}</div>
-      ) : (
-        <svg
-          className="mb-4 h-12 w-12 text-muted-foreground"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z" />
-          <polyline points="13 2 13 9 20 9" />
-        </svg>
-      )}
-      <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+    <div className={cn('flex flex-col items-center justify-center px-4 py-12 text-center', className)}>
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-surface3 text-muted-foreground">
+        {icon ?? defaultIcon}
+      </div>
+      <h3 className="text-base font-semibold text-foreground">{title}</h3>
       {description && (
         <p className="mt-1 max-w-sm text-sm text-muted-foreground">{description}</p>
       )}

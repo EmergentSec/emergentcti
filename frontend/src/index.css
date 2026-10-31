@@ -27,7 +27,7 @@
     --border-strong: #d0d5dd;
     --muted: var(--surface-3);
     --muted-foreground: #5b6474;
-    --text-3: #8a93a3;
+    --text-3: #687181; /* 4.55:1 on background/surface-2, 4.92:1 on card */
 
     --primary: #1f40af;
     --primary-hover: #1a3696;
@@ -42,10 +42,22 @@
     --masthead-foreground: #f2f5fc;
     --masthead-muted: #a9b4cc;
     --masthead-border: rgb(255 255 255 / 0.14);
+    /* Light action button that sits on the dark masthead band */
+    --masthead-action: #ffffff;
+    --masthead-action-hover: #e6ebf5;
+    --masthead-action-foreground: #101b33;
 
     --destructive: #c8323a;
+    --on-destructive: #ffffff; /* 5.29:1 on --destructive */
     --success: #12805c;
     --warning: #a35f00;
+    /* Soft status fills + AA text ("ink") for badges/pills on them (>=5.3:1) */
+    --success-soft: color-mix(in srgb, var(--success) 10%, transparent);
+    --warning-soft: color-mix(in srgb, var(--warning) 10%, transparent);
+    --destructive-soft: color-mix(in srgb, var(--destructive) 10%, transparent);
+    --success-ink: #0c6a4b;
+    --warning-ink: #864e00;
+    --destructive-ink: #a8262d;
 
     --secondary: var(--surface-2);
     --secondary-foreground: var(--muted-foreground);
@@ -81,7 +93,7 @@
     --border-strong: #3a455c;
     --muted: var(--surface-3);
     --muted-foreground: #a3adbf;
-    --text-3: #737f94;
+    --text-3: #8590a4; /* 5.46:1 background, 5.00:1 card, 5.56:1 surface-2 */
 
     --primary: #a9bcff;
     --primary-hover: #c2cfff;
@@ -96,10 +108,21 @@
     --masthead-foreground: #eef2fa;
     --masthead-muted: #9aa6bf;
     --masthead-border: rgb(255 255 255 / 0.1);
+    --masthead-action: #eef2fa;
+    --masthead-action-hover: #d6deee;
+    --masthead-action-foreground: #0e1424;
 
     --destructive: #f0605f;
+    --on-destructive: #1d0a0b; /* 5.95:1 on --destructive */
     --success: #3ccf91;
     --warning: #f2b34a;
+    /* 8% keeps destructive ink >=4.5:1 on card; inks reuse the base colors */
+    --success-soft: color-mix(in srgb, var(--success) 8%, transparent);
+    --warning-soft: color-mix(in srgb, var(--warning) 8%, transparent);
+    --destructive-soft: color-mix(in srgb, var(--destructive) 8%, transparent);
+    --success-ink: var(--success);
+    --warning-ink: var(--warning);
+    --destructive-ink: var(--destructive);
 
     --secondary: var(--surface-2);
     --secondary-foreground: var(--muted-foreground);

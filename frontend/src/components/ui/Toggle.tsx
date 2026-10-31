@@ -25,8 +25,9 @@ export function Toggle({ checked, onChange, disabled = false, label, className }
         onClick={() => onChange(!checked)}
         className={cn(
           'relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-          checked ? 'bg-primary' : 'bg-muted',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+          'disabled:cursor-not-allowed',
+          checked ? 'bg-primary' : 'bg-borderStrong',
         )}
       >
         <span
