@@ -7,6 +7,8 @@ import ObservablesPage from './pages/ObservablesPage'
 import ObservableDetailPage from './pages/ObservableDetailPage'
 import FeedsPage from './pages/FeedsPage'
 import SettingsPage from './pages/SettingsPage'
+import ReportsPage from './pages/ReportsPage'
+import ReportDetailPage from './pages/ReportDetailPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -42,6 +44,8 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         <Route path="observables" element={<ObservablesPage />} />
         <Route path="observables/:id" element={<ObservableDetailPage />} />
+        <Route path="reports" element={<ReportsPage />} />
+        <Route path="reports/:id" element={<ReportDetailPage />} />
         <Route path="feeds" element={<FeedsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>

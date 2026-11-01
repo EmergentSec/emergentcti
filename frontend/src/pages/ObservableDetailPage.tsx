@@ -15,6 +15,7 @@ import {
   TerminalWindow,
 } from '@phosphor-icons/react'
 import { useObservable } from '@/hooks/useObservables'
+import { useObservableReports } from '@/hooks/useReports'
 import { useCreateAllowlistEntry } from '@/hooks/useAllowlist'
 import { useConfig } from '@/hooks/useConfig'
 import { useAuth } from '@/contexts/AuthContext'
@@ -67,6 +68,7 @@ const DETAIL_TABS = [
 export default function ObservableDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: obs, isLoading, error } = useObservable(id ?? null)
+  const { data: linkedReports = [], isLoading: reportsLoading } = useObservableReports(id ?? null)
   const { data: cfg } = useConfig()
   const [searchParams, setSearchParams] = useSearchParams()
   const [copied, setCopied] = useState(false)
@@ -309,6 +311,31 @@ export default function ObservableDetailPage() {
         decayRate={decayRate}
         decayFloor={decayFloor}
       />
+
+      <Card className="p-5">
+        <h3 className="mb-3 text-sm font-semibold">Reports</h3>
+        {reportsLoading ? (
+          <LoadingSpinner size="sm" />
+        ) : linkedReports.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No linked reports.</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {linkedReports.map((report) => (
+              <li key={report.id} className="px-3 py-2.5">
+                <Link
+                  to={`/reports/${report.id}`}
+                  className="font-medium text-foreground hover:text-primary"
+                >
+                  {report.title}
+                </Link>
+                {report.summary && (
+                  <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{report.summary}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
       {/* ── Sources / Raw JSON tabs ─────────────────────────────────── */}
       <Card className="p-5">
