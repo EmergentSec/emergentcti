@@ -90,23 +90,46 @@ describe('ReportsPage', () => {
     expect(mockUseReports).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }))
   })
 
-  it('hides New report for analysts', () => {
+  it('ignores ?create=1 and hides create controls for analysts', () => {
     mockUseReportSources.mockReturnValue({ data: [] })
-    mockUseReports.mockReturnValue({ data: LIST, isLoading: false, error: null })
+    mockUseReports.mockReturnValue({
+      data: { items: [], total: 0, page: 1, size: 25, pages: 0 },
+      isLoading: false,
+      error: null,
+    })
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={['/reports?create=1']}>
         <ReportsPage />
       </MemoryRouter>,
     )
 
     expect(screen.queryByRole('button', { name: 'New report' })).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('shows New report for admins', () => {
+  it('opens the create dialog for admins via ?create=1 (masthead button target)', () => {
     mockAuth.isAdmin = true
     mockUseReportSources.mockReturnValue({ data: [] })
     mockUseReports.mockReturnValue({ data: LIST, isLoading: false, error: null })
+
+    render(
+      <MemoryRouter initialEntries={['/reports?create=1']}>
+        <ReportsPage />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('dialog')).toBeTruthy()
+  })
+
+  it('offers New report in the empty state for admins', () => {
+    mockAuth.isAdmin = true
+    mockUseReportSources.mockReturnValue({ data: [] })
+    mockUseReports.mockReturnValue({
+      data: { items: [], total: 0, page: 1, size: 25, pages: 0 },
+      isLoading: false,
+      error: null,
+    })
 
     render(
       <MemoryRouter>

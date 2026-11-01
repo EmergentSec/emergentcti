@@ -61,8 +61,14 @@ async def list_reports(
 ) -> tuple[list[Report], int]:
     clauses = []
     if filters.q:
-        pattern = f"%{filters.q}%"
-        clauses.append(or_(Report.title.ilike(pattern), Report.summary.ilike(pattern)))
+        escaped = filters.q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        clauses.append(
+            or_(
+                Report.title.ilike(pattern, escape="\\"),
+                Report.summary.ilike(pattern, escape="\\"),
+            )
+        )
     if filters.origin is not None:
         clauses.append(Report.origin == filters.origin)
     if filters.source_name is not None:

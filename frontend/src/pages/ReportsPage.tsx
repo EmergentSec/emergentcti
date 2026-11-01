@@ -164,15 +164,6 @@ export default function ReportsPage() {
         </CardContent>
       </Card>
 
-      {isAdmin && (
-        <div className="flex justify-end">
-          <Button variant="brand" onClick={openCreateDialog}>
-            <Plus size={16} weight="bold" aria-hidden="true" />
-            New report
-          </Button>
-        </div>
-      )}
-
       {isLoading ? (
         <div className="flex items-center justify-center py-24">
           <LoadingSpinner size="lg" />
@@ -206,7 +197,7 @@ export default function ReportsPage() {
           <Card>
             <CardHeader className="border-b border-border py-4">
               <CardTitle className="font-mono text-sm tabular-nums">
-                {data.total} reports
+                {data.total} {data.total === 1 ? 'report' : 'reports'}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">

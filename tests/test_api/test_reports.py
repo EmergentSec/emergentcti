@@ -204,6 +204,18 @@ async def test_non_http_source_url_rejected(client: AsyncClient, source_url: str
     assert response.status_code == 422
 
 
+async def test_search_treats_like_wildcards_literally(client: AsyncClient) -> None:
+    await create_report(client, title="100% confirmed")
+    await create_report(client, title="1000 confirmed")
+    await create_report(client, title="file_name report")
+    await create_report(client, title="filename report")
+
+    response = await client.get(REPORTS, params={"q": "100%"})
+    assert [item["title"] for item in response.json()["items"]] == ["100% confirmed"]
+    response = await client.get(REPORTS, params={"q": "file_name"})
+    assert [item["title"] for item in response.json()["items"]] == ["file_name report"]
+
+
 async def test_search_filters_sources_and_pagination(client: AsyncClient) -> None:
     await create_report(
         client,
