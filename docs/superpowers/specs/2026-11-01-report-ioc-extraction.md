@@ -217,6 +217,20 @@ written):
 Unsupported-only documents have no candidates, so every import against them is
 rejected with `not_a_candidate`.
 
+422 `detail` shape (pinned after frontend review): always the FastAPI
+validation shape, a list of `{ type, loc, msg, ... }`. Pydantic body errors
+(empty, too many, duplicates, confidence) use FastAPI's own entries. A
+`not_a_candidate` rejection is one entry:
+
+```json
+{ "type": "not_a_candidate", "loc": ["body", "items"],
+  "msg": "2 item(s) are not valid candidates extracted from this report: url http://x, ...",
+  "items": [{ "index": 0, "type": "url", "value": "http://x" }] }
+```
+
+`msg` is human-readable and names up to 20 items. The frontend shows every
+entry's `msg` (not just the first), and may use `items` to highlight rows.
+
 ## Frontend
 
 - Report detail page (`ReportDetailPage.tsx`): an admin-only **Extract
