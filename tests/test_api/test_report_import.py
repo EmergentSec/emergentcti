@@ -800,3 +800,35 @@ async def test_unlink_after_import_keeps_observable_and_retention_cleans_links(
     assert deleted == 2  # known and the manually linked observable (both OLD)
     assert await link_row(db_session, report_id, known_id) is None
     assert await db_session.get(Report, uuid.UUID(report_id), populate_existing=True) is not None
+
+
+async def test_import_invalidates_stats_and_blocklist_caches_only_when_creating(
+    admin_client: AsyncClient,
+    world: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cti.api.v1 import reports as reports_api
+
+    calls: list[str] = []
+
+    async def fake_cache_delete(key: str) -> None:
+        calls.append(key)
+
+    async def fake_invalidate_blocklist() -> None:
+        calls.append("blocklist:*")
+
+    monkeypatch.setattr(reports_api, "cache_delete", fake_cache_delete)
+    monkeypatch.setattr(reports_api, "invalidate_blocklist_cache", fake_invalidate_blocklist)
+    report_id = world["report"]["id"]
+    body = {"confidence": 80, "items": [{"type": "domain-name", "value": "fresh-drop.example"}]}
+
+    first = await admin_client.post(f"{REPORTS}/{report_id}/import", json=body)
+    assert first.status_code == 200, first.text
+    assert first.json()["created"] == 1
+    assert sorted(calls) == ["blocklist:*", "stats:dashboard"]
+
+    calls.clear()
+    again = await admin_client.post(f"{REPORTS}/{report_id}/import", json=body)
+    assert again.status_code == 200, again.text
+    assert again.json()["created"] == 0
+    assert calls == []  # nothing new: counts and blocklist are unchanged

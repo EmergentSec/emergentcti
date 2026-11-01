@@ -137,6 +137,7 @@ export function useImportReportIndicators() {
       queryClient.invalidateQueries({ queryKey: ['report', reportId] })
       queryClient.invalidateQueries({ queryKey: ['observables'] })
       queryClient.invalidateQueries({ queryKey: ['observableReports'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
   })
 }

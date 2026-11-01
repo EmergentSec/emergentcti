@@ -33,5 +33,7 @@ describe('useImportReportIndicators', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['report', 'rep-1'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['observables'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['observableReports'] })
+    // Dashboard KPIs and the sidebar observable badge read this query.
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['dashboard'] })
   })
 })

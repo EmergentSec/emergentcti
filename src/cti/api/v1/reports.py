@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cti.core.config import get_settings
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
+from cti.core.redis import cache_delete, invalidate_blocklist_cache
 from cti.models.report import Report, ReportOrigin
 from cti.models.user import User
 from cti.schemas.report import (
@@ -301,4 +302,9 @@ async def import_report_indicators(
     except report_import_service.NotACandidateError as exc:
         raise HTTPException(status_code=422, detail=exc.detail) from None
     await db.commit()
+    if result.created:
+        # New observables change dashboard counts and blocklist eligibility;
+        # drop both caches like feed runs and retention do.
+        await invalidate_blocklist_cache()
+        await cache_delete("stats:dashboard")
     return result
