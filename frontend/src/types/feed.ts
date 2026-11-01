@@ -23,6 +23,7 @@ export interface Feed {
   is_preconfigured: boolean
   has_auth: boolean
   auth_supported: boolean
+  auth_needs_repair: boolean
   default_confidence: number
   last_run_at: string | null
   observable_count: number
@@ -45,11 +46,11 @@ export interface FeedCreate {
 
 export interface FeedUpdate {
   name?: string
-  description?: string
+  description?: string | null
   feed_type?: FeedType
   url?: string
   config?: Record<string, unknown>
-  schedule_cron?: string
+  schedule_cron?: string | null
   enabled?: boolean
   auth_config?: Record<string, unknown>
   default_confidence?: number

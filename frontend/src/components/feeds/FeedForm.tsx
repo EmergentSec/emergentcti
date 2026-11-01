@@ -1,9 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Input, controlClass } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
 import type { Feed, FeedCreate, FeedType, FeedUpdate } from '@/types/feed'
+import {
+  AUTH_CONFIG_EXAMPLES,
+  AUTH_CONFIG_PLACEHOLDER,
+  validateFullAuthConfig,
+} from '@/lib/feedAuthValidation'
 import { cn } from '@/lib/utils'
 
 // ── Prop types ────────────────────────────────────────────────────────────────
@@ -11,6 +16,8 @@ import { cn } from '@/lib/utils'
 interface FeedFormSharedProps {
   onCancel: () => void
   isLoading?: boolean
+  /** Server validation message (e.g. HTTP 422 detail) shown inline on the form */
+  submitError?: string | null
 }
 
 // Create mode: no initialValues → onSubmit receives FeedCreate
@@ -35,33 +42,57 @@ const feedTypeOptions = [
   { value: 'scraper', label: 'Scraper' },
 ]
 
+const DEFAULT_CREATE_SCHEDULE = '0 */6 * * *'
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function FeedForm(props: FeedFormProps) {
-  const { onCancel, isLoading } = props
+  const { onCancel, isLoading, submitError } = props
   const isEditMode = props.initialValues != null
   const iv = isEditMode ? props.initialValues : null
 
   // Edit-mode derived flags (defined once, used for field gating throughout)
   const preconfigured = iv?.is_preconfigured ?? false
+  const authNeedsRepair = Boolean(iv?.auth_needs_repair)
   const knownAuth = Boolean(iv?.has_auth || iv?.auth_supported)
+  const showFriendlyKeyRotation =
+    isEditMode && knownAuth && !authNeedsRepair
 
   // ── Local state — seeded from initialValues in edit mode ─────────────────
   const [name, setName] = useState(iv?.name ?? '')
   const [description, setDescription] = useState(iv?.description ?? '')
   const [feedType, setFeedType] = useState<FeedType>(iv?.feed_type ?? 'file')
   const [url, setUrl] = useState(iv?.url ?? '')
-  const [scheduleCron, setScheduleCron] = useState(iv?.schedule_cron ?? '0 */6 * * *')
+  const [scheduleCron, setScheduleCron] = useState(
+    isEditMode ? (iv?.schedule_cron ?? '') : DEFAULT_CREATE_SCHEDULE,
+  )
   const [defaultConfidence, setDefaultConfidence] = useState(iv?.default_confidence ?? 50)
   const [enabled, setEnabled] = useState(iv?.enabled ?? true)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [replaceFullAuth, setReplaceFullAuth] = useState(false)
 
   // Auth state — authConfig: JSON textarea (create mode + edit !knownAuth)
   //              apiKeyValue: friendly API key field (edit mode + knownAuth)
   const [authConfig, setAuthConfig] = useState('')
   const [apiKeyValue, setApiKeyValue] = useState('')
 
+  useEffect(() => {
+    if (!submitError) return
+    setErrors((prev) => ({ ...prev, form: submitError }))
+  }, [submitError])
+
   // ── Validation ────────────────────────────────────────────────────────────
+
+  const validateAuthJson = (raw: string, feedUrlForTemplate: string): string | null => {
+    if (!raw.trim()) return null
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return 'Must be valid JSON'
+    }
+    return validateFullAuthConfig(parsed, feedUrlForTemplate)
+  }
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {}
@@ -76,13 +107,18 @@ export function FeedForm(props: FeedFormProps) {
       if (!url.trim()) newErrors.url = 'URL is required'
     }
 
-    // JSON auth config validation whenever the textarea is shown and non-empty
-    if (authConfig.trim()) {
-      try {
-        JSON.parse(authConfig)
-      } catch {
-        newErrors.authConfig = 'Must be valid JSON'
-      }
+    const urlForAuth = preconfigured && iv ? (iv.url ?? url) : url
+
+    const shouldValidateAuthJson =
+      authConfig.trim() &&
+      (!isEditMode ||
+        authNeedsRepair ||
+        replaceFullAuth ||
+        (!preconfigured && !knownAuth))
+
+    if (shouldValidateAuthJson) {
+      const authErr = validateAuthJson(authConfig, urlForAuth)
+      if (authErr) newErrors.authConfig = authErr
     }
 
     setErrors(newErrors)
@@ -93,6 +129,7 @@ export function FeedForm(props: FeedFormProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    setErrors({})
     if (!validate()) return
 
     if (!isEditMode) {
@@ -109,31 +146,49 @@ export function FeedForm(props: FeedFormProps) {
       if (authConfig.trim()) data.auth_config = JSON.parse(authConfig)
       props.onSubmit(data)
     } else {
-      // ── Edit mode ─────────────────────────────────────────────────────────
-      const data: FeedUpdate = {
-        enabled,
-        default_confidence: defaultConfidence,
-      }
+      // ── Edit mode — diff against initial feed values ─────────────────────
+      const data: FeedUpdate = {}
+      const feed = iv!
+
       const trimmedDesc = description.trim()
-      data.description = trimmedDesc || undefined
-      if (scheduleCron.trim()) data.schedule_cron = scheduleCron.trim()
-
-      // Structural fields: only send for custom (non-preconfigured) feeds
-      if (!preconfigured) {
-        data.name = name.trim() || undefined
-        data.feed_type = feedType
-        data.url = url.trim() || undefined
+      const initialDesc = (feed.description ?? '').trim()
+      if (trimmedDesc !== initialDesc) {
+        data.description = trimmedDesc === '' ? null : trimmedDesc
       }
 
-      // Auth: friendly API key field when knownAuth; JSON textarea otherwise
-      if (knownAuth) {
-        if (apiKeyValue.trim()) {
-          data.auth_config = { api_key_value: apiKeyValue.trim() }
-        }
-      } else {
+      const trimmedCron = scheduleCron.trim()
+      const initialCron = (feed.schedule_cron ?? '').trim()
+      if (trimmedCron !== initialCron) {
+        data.schedule_cron = trimmedCron === '' ? null : trimmedCron
+      }
+
+      if (enabled !== feed.enabled) data.enabled = enabled
+      if (defaultConfidence !== feed.default_confidence) {
+        data.default_confidence = defaultConfidence
+      }
+
+      if (!preconfigured) {
+        const trimmedName = name.trim()
+        if (trimmedName !== feed.name) data.name = trimmedName
+        if (feedType !== feed.feed_type) data.feed_type = feedType
+        const trimmedUrl = url.trim()
+        if (trimmedUrl !== (feed.url ?? '').trim()) data.url = trimmedUrl
+      }
+
+      if (authNeedsRepair) {
         if (authConfig.trim()) {
           data.auth_config = JSON.parse(authConfig)
         }
+      } else if (showFriendlyKeyRotation && replaceFullAuth) {
+        if (authConfig.trim()) {
+          data.auth_config = JSON.parse(authConfig)
+        }
+      } else if (showFriendlyKeyRotation) {
+        if (apiKeyValue.trim()) {
+          data.auth_config = { api_key_value: apiKeyValue.trim() }
+        }
+      } else if (!preconfigured && authConfig.trim()) {
+        data.auth_config = JSON.parse(authConfig)
       }
 
       props.onSubmit(data)
@@ -155,18 +210,26 @@ export function FeedForm(props: FeedFormProps) {
         id="feed-auth-config"
         value={authConfig}
         onChange={(e) => setAuthConfig(e.target.value)}
-        placeholder='{"api_key": "your-key-here"}'
-        rows={3}
+        placeholder={AUTH_CONFIG_PLACEHOLDER}
+        rows={4}
         aria-invalid={errors.authConfig ? true : undefined}
-        aria-describedby={errors.authConfig ? 'feed-auth-config-error' : undefined}
+        aria-describedby={
+          errors.authConfig ? 'feed-auth-config-error' : 'feed-auth-config-help'
+        }
         className={cn(
           controlClass,
-          'h-auto min-h-20 resize-y py-2 font-mono',
-          errors.authConfig && 'border-destructive focus-visible:border-destructive focus-visible:ring-destructive',
+          'h-auto min-h-20 resize-y py-2 font-mono text-sm',
+          errors.authConfig &&
+            'border-destructive focus-visible:border-destructive focus-visible:ring-destructive',
         )}
       />
+      <p id="feed-auth-config-help" className="whitespace-pre-line text-xs text-muted-foreground">
+        {AUTH_CONFIG_EXAMPLES}
+      </p>
       {errors.authConfig && (
-        <p id="feed-auth-config-error" className="text-xs text-destructive">{errors.authConfig}</p>
+        <p id="feed-auth-config-error" className="text-xs text-destructive">
+          {errors.authConfig}
+        </p>
       )}
     </div>
   )
@@ -175,6 +238,21 @@ export function FeedForm(props: FeedFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {errors.form && (
+        <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {errors.form}
+        </p>
+      )}
+
+      {isEditMode && authNeedsRepair && (
+        <p
+          role="status"
+          className="rounded-lg border border-warning bg-warning-soft px-3 py-2 text-sm text-warning-ink"
+        >
+          Stored authentication for this feed is invalid or outdated. Enter a full auth
+          configuration below to repair it (secrets are never shown).
+        </p>
+      )}
 
       {/* Feed Name: read-only text for preconfigured edit; editable input otherwise */}
       {isEditMode && preconfigured ? (
@@ -235,7 +313,7 @@ export function FeedForm(props: FeedFormProps) {
         label="Schedule (cron)"
         value={scheduleCron}
         onChange={(e) => setScheduleCron(e.target.value)}
-        placeholder="0 */6 * * *"
+        placeholder={isEditMode ? 'Leave empty for no schedule' : DEFAULT_CREATE_SCHEDULE}
       />
 
       <div className="space-y-1.5">
@@ -256,22 +334,28 @@ export function FeedForm(props: FeedFormProps) {
 
       {/* Auth section */}
       {isEditMode ? (
-        // Edit mode: friendly API key when knownAuth (has_auth || auth_supported);
-        // JSON textarea when !knownAuth AND custom feed (lets a custom feed set raw auth);
-        // nothing when !knownAuth AND preconfigured (no auth concept for this feed)
-        knownAuth ? (
-          <Input
-            label="API Key"
-            type="password"
-            value={apiKeyValue}
-            onChange={(e) => setApiKeyValue(e.target.value)}
-            placeholder={apiKeyPlaceholder}
-          />
+        authNeedsRepair ? (
+          authJsonTextarea
+        ) : showFriendlyKeyRotation ? (
+          <div className="space-y-3">
+            <Input
+              label="API Key"
+              type="password"
+              value={apiKeyValue}
+              onChange={(e) => setApiKeyValue(e.target.value)}
+              placeholder={apiKeyPlaceholder}
+            />
+            <Toggle
+              checked={replaceFullAuth}
+              onChange={setReplaceFullAuth}
+              label="Replace full auth configuration"
+            />
+            {replaceFullAuth ? authJsonTextarea : null}
+          </div>
         ) : (
           !preconfigured ? authJsonTextarea : null
         )
       ) : (
-        // Create mode: raw JSON textarea (unchanged behaviour)
         authJsonTextarea
       )}
 

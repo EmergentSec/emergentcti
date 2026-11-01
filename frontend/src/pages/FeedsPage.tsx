@@ -13,6 +13,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Tabs } from '@/components/ui/Tabs'
 import { FeedCard } from '@/components/feeds/FeedCard'
 import { FeedForm } from '@/components/feeds/FeedForm'
+import { apiErrorMessage } from '@/lib/apiError'
 import { compactNumber } from '@/lib/dashboardFormat'
 import { cn } from '@/lib/utils'
 import type { Feed, FeedCreate, FeedUpdate, FeedType } from '@/types/feed'
@@ -58,6 +59,7 @@ export default function FeedsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [activeSegment, setActiveSegment] = useState<FilterSegment>('all')
   const [editingFeed, setEditingFeed] = useState<Feed | null>(null)
+  const [editSubmitError, setEditSubmitError] = useState<string | null>(null)
   const showCreateDialog = isAdmin && searchParams.get('create') === '1'
 
   const openCreateDialog = () => {
@@ -86,18 +88,19 @@ export default function FeedsPage() {
 
   const handleEdit = (data: FeedUpdate) => {
     if (!editingFeed) return
+    setEditSubmitError(null)
     updateFeed.mutate(
       { id: editingFeed.id, data },
       {
         onSuccess: () => {
           toast('Feed updated', 'success')
           setEditingFeed(null)
+          setEditSubmitError(null)
         },
         onError: (err) => {
-          toast(
-            err instanceof Error ? err.message : 'Failed to update feed',
-            'error',
-          )
+          const message = apiErrorMessage(err, 'Failed to update feed')
+          setEditSubmitError(message)
+          toast(message, 'error')
         },
       },
     )
@@ -182,7 +185,10 @@ export default function FeedsPage() {
           </Card>
         ) : (
           filteredFeeds.map((feed) => (
-            <FeedCard key={feed.id} feed={feed} onEdit={setEditingFeed} />
+            <FeedCard key={feed.id} feed={feed} onEdit={(feed) => {
+              setEditSubmitError(null)
+              setEditingFeed(feed)
+            }} />
           ))
         )}
       </div>
@@ -197,12 +203,13 @@ export default function FeedsPage() {
 
       {/* ── Edit dialog ──────────────────────────────────────────────────── */}
       {editingFeed && (
-        <Dialog open onClose={() => setEditingFeed(null)} title="Edit Feed">
+        <Dialog open onClose={() => { setEditingFeed(null); setEditSubmitError(null) }} title="Edit Feed">
           <FeedForm
             initialValues={editingFeed}
             onSubmit={handleEdit}
-            onCancel={() => setEditingFeed(null)}
+            onCancel={() => { setEditingFeed(null); setEditSubmitError(null) }}
             isLoading={updateFeed.isPending}
+            submitError={editSubmitError}
           />
         </Dialog>
       )}

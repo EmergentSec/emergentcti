@@ -19,6 +19,7 @@ const baseEditFeed: Feed = {
   is_preconfigured: true,
   has_auth: false,
   auth_supported: true,
+  auth_needs_repair: false,
   default_confidence: 85,
   last_run_at: null,
   observable_count: 0,
@@ -450,8 +451,8 @@ describe('FeedForm — edit mode, custom feed', () => {
     expect(handleSubmit).toHaveBeenCalledOnce()
     const payload = handleSubmit.mock.calls[0][0]
     expect(payload.name).toBe('Renamed Feed')
-    expect(payload.feed_type).toBe('file')
-    expect(payload.url).toBe('https://custom.example.com/feed.txt')
+    expect('feed_type' in payload).toBe(false)
+    expect('url' in payload).toBe(false)
   })
 
   it('does not include name, feed_type, or url in FeedUpdate payload for preconfigured feed', () => {
@@ -482,14 +483,142 @@ describe('FeedForm — edit mode, custom feed', () => {
         onCancel={vi.fn()}
       />,
     )
-    fireEvent.change(screen.getByPlaceholderText(/api_key/i), {
-      target: { value: '{"api_key": "abc123"}' },
+    fireEvent.change(screen.getByLabelText(/auth config/i).closest('div')!.querySelector('textarea')!, {
+      target: {
+        value: JSON.stringify({
+          auth_type: 'api_key',
+          api_key_header: 'X-Key',
+          api_key_value: 'abc123',
+        }),
+      },
     })
     fireEvent.submit(
       screen.getByRole('button', { name: /save changes/i }).closest('form')!,
     )
     expect(handleSubmit).toHaveBeenCalledOnce()
     const payload = handleSubmit.mock.calls[0][0]
-    expect(payload.auth_config).toEqual({ api_key: 'abc123' })
+    expect(payload.auth_config).toEqual({
+      auth_type: 'api_key',
+      api_key_header: 'X-Key',
+      api_key_value: 'abc123',
+    })
+  })
+})
+
+// ── Issue #21 regressions (schedule, clear fields, auth repair) ─────────────
+
+describe('FeedForm — issue #21 regressions', () => {
+  it('create mode still defaults schedule to every six hours', () => {
+    render(<FeedForm onSubmit={vi.fn()} onCancel={vi.fn()} />)
+    const cronInput = screen.getByLabelText(/schedule/i) as HTMLInputElement
+    expect(cronInput.value).toBe('0 */6 * * *')
+  })
+
+  it('edit mode shows empty schedule when feed has null schedule_cron', () => {
+    render(
+      <FeedForm
+        initialValues={{ ...customEditFeed, schedule_cron: null }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    const cronInput = screen.getByLabelText(/schedule/i) as HTMLInputElement
+    expect(cronInput.value).toBe('')
+  })
+
+  it('unchanged save of unscheduled custom feed omits schedule_cron', () => {
+    const handleSubmit = vi.fn()
+    render(
+      <FeedForm
+        initialValues={{ ...customEditFeed, schedule_cron: null }}
+        onSubmit={handleSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+    fireEvent.submit(
+      screen.getByRole('button', { name: /save changes/i }).closest('form')!,
+    )
+    const payload = handleSubmit.mock.calls[0][0]
+    expect('schedule_cron' in payload).toBe(false)
+  })
+
+  it('clearing description sends description: null', () => {
+    const handleSubmit = vi.fn()
+    render(
+      <FeedForm
+        initialValues={customEditFeed}
+        onSubmit={handleSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: '' } })
+    fireEvent.submit(
+      screen.getByRole('button', { name: /save changes/i }).closest('form')!,
+    )
+    expect(handleSubmit.mock.calls[0][0].description).toBe(null)
+  })
+
+  it('clearing schedule sends schedule_cron: null', () => {
+    const handleSubmit = vi.fn()
+    render(
+      <FeedForm
+        initialValues={{ ...customEditFeed, schedule_cron: '0 */6 * * *' }}
+        onSubmit={handleSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText(/schedule/i), { target: { value: '' } })
+    fireEvent.submit(
+      screen.getByRole('button', { name: /save changes/i }).closest('form')!,
+    )
+    expect(handleSubmit.mock.calls[0][0].schedule_cron).toBe(null)
+  })
+
+  it('auth_needs_repair shows repair warning and JSON editor instead of API key field', () => {
+    render(
+      <FeedForm
+        initialValues={{
+          ...customEditFeed,
+          has_auth: true,
+          auth_supported: true,
+          auth_needs_repair: true,
+        }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/invalid or outdated/i)).toBeTruthy()
+    expect(screen.queryByLabelText(/^api key$/i)).toBeNull()
+    expect(screen.getByLabelText(/auth config/i)).toBeTruthy()
+  })
+
+  it('shows inline error for malformed auth JSON structure', () => {
+    render(<FeedForm onSubmit={vi.fn()} onCancel={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText(/feed name/i), {
+      target: { value: 'My Feed' },
+    })
+    fireEvent.change(screen.getByLabelText(/^url$/i), {
+      target: { value: 'https://example.com' },
+    })
+    fireEvent.change(
+      screen.getByLabelText(/auth config/i).closest('div')!.querySelector('textarea')!,
+      { target: { value: '{"api_key":"only-legacy"}' } },
+    )
+    fireEvent.submit(screen.getByRole('button', { name: /create feed/i }).closest('form')!)
+    expect(document.getElementById('feed-auth-config-error')?.textContent).toMatch(
+      /auth_type is required/,
+    )
+  })
+
+  it('displays submitError from server on the form', () => {
+    render(
+      <FeedForm
+        initialValues={baseEditFeed}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+        submitError="Stored auth configuration is invalid"
+      />,
+    )
+    expect(screen.getByRole('alert').textContent).toMatch(/invalid/i)
   })
 })
