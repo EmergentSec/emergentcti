@@ -325,6 +325,7 @@ async def preview_export_profile(
 @router.get("/profiles/{profile_id}/download", response_model=None)
 async def download_export_profile(
     profile_id: uuid.UUID,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     _auth: AuthSubject = Depends(get_current_auth),
 ) -> PlainTextResponse | JsonExportResponse:
@@ -349,6 +350,20 @@ async def download_export_profile(
         )
 
     allowlist = await allowlist_service.load_matcher(db)
+    # Count-only query (same withheld-row classification as the text path and
+    # the preview) — building the full value list here would scan every
+    # exportable row a second time just to discard it.
+    by_tlp = await observable_service.count_tlp_excluded(
+        db,
+        obs_type=profile.type,
+        confidence_min=profile.confidence_min,
+        max_age_days=profile.max_age_days,
+        feed_id=profile.feed_id,
+        tags=tags,
+        destination=profile.destination.value,
+        allowlist=allowlist,
+    )
+    response.headers["X-TLP-Excluded"] = str(sum(by_tlp.values()))
     observables = await observable_service.get_export_json(
         db,
         obs_type=profile.type,

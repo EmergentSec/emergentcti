@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import ReportsPage from './ReportsPage'
+import { ReportTagsSaveError } from '@/api/reports'
 import type { ReportFilters } from '@/types/report'
 import { EMPTY_TLP_REPORT_FIELDS } from '@/test/fixtures/tlp'
 
@@ -19,8 +20,9 @@ const { mockAuth } = vi.hoisted(() => ({ mockAuth: { isAdmin: false } }))
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => mockAuth,
 }))
+const { mockToast } = vi.hoisted(() => ({ mockToast: vi.fn() }))
 vi.mock('@/contexts/ToastContext', () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast: mockToast }),
 }))
 
 vi.mock('@/hooks/useTags', () => ({
@@ -28,7 +30,13 @@ vi.mock('@/hooks/useTags', () => ({
 }))
 
 vi.mock('@/components/reports/ReportForm', () => ({
-  ReportForm: () => <div data-testid="report-form" />,
+  ReportForm: ({ onSubmit }: { onSubmit: (payload: unknown) => void }) => (
+    <div data-testid="report-form">
+      <button onClick={() => onSubmit({ title: 'New', origin: 'internal', tags: ['missing'] })}>
+        submit-report
+      </button>
+    </div>
+  ),
 }))
 
 const ITEMS = [
@@ -55,6 +63,8 @@ afterEach(() => {
   cleanup()
   mockAuth.isAdmin = false
   mockUseReports.mockReset()
+  mockCreateReport.mockReset()
+  mockToast.mockReset()
 })
 
 describe('ReportsPage', () => {
@@ -144,5 +154,38 @@ describe('ReportsPage', () => {
     )
 
     expect(screen.getByRole('button', { name: 'New report' })).toBeTruthy()
+  })
+
+  it('opens the created report when tags fail to save, without leaving a retry path', () => {
+    mockAuth.isAdmin = true
+    mockUseReportSources.mockReturnValue({ data: [] })
+    mockUseReports.mockReturnValue({ data: LIST, isLoading: false, error: null })
+    mockCreateReport.mockImplementation((_payload, opts: { onError: (err: unknown) => void }) => {
+      opts.onError(
+        new ReportTagsSaveError({ ...ITEMS[0], id: 'r9' } as never, {
+          isAxiosError: true,
+          response: { data: { detail: 'Tag not found: missing' } },
+        }),
+      )
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/reports?create=1']}>
+        <Routes>
+          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/reports/:id" element={<p>report detail page</p>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'submit-report' }))
+
+    expect(mockCreateReport).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('report detail page')).toBeTruthy()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.stringMatching(/Report created, but tags couldn't be saved: Tag not found: missing/),
+      'error',
+    )
   })
 })

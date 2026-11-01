@@ -138,7 +138,9 @@ describe('ObservableTable', () => {
         <ObservableTable observables={observables} />
       </MemoryRouter>,
     )
-    expect(screen.getByLabelText(/TLP:RED\./)).toBeTruthy()
+    expect(screen.getByText('TLP:RED')).toBeTruthy()
+    // The row is role="button"; the badge must not add a nested control.
+    expect(screen.getByText('TLP:RED').closest('button')).toBeNull()
     expect(screen.getByText('c2')).toBeTruthy()
   })
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Plus } from '@phosphor-icons/react'
 import { useFeeds, useCreateFeed, useUpdateFeed } from '@/hooks/useFeeds'
@@ -61,6 +61,28 @@ export default function FeedsPage() {
   const [editingFeed, setEditingFeed] = useState<Feed | null>(null)
   const [editSubmitError, setEditSubmitError] = useState<string | null>(null)
   const showCreateDialog = isAdmin && searchParams.get('create') === '1'
+  const highlightFeedId = searchParams.get('feed')
+
+  const highlightFeedExists =
+    !highlightFeedId || (feeds ?? []).some((feed) => feed.id === highlightFeedId)
+  // Scroll once per deep-linked id. Feed mutations invalidate ['feeds'];
+  // re-scrolling on every refetch would yank the viewport back to this card.
+  const scrolledToFeedId = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!highlightFeedId || feedsLoading) return
+    if (scrolledToFeedId.current === highlightFeedId) return
+    const el = document.getElementById(`feed-${highlightFeedId}`)
+    if (!el) return
+    scrolledToFeedId.current = highlightFeedId
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [highlightFeedId, feedsLoading, feeds, activeSegment])
+
+  const clearFeedParam = () => {
+    const params = new URLSearchParams(searchParams)
+    params.delete('feed')
+    setSearchParams(params, { replace: true })
+  }
 
   const openCreateDialog = () => {
     const params = new URLSearchParams(searchParams)
@@ -149,6 +171,18 @@ export default function FeedsPage() {
         </CardContent>
       </Card>
 
+      {!highlightFeedExists && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-4 py-3 text-sm text-muted-foreground"
+        >
+          <span>The linked feed was not found. It may have been deleted.</span>
+          <Button variant="ghost" size="sm" onClick={clearFeedParam}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <Tabs
           tabs={SEGMENTS}
@@ -185,7 +219,11 @@ export default function FeedsPage() {
           </Card>
         ) : (
           filteredFeeds.map((feed) => (
-            <FeedCard key={feed.id} feed={feed} onEdit={(feed) => {
+            <FeedCard
+              key={feed.id}
+              feed={feed}
+              highlighted={highlightFeedId === feed.id}
+              onEdit={(feed) => {
               setEditSubmitError(null)
               setEditingFeed(feed)
             }} />

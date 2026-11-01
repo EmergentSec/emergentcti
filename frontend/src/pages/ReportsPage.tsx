@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Paperclip, Plus, Robot } from '@phosphor-icons/react'
 import {
   useReports,
@@ -33,6 +33,7 @@ import { TagMultiFilter } from '@/components/common/TagMultiFilter'
 import { TlpMultiFilter } from '@/components/common/TlpMultiFilter'
 import { formatDate } from '@/lib/utils'
 import { apiErrorMessage } from '@/lib/apiError'
+import { ReportTagsSaveError } from '@/api/reports'
 import type { ReportCreate, ReportFilters, ReportOrigin } from '@/types/report'
 
 const ORIGIN_OPTIONS = [
@@ -50,6 +51,7 @@ const DEFAULT_FILTERS: ReportFilters = {
 export default function ReportsPage() {
   const [filters, setFilters] = useState<ReportFilters>(DEFAULT_FILTERS)
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const { isAdmin } = useAuth()
   const { toast } = useToast()
   const createReport = useCreateReport()
@@ -103,6 +105,12 @@ export default function ReportsPage() {
         closeCreateDialog()
       },
       onError: (err) => {
+        if (err instanceof ReportTagsSaveError) {
+          closeCreateDialog()
+          navigate(`/reports/${err.report.id}`)
+          toast(`Report created, but tags couldn't be saved: ${err.message}`, 'error')
+          return
+        }
         toast(apiErrorMessage(err, 'Failed to create report'), 'error')
       },
     })

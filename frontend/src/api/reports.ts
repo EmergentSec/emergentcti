@@ -1,5 +1,6 @@
 import api from './client'
 import { buildListParams } from './listParams'
+import { apiErrorMessage } from '@/lib/apiError'
 import type {
   ReportAttachment,
   ReportCreate,
@@ -31,6 +32,16 @@ export async function getReport(id: string): Promise<ReportDetail> {
   return data
 }
 
+export class ReportTagsSaveError extends Error {
+  readonly report: ReportDetail
+
+  constructor(report: ReportDetail, cause: unknown) {
+    super(apiErrorMessage(cause, 'Failed to save tags'))
+    this.name = 'ReportTagsSaveError'
+    this.report = report
+  }
+}
+
 /**
  * The backend's report create/patch schemas have no `tags` field (unknown keys
  * are ignored), so tags are saved with the dedicated admin-only
@@ -39,7 +50,13 @@ export async function getReport(id: string): Promise<ReportDetail> {
 export async function createReport(payload: ReportCreate): Promise<ReportDetail> {
   const { tags, ...body } = payload
   const { data } = await api.post<ReportDetail>('/reports', body)
-  if (tags && tags.length > 0) return setReportTags(data.id, tags)
+  if (tags && tags.length > 0) {
+    try {
+      return await setReportTags(data.id, tags)
+    } catch (err) {
+      throw new ReportTagsSaveError(data, err)
+    }
+  }
   return data
 }
 

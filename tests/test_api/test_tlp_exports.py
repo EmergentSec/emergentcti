@@ -395,3 +395,19 @@ async def test_cached_red_value_withheld_after_it_drifts_out_of_filters(
     assert cached.headers["X-Cache"] == "HIT"
     assert cached.text == "203.0.113.96"
     assert cached.headers["X-TLP-Excluded"] == "1"
+
+
+async def test_json_profile_download_sends_x_tlp_excluded_header(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    red_feed = await add_feed(db_session, "Red feed", tlp="red")
+    await add_observable(db_session, "203.0.113.99", feed=red_feed)
+    clear_feed = await add_feed(db_session, "Clear feed", tlp="clear")
+    await add_observable(db_session, "203.0.113.98", feed=clear_feed)
+    profile = await _profile(client, "JSON header", "json", confidence_min=0)
+    download = await client.get(f"{PROFILES}/{profile['id']}/download")
+    assert download.headers["X-TLP-Excluded"] == "1"
+    assert [o["value"] for o in download.json()["observables"]] == ["203.0.113.98"]
+    # Same count semantics as the preview (and the text download path).
+    preview = (await client.get(f"{PROFILES}/{profile['id']}/preview")).json()
+    assert sum(preview["excluded_by_tlp"].values()) == 1

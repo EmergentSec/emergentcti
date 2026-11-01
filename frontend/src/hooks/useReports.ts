@@ -14,6 +14,7 @@ import {
   extractReportIndicators,
   importReportIndicators,
   setReportTags,
+  ReportTagsSaveError,
 } from '@/api/reports'
 import type { ImportRequest } from '@/types/reportIocExtraction'
 import type { ReportCreate, ReportFilters, ReportUpdate } from '@/types/report'
@@ -54,6 +55,12 @@ export function useCreateReport() {
     mutationFn: (data: ReportCreate) => createReport(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reports'] })
+    },
+    onError: (err) => {
+      if (err instanceof ReportTagsSaveError) {
+        queryClient.invalidateQueries({ queryKey: ['reports'] })
+        queryClient.invalidateQueries({ queryKey: ['report', err.report.id] })
+      }
     },
   })
 }

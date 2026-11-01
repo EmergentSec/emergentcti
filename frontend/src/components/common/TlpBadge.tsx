@@ -13,8 +13,9 @@ export interface TlpBadgeProps {
 function badgeClasses(tlp: Tlp | null): string {
   if (tlp === null) {
     return cn(
-      'border border-dashed border-borderStrong bg-transparent text-muted-foreground',
-      'dark:border-muted-foreground/50',
+      'border border-dashed border-muted-foreground/75 bg-transparent text-muted-foreground',
+      // >=3:1 non-text contrast (WCAG 1.4.11) on background and card in both modes.
+      'dark:border-muted-foreground/60',
     )
   }
   switch (tlp) {
@@ -49,9 +50,16 @@ function labelText(tlp: Tlp | null, showStrictLabel: boolean): ReactNode {
   return TLP_LABELS[tlp]
 }
 
+/**
+ * Non-interactive on purpose: badges render once per row in long tables
+ * (observables, reports), and some of those rows are themselves
+ * `role="button"`. A focusable badge would add a tab stop per row and nest an
+ * interactive control inside another. The visible label carries the marking
+ * (not color alone); the meaning is exposed as inline screen-reader text and
+ * as a hover tooltip.
+ */
 export function TlpBadge({ tlp, showStrictLabel = true, className }: TlpBadgeProps) {
   const meaning = tlp === null ? TLP_UNSPECIFIED_MEANING : TLP_MEANINGS[tlp]
-  const textLabel = tlp === null ? 'Unspecified' : TLP_LABELS[tlp]
 
   return (
     <span
@@ -61,9 +69,9 @@ export function TlpBadge({ tlp, showStrictLabel = true, className }: TlpBadgePro
         className,
       )}
       title={meaning}
-      aria-label={`${textLabel}. ${meaning}`}
     >
       {labelText(tlp, showStrictLabel)}
+      <span className="sr-only">: {meaning}</span>
     </span>
   )
 }
