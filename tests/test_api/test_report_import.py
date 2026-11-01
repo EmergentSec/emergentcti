@@ -17,7 +17,7 @@ from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
 from cti.models.report import Report, ReportAttachment, report_observables
 from cti.models.user import User, UserRole
-from cti.services import retention
+from cti.services import report_import_service, retention
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -500,6 +500,145 @@ async def test_import_fills_attribution_on_manual_link(
     observable = await db_session.get(Observable, linked_id, populate_existing=True)
     assert observable is not None
     assert observable.confidence_score == 33
+
+
+def stale_links(monkeypatch: pytest.MonkeyPatch, fake: Any) -> None:
+    """Make the import read a stale link snapshot, as if a concurrent import raced it."""
+
+    async def _stale(_db: Any, _report_id: Any, observable_ids: Any) -> dict[Any, Any]:
+        return fake(observable_ids)
+
+    monkeypatch.setattr(report_import_service, "_find_links", _stale)
+
+
+async def test_import_counts_a_lost_link_insert_as_already_attributed(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    world: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_id = world["report"]["id"]
+    body = {
+        "confidence": 70,
+        "items": [
+            {"type": "domain-name", "value": "fresh-drop.example"},
+            {"type": "ip-addr", "value": "185.220.101.42"},
+        ],
+    }
+    first = await client.post(f"{REPORTS}/{report_id}/import", json=body)
+    assert first.status_code == 200, first.text
+    after_first = await snapshot(db_session)
+    stale_links(monkeypatch, lambda _ids: {})  # "No links yet": both inserts are no-ops.
+
+    second = await client.post(f"{REPORTS}/{report_id}/import", json={**body, "confidence": 5})
+
+    assert second.status_code == 200, second.text
+    assert second.json()["created"] == 0
+    assert second.json()["attributed_existing"] == 0
+    assert second.json()["already_attributed"] == 2
+    assert await snapshot(db_session) == after_first
+
+
+async def test_import_counts_a_no_op_manual_fill_as_already_attributed(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    world: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_id = world["report"]["id"]
+    body = {"confidence": 42, "items": [{"type": "ip-addr", "value": "45.33.32.156"}]}
+    first = await client.post(f"{REPORTS}/{report_id}/import", json=body)
+    assert first.json()["attributed_existing"] == 1
+    after_first = await snapshot(db_session)
+    # "Still a manual link": the UPDATE ... WHERE imported_at IS NULL matches nothing.
+    stale_links(monkeypatch, lambda ids: dict.fromkeys(ids))
+
+    second = await client.post(f"{REPORTS}/{report_id}/import", json={**body, "confidence": 9})
+
+    assert second.status_code == 200, second.text
+    assert second.json()["attributed_existing"] == 0
+    assert second.json()["already_attributed"] == 1
+    assert await snapshot(db_session) == after_first
+
+
+async def test_import_fills_a_manual_link_that_won_the_insert_race(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    world: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_id = world["report"]["id"]
+    linked_id = world["linked"]
+    stale_links(monkeypatch, lambda _ids: {})  # The manual link appeared after the read.
+
+    response = await client.post(
+        f"{REPORTS}/{report_id}/import",
+        json={"confidence": 42, "items": [{"type": "ip-addr", "value": "45.33.32.156"}]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["attributed_existing"] == 1
+    assert response.json()["already_attributed"] == 0
+    row = await link_row(db_session, report_id, linked_id)
+    assert row.imported_at is not None
+    assert row.analyst_confidence == 42
+
+
+UNICODE_CONTENT = (
+    "Drop host m\u00fcnchen.example, phish from user\u200b@pay-portal.example and "
+    "beacon https://b\u00fccher.example/g\u202ea\u200cte today."
+)
+
+
+async def test_import_accepts_exactly_the_unicode_safe_preview_values(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    world: dict[str, Any],
+) -> None:
+    report = await create_report(client, content=UNICODE_CONTENT)
+    preview = await client.post(f"{REPORTS}/{report['id']}/extract")
+    assert preview.status_code == 200, preview.text
+    found = {(c["type"], c["value"]) for c in preview.json()["candidates"]}
+    expected = {
+        ("domain-name", "xn--mnchen-3ya.example"),
+        ("email-addr", "user@pay-portal.example"),
+        ("url", "https://xn--bcher-kva.example/gate"),
+    }
+    assert found == expected
+    domain = candidate(preview.json(), "domain-name", "xn--mnchen-3ya.example")
+    assert domain["original"] == "m\u00fcnchen.example"
+
+    before = await snapshot(db_session)
+    rejected = await client.post(
+        f"{REPORTS}/{report['id']}/import",
+        json={
+            "confidence": 50,
+            "items": [
+                {"type": "domain-name", "value": "nchen.example"},
+                {"type": "domain-name", "value": "pay-portal.example"},
+                {"type": "domain-name", "value": "m\u00fcnchen.example"},
+            ],
+        },
+    )
+    assert_not_a_candidate(
+        rejected,
+        [
+            (0, "domain-name", "nchen.example"),
+            (1, "domain-name", "pay-portal.example"),
+            (2, "domain-name", "m\u00fcnchen.example"),
+        ],
+    )
+    assert await snapshot(db_session) == before
+
+    accepted = await client.post(
+        f"{REPORTS}/{report['id']}/import",
+        json={
+            "confidence": 50,
+            "items": [{"type": t, "value": v} for t, v in sorted(expected)],
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["created"] == 3
 
 
 def assert_not_a_candidate(response: Any, expected: list[tuple[int, str, str]]) -> None:

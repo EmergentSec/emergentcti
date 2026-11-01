@@ -302,41 +302,61 @@ async def import_candidates(
         "imported_by_id": imported_by_id,
         "analyst_confidence": confidence,
     }
-    created = attributed_existing = already_attributed = 0
-    new_links: list[dict[str, Any]] = []
-    result_observables: list[ImportedObservable] = []
+    excerpts = {
+        observables[key][0]: candidates[(key[0].value, key[1])].context[:500] for key in keys
+    }
 
+    # Counters come from what the database reports it changed, not from the
+    # snapshot read above: a concurrent import can win any of these writes.
+    attributed: set[uuid.UUID] = set()
+    to_fill = [oid for oid, imported_at in links.items() if imported_at is None]
+    new_link_ids = [observables[key][0] for key in keys if observables[key][0] not in links]
+    if new_link_ids:
+        inserted = await db.execute(
+            insert(report_observables)
+            .values(
+                [
+                    {
+                        "report_id": report.id,
+                        "observable_id": observable_id,
+                        "source_excerpt": excerpts[observable_id],
+                        **attribution,
+                    }
+                    for observable_id in new_link_ids
+                ]
+            )
+            .on_conflict_do_nothing(index_elements=["report_id", "observable_id"])
+            .returning(report_observables.c.observable_id)
+        )
+        attributed.update(inserted.scalars())
+        # Lost the insert race: the winner's row may be a manual link to fill.
+        to_fill.extend(oid for oid in new_link_ids if oid not in attributed)
+    for observable_id in to_fill:
+        # Manual link from #12: fill in attribution, keep the row.
+        filled = await db.execute(
+            update(report_observables)
+            .where(
+                report_observables.c.report_id == report.id,
+                report_observables.c.observable_id == observable_id,
+                report_observables.c.imported_at.is_(None),
+            )
+            .values(source_excerpt=excerpts[observable_id], **attribution)
+            .returning(report_observables.c.observable_id)
+        )
+        if filled.first() is not None:  # Zero rows: a concurrent import filled it.
+            attributed.add(observable_id)
+
+    created = attributed_existing = already_attributed = 0
+    result_observables: list[ImportedObservable] = []
     for key in keys:
         observable_id, confidence_score = observables[key]
         was_created = proposed_ids.get(key) == observable_id
-        excerpt = candidates[(key[0].value, key[1])].context[:500]
-        if observable_id not in links:
-            new_links.append(
-                {
-                    "report_id": report.id,
-                    "observable_id": observable_id,
-                    "source_excerpt": excerpt,
-                    **attribution,
-                }
-            )
-            if was_created:
-                created += 1
-            else:
-                attributed_existing += 1
-        elif links[observable_id] is None:
-            # Manual link from #12: fill in attribution, keep the row.
-            await db.execute(
-                update(report_observables)
-                .where(
-                    report_observables.c.report_id == report.id,
-                    report_observables.c.observable_id == observable_id,
-                    report_observables.c.imported_at.is_(None),
-                )
-                .values(source_excerpt=excerpt, **attribution)
-            )
-            attributed_existing += 1
-        else:
+        if observable_id not in attributed:
             already_attributed += 1
+        elif was_created:
+            created += 1
+        else:
+            attributed_existing += 1
         result_observables.append(
             ImportedObservable(
                 id=observable_id,
@@ -347,12 +367,6 @@ async def import_candidates(
             )
         )
 
-    if new_links:
-        await db.execute(
-            insert(report_observables)
-            .values(new_links)
-            .on_conflict_do_nothing(index_elements=["report_id", "observable_id"])
-        )
     await db.flush()
     # The report's eagerly loaded observable list predates these writes.
     db.expire(report, ["observables"])

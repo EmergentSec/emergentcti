@@ -200,8 +200,119 @@ def test_unsupported_scheme_is_not_a_url() -> None:
 
 
 def test_url_values_never_carry_invisible_characters() -> None:
-    found = keys("http://evil.example/a‮gnp.exe")
-    assert (URL, "http://evil.example/a") in found
+    # Format characters are removed before matching, never kept in a value.
+    found = by_key("http://evil.example/a‮gnp.exe")
+    assert set(found) == {(URL, "http://evil.example/agnp.exe")}
+    assert found[(URL, "http://evil.example/agnp.exe")].original == "http://evil.example/agnp.exe"
+
+
+FORMAT_CHARS = [
+    "\u00ad",
+    "\u200b",
+    "\u200c",
+    "\u200d",
+    "\u202a",
+    "\u202b",
+    "\u202c",
+    "\u202d",
+    "\u202e",
+    "\u2060",
+    "\u2064",
+    "\ufeff",
+]
+
+
+@pytest.mark.parametrize("char", FORMAT_CHARS)
+def test_format_characters_inside_a_domain_are_removed(char: str) -> None:
+    found = by_key(f"see evil{char}exa{char}mple.com now")
+    assert set(found) == {(DOMAIN, "evilexample.com")}
+    assert found[(DOMAIN, "evilexample.com")].original == "evilexample.com"
+    assert char not in found[(DOMAIN, "evilexample.com")].context
+
+
+@pytest.mark.parametrize("char", FORMAT_CHARS)
+def test_format_characters_inside_a_url_are_removed(char: str) -> None:
+    assert keys(f"get http{char}s://c2.ex{char}ample/ga{char}te ok") == {
+        (URL, "https://c2.example/gate")
+    }
+
+
+@pytest.mark.parametrize("char", FORMAT_CHARS)
+def test_format_characters_around_email_at_sign_are_removed(char: str) -> None:
+    found = by_key(f"mail user{char}@{char}pay{char}-portal.example today")
+    assert set(found) == {(EMAIL, "user@pay-portal.example")}
+    assert found[(EMAIL, "user@pay-portal.example")].original == "user@pay-portal.example"
+
+
+@pytest.mark.parametrize("char", FORMAT_CHARS)
+def test_format_characters_inside_defang_markers_are_removed(char: str) -> None:
+    found = by_key(f"evil[{char}.]example")
+    assert set(found) == {(DOMAIN, "evil.example")}
+    assert found[(DOMAIN, "evil.example")].defanged is True
+
+
+def test_review_reproducers_for_format_characters() -> None:
+    # The reviewer's literal inputs ("\u202examp" is U+202E then "xamp").
+    assert keys("evil\u202examp\u200cle.com") == {(DOMAIN, "evilxample.com")}
+    assert keys("evil\u202eexamp\u200cle.com") == {(DOMAIN, "evilexample.com")}
+    assert keys("user\u200c@pay-portal.example") == {(EMAIL, "user@pay-portal.example")}
+    assert keys("mail user\u202e@pay\u200c-portal.example") == {(EMAIL, "user@pay-portal.example")}
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("visit münchen.example today", (DOMAIN, "xn--mnchen-3ya.example")),
+        ("visit MÜNCHEN.Example today", (DOMAIN, "xn--mnchen-3ya.example")),
+        ("host evil.exampleü here", (DOMAIN, "evil.xn--example-t2a")),
+        ("host shop.bücher.example here", (DOMAIN, "shop.xn--bcher-kva.example")),
+        ("host 例え.jp here", (DOMAIN, "xn--r8jz45g.jp")),
+        ("defanged münchen[.]example", (DOMAIN, "xn--mnchen-3ya.example")),
+        ("url https://münchen.example/p?q=ü", (URL, "https://xn--mnchen-3ya.example/p?q=ü")),
+        (
+            "url http://user@bücher.example:8080/x",
+            (URL, "http://user@xn--bcher-kva.example:8080/x"),
+        ),
+        ("mail ops@bücher.example now", (EMAIL, "ops@xn--bcher-kva.example")),
+        ("mail ops@münchen.example.", (EMAIL, "ops@xn--mnchen-3ya.example")),
+    ],
+)
+def test_non_ascii_host_labels_are_taken_whole_and_idna_encoded(
+    text: str, expected: tuple[ObservableType, str]
+) -> None:
+    found = by_key(text)
+    assert set(found) == {expected}
+    assert found[expected].valid is True
+
+
+@pytest.mark.parametrize(
+    ("text", "suffix"),
+    [
+        ("visit münchen.example", "nchen.example"),
+        ("see zürich.example", "rich.example"),
+        ("https://münchen.example/x", "nchen.example"),
+        ("ops@bücher.example", "cher.example"),
+    ],
+)
+def test_no_candidate_is_a_suffix_of_a_non_ascii_host(text: str, suffix: str) -> None:
+    candidates = extract([text]).candidates
+    assert len(candidates) == 1
+    assert candidates[0].value.isascii()
+    assert "xn--" in candidates[0].value
+    assert suffix not in candidates[0].value
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "x" + "ü" * 70 + ".example",  # Label longer than 63: does not encode.
+        "ü" * 250 + ".example",  # Host longer than 253.
+        "mail ops@" + "ü" * 70 + ".example",
+        "https://" + "ü" * 70 + ".example/x",
+    ],
+)
+def test_non_ascii_host_that_does_not_encode_emits_nothing(text: str) -> None:
+    assert extract([text]).candidates == []
 
 
 def test_email_domain_is_not_double_emitted() -> None:
@@ -282,6 +393,13 @@ def test_overlong_url_is_invalid_and_clipped() -> None:
         "0" * 2_000_000,
         "[.]" * 600_000,
         "1.1." * 500_000,
+        "ü." * 1_000_000,
+        "ü" * 1_999_000 + ".example",
+        "a@" + "ü" * 1_999_000,
+        "\u200b" * 2_000_000,
+        "ü\u200b." * 600_000,
+        "http://" + "ü" * 1_999_000,
+        " ".join(f"x{i}.ü" for i in range(260_000))[:2_000_000],  # Distinct IDNA hosts.
     ],
 )
 def test_pathological_input_runs_in_linear_time(text: str) -> None:

@@ -6,10 +6,13 @@ does a bounded amount of work per input character (no nested unbounded
 quantifiers; unbounded runs are anchored by a lookbehind so each run is tried
 from one start position only).
 
-Pipeline: refang the text once (recording where substitutions happened), then
+Pipeline: remove Unicode format characters (category Cf), refang the text
+once (recording where substitutions happened), then
 run the type phases in order — URLs, emails, IPv6, IPv4, hashes, domains —
 masking what an earlier phase emitted so a URL's host or an email's domain is
-not emitted again.
+not emitted again. A host (domain, URL host, email domain) never starts or
+ends next to a non-ASCII letter or digit: such hosts are taken whole and
+IDNA-encoded, or dropped when they do not encode.
 """
 
 from __future__ import annotations
@@ -17,8 +20,10 @@ from __future__ import annotations
 import bisect
 import ipaddress
 import re
+import sys
 import unicodedata
 from dataclasses import dataclass, field
+from functools import cache, lru_cache
 from typing import TYPE_CHECKING
 
 from cti.models.observable import ObservableType
@@ -58,6 +63,33 @@ W_INVALID_IP = "invalid_ip"
 W_INVALID_HASH = "invalid_hash"
 W_INVALID_DOMAIN = "invalid_domain"
 W_VALUE_TOO_LONG = "value_too_long"
+
+
+# ── Format characters ────────────────────────────────────────────────────
+
+
+@cache
+def _format_char_re() -> re.Pattern[str]:
+    """One character class of every Unicode ``Cf`` code point (built once)."""
+    ranges: list[tuple[int, int]] = []
+    for code_point in range(0x80, sys.maxunicode + 1):
+        if unicodedata.category(chr(code_point)) == "Cf":
+            if ranges and ranges[-1][1] == code_point - 1:
+                ranges[-1] = (ranges[-1][0], code_point)
+            else:
+                ranges.append((code_point, code_point))
+    body = "".join(
+        re.escape(chr(lo)) if lo == hi else f"{re.escape(chr(lo))}-{re.escape(chr(hi))}"
+        for lo, hi in ranges
+    )
+    return re.compile(f"[{body}]+")
+
+
+def strip_format_chars(text: str) -> str:
+    """Remove Unicode format characters (zero-width, bidi controls, BOM, ...)."""
+    if text.isascii():
+        return text  # Every Cf code point is non-ASCII.
+    return _format_char_re().sub("", text)
 
 
 # ── Refanging ────────────────────────────────────────────────────────────
@@ -166,6 +198,27 @@ def normalize_domain(value: str) -> str | None:
     return host
 
 
+def idna_host(host: str) -> str | None:
+    """IDNA-encode a host with non-ASCII labels; None when it does not encode.
+
+    Labels and the host are length-checked first so the codec (punycode is
+    quadratic in label length) only ever sees bounded input.
+    """
+    if host.isascii():
+        return host
+    return _idna_encode(host)
+
+
+@lru_cache(maxsize=4096)  # Reports repeat hosts; the codec is the slow part.
+def _idna_encode(host: str) -> str | None:
+    if len(host) > 253 or any(len(label) > 63 for label in host.split(".")):
+        return None
+    try:
+        return host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return None
+
+
 def _is_non_public(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return (
         address.is_private
@@ -198,9 +251,10 @@ def _normalize_url_host(host: str) -> str | None:
         except ValueError:
             return None
         return host
-    if normalize_domain(host) is None:
+    encoded = idna_host(host)
+    if encoded is None or normalize_domain(encoded) is None:
         return None
-    return host.lower()
+    return encoded.lower()
 
 
 _PORT_RE = re.compile(r"(?::[0-9]{1,5})?")
@@ -344,8 +398,13 @@ def _phase_urls(text: str) -> tuple[list[_Hit], list[tuple[int, int]]]:
 
 
 _EMAIL_LOCAL = r"A-Za-z0-9._%+\-"
-_HOST_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-")
-_EMAIL_RE = re.compile(rf"(?<![{_EMAIL_LOCAL}])[{_EMAIL_LOCAL}]{{1,64}}@[A-Za-z0-9.\-]{{1,253}}")
+# Domain characters are any letter or digit (``[^\W_]``), dot or hyphen, so a
+# non-ASCII label is taken whole and IDNA-encoded rather than cut short.
+_EMAIL_RE = re.compile(rf"(?<![{_EMAIL_LOCAL}])[{_EMAIL_LOCAL}]{{1,64}}@(?:[^\W_]|[.\-]){{1,253}}")
+
+
+def _is_host_char(ch: str) -> bool:
+    return ch.isalnum() or ch in ".-"
 
 
 def _phase_emails(text: str) -> tuple[list[_Hit], list[tuple[int, int]]]:
@@ -353,7 +412,7 @@ def _phase_emails(text: str) -> tuple[list[_Hit], list[tuple[int, int]]]:
     spans: list[tuple[int, int]] = []
     for match in _EMAIL_RE.finditer(text):
         start, end = match.span()
-        if end < len(text) and text[end] in _HOST_CHARS:
+        if end < len(text) and _is_host_char(text[end]):
             continue  # Domain part longer than any valid hostname.
         local, _, domain = match.group().partition("@")
         stripped_local = local.lstrip(".")
@@ -362,7 +421,8 @@ def _phase_emails(text: str) -> tuple[list[_Hit], list[tuple[int, int]]]:
         end -= len(domain) - len(stripped_domain)
         if not stripped_local or stripped_local.endswith("."):
             continue
-        normalized = normalize_domain(stripped_domain)
+        encoded = idna_host(stripped_domain)
+        normalized = normalize_domain(encoded) if encoded is not None else None
         if normalized is None:
             continue
         spans.append((start, end))
@@ -449,7 +509,9 @@ def _phase_hashes(text: str) -> tuple[list[_Hit], list[tuple[int, int]]]:
     return hits, spans
 
 
-_DOMAIN_RUN_RE = re.compile(r"(?<![A-Za-z0-9._\-])[A-Za-z0-9_\-]*\.[A-Za-z0-9._\-]*")
+# ``\w`` is Unicode-aware: a run spans every adjacent letter or digit, ASCII or
+# not, so it can never begin or end next to a non-ASCII letter or digit.
+_DOMAIN_RUN_RE = re.compile(r"(?<![\w.\-])[\w\-]*\.[\w.\-]*")
 
 
 def _phase_domains(text: str, offsets: _OffsetMap) -> list[_Hit]:
@@ -461,6 +523,11 @@ def _phase_domains(text: str, offsets: _OffsetMap) -> list[_Hit]:
             continue
         start = match.start() + (len(run) - len(run.lstrip(".")))
         end = start + len(token)
+        if not token.isascii():
+            encoded = idna_host(token)
+            if encoded is None:
+                continue  # Never emit part of a host that does not encode.
+            token = encoded
         labels = token.split(".")
         tld = labels[-1].lower()
         if len(labels) < 2 or not _tld_shape_ok(tld):
@@ -525,6 +592,7 @@ def extract(texts: Sequence[str]) -> ExtractionResult:
             text = text[:remaining]
             truncated = True
         remaining -= len(text)
+        text = strip_format_chars(text)
         scanned.append(text)
 
         hits, offsets = _scan(text)
