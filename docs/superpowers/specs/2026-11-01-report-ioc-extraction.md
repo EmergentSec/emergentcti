@@ -89,6 +89,8 @@ Unicode handling (pinned after backend review):
   example U+200B–U+200D, U+202A–U+202E, U+2060–U+2064, U+FEFF) from the
   scanned text. Authors often use them to obfuscate indicators. `original`
   shows the text with them removed; `context` already strips them.
+- Then compose the text to NFC (so combining marks join their base letter) and
+  map the IDNA dot homoglyphs U+FF0E, U+3002, U+FF61 to `.`.
 - A host run (domain, URL host, or email domain) must never start or end next
   to a non-ASCII letter or digit. When it would, extend the run over the
   adjacent non-ASCII label characters and IDNA-encode the whole host with
