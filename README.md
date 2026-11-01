@@ -98,6 +98,22 @@ there is no separate report-upload directory to copy. Attachments are limited to
 20 MiB by default. Set `REPORT_MAX_UPLOAD_BYTES` to change the API limit and keep
 the nginx `client_max_body_size` setting above that value.
 
+## AI providers
+
+Administrators can configure bring-your-own API keys for Anthropic, OpenAI,
+OpenRouter, and xAI (Grok) under **Settings → AI**. Create keys in the provider
+consoles: [Anthropic](https://console.anthropic.com/settings/keys),
+[OpenAI](https://platform.openai.com/api-keys),
+[OpenRouter](https://openrouter.ai/settings/keys), or
+[xAI](https://console.x.ai/).
+
+`FEED_ENCRYPTION_KEY` encrypts AI provider keys as well as feed credentials. Back
+it up with the database: changing or losing it makes stored keys unreadable, and
+each provider key must then be re-entered. Provider usage charges and data-handling
+policies belong to the external provider. Saving a key, checking a connection, and
+listing models do not send CTI instance data; only the separately confirmed
+inference test makes a potentially billable request, using one fixed tiny prompt.
+
 ## Development
 
 Backend — run the API and tests with [uv](https://docs.astral.sh/uv/):
