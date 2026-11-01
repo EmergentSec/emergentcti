@@ -84,7 +84,7 @@ manual_confidence: number | null;
 confidence_override: {
   value: number;
   set_at: string;                 // ISO timestamp
-  set_by: string | null;          // username; null if the user was deleted
+  set_by: string | null;          // username; null if set via an API key or the user was deleted
 } | null;
 ```
 
@@ -95,8 +95,10 @@ The export JSON format is unchanged.
 On the observable detail page (`ObservableDetailPage.tsx`):
 
 - **Confidence display:** when an override is active, show a badge ("Pinned by
-  <user>, <relative time>") next to the confidence. The page also shows the
-  analyst floor (`manual_confidence`) when it is non-null.
+  <user>, <relative time>") next to the confidence. When `set_by` is null,
+  show "Pinned by an API key or removed user, <time>". The page also shows
+  `manual_confidence` labelled "Manual floor" when it is non-null. It is not
+  the whole analyst floor, because report-import confidences also count.
 - **Admin-only "Override confidence" control:**
   - Number input, 0–100, whole numbers only, prefilled with the current
     effective confidence.
