@@ -93,3 +93,17 @@ async def invalidate_blocklist_cache() -> None:
         logger.warning("invalidate_blocklist_cache failed; stale entries expire by TTL")
     if deleted:
         logger.info("Invalidated %d blocklist cache entries", deleted)
+
+
+STATS_DASHBOARD_KEY = "stats:dashboard"
+
+
+async def invalidate_observable_caches() -> None:
+    """Drop every cache derived from the observable set (dashboard stats, blocklists).
+
+    Call after committing any change that adds, removes, or re-scores
+    observables, so the dashboard and blocklist exports reflect it at once
+    rather than after their TTLs. Best-effort, like the other helpers.
+    """
+    await invalidate_blocklist_cache()
+    await cache_delete(STATS_DASHBOARD_KEY)

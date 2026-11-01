@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cti.api.v1.reports import report_to_summary
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
+from cti.core.redis import invalidate_observable_caches
 from cti.models.observable import ObservableType
 from cti.schemas.observable import (
     ObservableCreate,
@@ -121,6 +122,9 @@ async def create_observable(
         confidence_score=data.confidence_score,
     )
     await db.commit()
+    # Even an upsert of an existing value can raise its confidence (MAX), which
+    # changes blocklist eligibility, so invalidate on every successful create.
+    await invalidate_observable_caches()
     return _obs_to_response(obs, await allowlist_service.load_matcher(db))
 
 
@@ -158,3 +162,4 @@ async def delete_observable(
     if not deleted:
         raise HTTPException(status_code=404, detail="Observable not found")
     await db.commit()
+    await invalidate_observable_caches()

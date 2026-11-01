@@ -24,6 +24,8 @@ export function useCreateObservable() {
     mutationFn: (data: ObservableCreate) => createObservable(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['observables'] })
+      // Dashboard KPIs and the sidebar observable badge read this query.
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
   })
 }
@@ -34,6 +36,8 @@ export function useDeleteObservable() {
     mutationFn: (id: string) => deleteObservable(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['observables'] })
+      // Dashboard KPIs and the sidebar observable badge read this query.
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
   })
 }

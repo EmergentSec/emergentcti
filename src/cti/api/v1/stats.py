@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth
-from cti.core.redis import cache_get, cache_set
+from cti.core.redis import STATS_DASHBOARD_KEY, cache_get, cache_set
 from cti.models.feed import Feed, FeedRun, FeedRunStatus
 from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
@@ -26,7 +26,7 @@ async def get_stats(
     """Dashboard stats: counts by type, feed health, recent ingestion."""
     import json
 
-    cached = await cache_get("stats:dashboard")
+    cached = await cache_get(STATS_DASHBOARD_KEY)
     if cached:
         return json.loads(cached)
 
@@ -150,6 +150,6 @@ async def get_stats(
         "feeds_health": feeds_health,
     }
 
-    await cache_set("stats:dashboard", json.dumps(result, default=str), ttl_seconds=60)
+    await cache_set(STATS_DASHBOARD_KEY, json.dumps(result, default=str), ttl_seconds=60)
 
     return result
