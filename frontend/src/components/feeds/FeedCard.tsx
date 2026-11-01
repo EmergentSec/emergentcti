@@ -157,6 +157,15 @@ export function FeedCard({ feed, onEdit }: FeedCardProps) {
                   <h3 className="font-semibold text-foreground">{feed.name}</h3>
                   <Badge variant="outline">{typeConfig.label}</Badge>
                   <FeedStatus feed={feed} />
+                  {feed.auth_needs_repair && (
+                    <Badge
+                      variant="warning"
+                      className="border border-warning"
+                      title="Stored authentication is invalid or unreadable; repair in Edit feed"
+                    >
+                      Auth needs repair
+                    </Badge>
+                  )}
                 </div>
                 {feed.description && (
                   <p className="mt-1 text-sm text-muted-foreground">{feed.description}</p>

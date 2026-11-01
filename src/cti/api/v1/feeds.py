@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -9,11 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
-from cti.core.security import decrypt_config
 from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.schemas.feed import FeedCreate, FeedResponse, FeedRunResponse, FeedUpdate
 from cti.services import feed_service
-from cti.services.feed_auth import AuthConfigValidationError, stored_auth_needs_repair
+from cti.services.feed_auth import (
+    AuthConfigValidationError,
+    stored_auth_needs_repair,
+    try_decrypt_stored_auth,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -24,7 +30,13 @@ _AUTH_FEED_NAMES = {d["name"] for d in DEFAULT_FEEDS if d.get("requires_api_key"
 def _feed_auth_needs_repair(feed) -> bool:
     if feed.auth_config_encrypted is None:
         return False
-    decrypted = decrypt_config(feed.auth_config_encrypted)
+    decrypted = try_decrypt_stored_auth(feed.auth_config_encrypted)
+    if decrypted is None:
+        logger.warning(
+            "Feed auth could not be decrypted; marking auth_needs_repair",
+            extra={"feed_id": str(feed.id)},
+        )
+        return True
     return stored_auth_needs_repair(decrypted, feed_url=feed.url)
 
 

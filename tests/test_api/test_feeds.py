@@ -11,8 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cti.core.security import decrypt_config, encrypt_config
 from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.models.feed import Feed, FeedType
-from cti.services.feed_auth import REPAIR_MESSAGE
+from cti.services.feed_auth import REPAIR_MESSAGE, URL_TEMPLATE_URL_CHANGE_MESSAGE
 from tests.policy_helpers import non_admin_client
+
+
+def _corrupted_auth_blob(valid_config: dict) -> bytes:
+    encrypted = encrypt_config(valid_config)
+    tampered = bytearray(encrypted)
+    tampered[len(tampered) // 2] ^= 0xFF
+    return bytes(tampered)
 
 
 @pytest.mark.asyncio
@@ -556,6 +563,220 @@ async def test_invalid_full_auth_config_on_create_returns_422(
         },
     )
     assert resp.status_code == 422
+    assert "not supported" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_undecryptable_auth_list_and_detail_return_repair_flag(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    valid = {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "secret"}
+    feed = Feed(
+        name="UndecryptableFeed",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=_corrupted_auth_blob(valid),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    list_resp = await client.get("/api/v1/feeds")
+    assert list_resp.status_code == 200
+    row = next(item for item in list_resp.json() if item["id"] == str(feed.id))
+    assert row["auth_needs_repair"] is True
+
+    detail_resp = await client.get(f"/api/v1/feeds/{feed.id}")
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["auth_needs_repair"] is True
+
+
+@pytest.mark.asyncio
+async def test_undecryptable_auth_description_only_put_returns_200(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    valid = {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "secret"}
+    feed = Feed(
+        name="UndecryptableFeed2",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+        description="before",
+        auth_config_encrypted=_corrupted_auth_blob(valid),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"description": "after"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["description"] == "after"
+    assert resp.json()["auth_needs_repair"] is True
+
+
+@pytest.mark.asyncio
+async def test_undecryptable_auth_partial_rotation_returns_repair_422(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    valid = {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "secret"}
+    feed = Feed(
+        name="UndecryptableFeed3",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=_corrupted_auth_blob(valid),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"api_key_value": "new-secret"}},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == REPAIR_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_undecryptable_preconfigured_partial_rotation_uses_template(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    valid = {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "secret"}
+    feed = Feed(
+        name="AbuseIPDB",
+        feed_type=FeedType.API,
+        is_preconfigured=True,
+        default_confidence=85,
+        auth_config_encrypted=_corrupted_auth_blob(valid),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"api_key_value": "fresh-key"}},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["has_auth"] is True
+    assert resp.json()["auth_needs_repair"] is False
+
+
+@pytest.mark.asyncio
+async def test_url_template_url_change_dropping_placeholder_returns_422(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    old_url = "https://example.com/fetch?key={api_key}"
+    auth = {"auth_type": "url_template", "api_key_value": "template-key"}
+    feed = Feed(
+        name="UrlTemplateFeed",
+        feed_type=FeedType.API,
+        url=old_url,
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=encrypt_config(auth),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"url": "https://example.com/fetch?key=hardcoded"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == URL_TEMPLATE_URL_CHANGE_MESSAGE
+
+    await db_session.refresh(feed)
+    assert feed.url == old_url
+
+
+@pytest.mark.asyncio
+async def test_url_template_url_change_with_full_auth_config_succeeds(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    old_url = "https://example.com/fetch?key={api_key}"
+    auth = {"auth_type": "url_template", "api_key_value": "template-key"}
+    new_url = "https://other.example/data?token={api_key}"
+    feed = Feed(
+        name="UrlTemplateFeed2",
+        feed_type=FeedType.API,
+        url=old_url,
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=encrypt_config(auth),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={
+            "url": new_url,
+            "auth_config": {
+                "auth_type": "url_template",
+                "api_key_value": "rotated-key",
+            },
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["url"] == new_url
+    assert resp.json()["auth_needs_repair"] is False
+
+    await db_session.refresh(feed)
+    stored = decrypt_config(feed.auth_config_encrypted)
+    assert stored["api_key_value"] == "rotated-key"
+
+
+@pytest.mark.asyncio
+async def test_undecryptable_auth_url_change_allowed(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    valid = {"auth_type": "url_template", "api_key_value": "k"}
+    old_url = "https://example.com/fetch?key={api_key}"
+    new_url = "https://example.com/fetch?key=hardcoded"
+    feed = Feed(
+        name="UndecryptableUrlFeed",
+        feed_type=FeedType.API,
+        url=old_url,
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=_corrupted_auth_blob(valid),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"url": new_url},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["url"] == new_url
+    assert resp.json()["auth_needs_repair"] is True
+
+
+@pytest.mark.asyncio
+async def test_numeric_partial_secret_returns_422(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    feed = Feed(
+        name="NumericPartial",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=encrypt_config(
+            {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "old"}
+        ),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"api_key_value": 12345}},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "auth_config api_key_value must be a string"
 
 
 @pytest.mark.asyncio
@@ -576,6 +797,7 @@ async def test_invalid_full_auth_config_on_update_returns_422(
         json={"auth_config": {"auth_type": "api_key", "api_key_header": ""}},
     )
     assert resp.status_code == 422
+    assert resp.json()["detail"] == "auth_config api_key_header must be a non-empty string"
 
 
 @pytest.mark.asyncio

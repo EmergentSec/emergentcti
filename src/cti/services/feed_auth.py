@@ -2,8 +2,19 @@
 
 from __future__ import annotations
 
+import json
+
+from cryptography.fernet import InvalidToken
+
+from cti.core.security import decrypt_config
+
 REPAIR_MESSAGE = (
     "Stored auth configuration is invalid; provide a full auth_config including auth_type."
+)
+
+URL_TEMPLATE_URL_CHANGE_MESSAGE = (
+    "Feed URL must contain '{api_key}' for url_template auth; "
+    "update the URL or provide a new auth_config."
 )
 
 
@@ -94,12 +105,25 @@ def stored_auth_needs_repair(auth_config: dict, *, feed_url: str | None) -> bool
     return False
 
 
+def try_decrypt_stored_auth(encrypted: bytes) -> dict | None:
+    """Decrypt stored auth, or None when ciphertext or payload is unusable."""
+    try:
+        return decrypt_config(encrypted)
+    except (InvalidToken, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
 def extract_partial_secret(partial: dict) -> str | None:
     """Return a non-empty secret from a partial rotation payload, or None for no-op."""
     for key in ("api_key_value", "token"):
-        raw = partial.get(key)
-        if isinstance(raw, str):
-            stripped = raw.strip()
-            if stripped:
-                return stripped
+        if key not in partial:
+            continue
+        raw = partial[key]
+        if raw is None:
+            continue
+        if not isinstance(raw, str):
+            raise AuthConfigValidationError("auth_config api_key_value must be a string")
+        stripped = raw.strip()
+        if stripped:
+            return stripped
     return None

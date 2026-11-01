@@ -74,6 +74,16 @@ describe('FeedCard', () => {
     mockIsAdmin.isAdmin = true
   })
 
+  it('shows Auth needs repair badge when auth_needs_repair is true', () => {
+    render(<FeedCard feed={{ ...mockFeed, auth_needs_repair: true }} />)
+    expect(screen.getByText('Auth needs repair')).toBeTruthy()
+  })
+
+  it('does not show Auth needs repair badge when flag is false', () => {
+    render(<FeedCard feed={mockFeed} />)
+    expect(screen.queryByText('Auth needs repair')).toBeNull()
+  })
+
   it('renders feed name and type chip', () => {
     render(<FeedCard feed={mockFeed} />)
     expect(screen.getByText('AbuseIPDB')).toBeTruthy()

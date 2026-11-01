@@ -11,15 +11,17 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cti.core.security import decrypt_config, encrypt_config
+from cti.core.security import encrypt_config
 from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.models.export_profile import ExportProfile
 from cti.models.feed import Feed, FeedRun, FeedRunStatus, FeedType
 from cti.models.observable_source import ObservableSource
 from cti.services.feed_auth import (
     REPAIR_MESSAGE,
+    URL_TEMPLATE_URL_CHANGE_MESSAGE,
     AuthConfigValidationError,
     extract_partial_secret,
+    try_decrypt_stored_auth,
     validate_auth_config,
 )
 
@@ -73,11 +75,17 @@ def _apply_auth_config_update(
 
     base: dict | None = None
     if feed.auth_config_encrypted is not None:
-        decrypted = decrypt_config(feed.auth_config_encrypted)
-        try:
-            base = validate_auth_config(decrypted, feed_url=feed_url)
-        except AuthConfigValidationError:
-            base = None
+        decrypted = try_decrypt_stored_auth(feed.auth_config_encrypted)
+        if decrypted is None:
+            logger.warning(
+                "Feed auth could not be decrypted during partial rotation",
+                extra={"feed_id": str(feed.id)},
+            )
+        else:
+            try:
+                base = validate_auth_config(decrypted, feed_url=feed_url)
+            except AuthConfigValidationError:
+                base = None
 
     if base is None:
         template = _preconfigured_auth_template(feed)
@@ -164,6 +172,14 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
     auth_config_provided = "auth_config" in data
     auth_config = data.pop("auth_config", None) if auth_config_provided else None
 
+    url_change_without_auth = (
+        not feed.is_preconfigured
+        and not auth_config_provided
+        and "url" in data
+        and data["url"] != feed.url
+    )
+    previous_url = feed.url
+
     if feed.is_preconfigured:
         allowed = {
             "enabled",
@@ -189,6 +205,21 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
         _apply_auth_config_update(
             feed, auth_config, partial_only=partial_only
         )
+
+    if url_change_without_auth and feed.auth_config_encrypted is not None:
+        decrypted = try_decrypt_stored_auth(feed.auth_config_encrypted)
+        if decrypted is not None:
+            try:
+                validate_auth_config(decrypted, feed_url=previous_url)
+            except AuthConfigValidationError:
+                pass
+            else:
+                try:
+                    validate_auth_config(decrypted, feed_url=feed.url)
+                except AuthConfigValidationError as exc:
+                    raise AuthConfigValidationError(
+                        URL_TEMPLATE_URL_CHANGE_MESSAGE
+                    ) from exc
 
     await db.flush()
     # SQL-expression onupdate expires this field; load it while IO is awaited.
