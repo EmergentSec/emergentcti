@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { X } from '@phosphor-icons/react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -23,6 +23,7 @@ export function TagEditor({
   className,
   showSaveButton = true,
 }: TagEditorProps) {
+  const draftInputId = useId()
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
 
@@ -70,7 +71,7 @@ export function TagEditor({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <div className="sm:flex-1">
           <Input
-            id="tag-draft"
+            id={draftInputId}
             label="Add tag"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
