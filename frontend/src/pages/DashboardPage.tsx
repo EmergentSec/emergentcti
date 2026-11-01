@@ -1,5 +1,6 @@
 import { useDashboard } from '@/hooks/useDashboard'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { EmptyState } from '@/components/common/EmptyState'
 import { KpiCards } from '@/components/dashboard/KpiCards'
 import { IngestionTrend } from '@/components/dashboard/IngestionTrend'
 import { TypeDonut } from '@/components/dashboard/TypeDonut'
@@ -19,20 +20,19 @@ export default function DashboardPage() {
 
   if (error || !data) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-center">
-        <p className="text-destructive-foreground">Failed to load dashboard stats</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {error instanceof Error ? error.message : 'Unknown error'}
-        </p>
-      </div>
+      <EmptyState
+        className="[&_h3]:text-destructive"
+        title="Failed to load dashboard stats"
+        description={error instanceof Error ? error.message : 'Unknown error'}
+      />
     )
   }
 
   return (
-    <div className="space-y-3.5">
+    <div className="space-y-5">
       <KpiCards stats={data} />
 
-      <div className="grid lg:grid-cols-3 gap-3.5">
+      <div className="grid gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <IngestionTrend series={data.daily_ingest_14d} />
         </div>
@@ -41,7 +41,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-3.5">
+      <div className="grid gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <FeedStatusTable feeds={data.feeds_health} />
         </div>

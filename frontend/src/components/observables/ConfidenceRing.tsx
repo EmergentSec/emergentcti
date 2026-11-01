@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card'
 interface ConfidenceRingProps {
   decayed: number
   nativeMax: number
+  compact?: boolean
 }
 
 function getBandColor(score: number): string {
@@ -12,25 +13,32 @@ function getBandColor(score: number): string {
   return 'var(--conf-low)'
 }
 
-export function ConfidenceRing({ decayed, nativeMax }: ConfidenceRingProps) {
+export function ConfidenceRing({ decayed, nativeMax, compact = false }: ConfidenceRingProps) {
   const color = getBandColor(decayed)
   const R = 38
   const circumference = 2 * Math.PI * R
   const clamped = Math.max(0, Math.min(100, decayed))
   const dashOffset = circumference * (1 - clamped / 100)
 
-  return (
-    <Card>
+  const content = (
+    <>
+      {compact ? (
+        <p className="mb-2 text-center text-xs font-medium text-muted-foreground">
+          Effective confidence
+        </p>
+      ) : (
       <CardHeader className="pb-3 p-5">
         <h3 className="text-base font-semibold text-foreground">Effective confidence</h3>
       </CardHeader>
-      <CardContent className="p-5 pt-0 flex flex-col items-center">
+      )}
+      <CardContent className={compact ? 'flex flex-col items-center p-0' : 'flex flex-col items-center p-5 pt-0'}>
         {/* SVG donut ring */}
-        <div className="relative h-[120px] w-[120px]">
+        <div className={compact ? 'relative h-[104px] w-[104px]' : 'relative h-[120px] w-[120px]'}>
           <svg
             viewBox="0 0 100 100"
             className="h-full w-full -rotate-90"
-            aria-hidden="true"
+            role="img"
+            aria-label={`Effective confidence ${clamped} out of 100`}
           >
             {/* Background track */}
             <circle
@@ -67,7 +75,7 @@ export function ConfidenceRing({ decayed, nativeMax }: ConfidenceRingProps) {
         </div>
 
         {/* Dual readout below ring */}
-        <div className="mt-4 flex items-end gap-6">
+        <div className={compact ? 'mt-2 flex items-end gap-5' : 'mt-4 flex items-end gap-6'}>
           <div className="text-center">
             <span className="block text-[11px] uppercase tracking-widest text-muted-foreground">
               decayed
@@ -93,6 +101,8 @@ export function ConfidenceRing({ decayed, nativeMax }: ConfidenceRingProps) {
           </div>
         </div>
       </CardContent>
-    </Card>
+    </>
   )
+
+  return compact ? content : <Card>{content}</Card>
 }

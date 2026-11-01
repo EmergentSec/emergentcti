@@ -6,6 +6,8 @@ import { ApiKeyManager } from '@/components/settings/ApiKeyManager'
 import { ExportProfileManager } from '@/components/settings/ExportProfileManager'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { UserManager } from '@/components/settings/UserManager'
+import { Card } from '@/components/ui/Card'
+import { Tabs } from '@/components/ui/Tabs'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 
@@ -21,7 +23,6 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'apikeys', label: 'API keys', Icon: Key, adminOnly: true },
   { id: 'members', label: 'Members', Icon: Users, adminOnly: true },
-  // Readable by every signed-in user; the panes hide mutation controls from non-admins.
   { id: 'allowlist', label: 'Allowlist', Icon: ShieldCheck, adminOnly: false },
   { id: 'exportprofiles', label: 'Export profiles', Icon: Export, adminOnly: false },
   { id: 'account', label: 'Account', Icon: UserCircle, adminOnly: false },
@@ -30,13 +31,12 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function SettingsPage() {
   const { isAdmin } = useAuth()
-  const visibleItems = NAV_ITEMS.filter(item => !item.adminOnly || isAdmin)
-
-  // Follow router navigation, including deep links while Settings stays mounted.
+  const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin)
   const [searchParams, setSearchParams] = useSearchParams()
   const requested = searchParams.get('tab')
-  const activeTab: Tab = visibleItems.find(item => item.id === requested)?.id
+  const activeTab: Tab = visibleItems.find((item) => item.id === requested)?.id
     ?? (isAdmin ? 'apikeys' : 'account')
+
   const setActiveTab = (tab: Tab) => {
     const params = new URLSearchParams(searchParams)
     params.set('tab', tab)
@@ -44,38 +44,39 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex gap-6">
-      {/* Left vertical sub-nav */}
-      <nav className="w-48 shrink-0">
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
-          {visibleItems.map(item => {
+    <div className="flex min-w-0 flex-col gap-5 md:flex-row md:items-start md:gap-6">
+      <Tabs
+        tabs={visibleItems.map((item) => ({ key: item.id, label: item.label }))}
+        active={activeTab}
+        onChange={(key) => setActiveTab(key as Tab)}
+        className="w-full md:hidden"
+      />
+
+      <nav aria-label="Settings sections" className="hidden w-48 shrink-0 md:block">
+        <Card className="overflow-hidden p-1.5">
+          {visibleItems.map((item) => {
             const isActive = activeTab === item.id
             return (
               <button
                 key={item.id}
+                type="button"
                 onClick={() => setActiveTab(item.id)}
                 aria-current={isActive ? 'page' : undefined}
                 className={cn(
-                  'flex w-full items-center gap-3 px-3 py-2.5 text-sm transition-colors',
+                  'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors',
                   isActive
-                    ? 'font-bold text-brand'
-                    : 'font-medium text-muted-foreground hover:text-foreground hover:bg-hover',
+                    ? 'bg-primary-soft font-semibold text-primary'
+                    : 'font-medium text-muted-foreground hover:bg-hover hover:text-foreground',
                 )}
-                style={
-                  isActive
-                    ? { background: 'color-mix(in srgb, var(--brand) 13%, transparent)' }
-                    : undefined
-                }
               >
-                <item.Icon size={16} />
+                <item.Icon size={16} aria-hidden="true" />
                 {item.label}
               </button>
             )
           })}
-        </div>
+        </Card>
       </nav>
 
-      {/* Right content pane */}
       <div className="min-w-0 flex-1">
         {activeTab === 'apikeys' && isAdmin && <ApiKeyManager />}
         {activeTab === 'members' && isAdmin && <UserManager />}

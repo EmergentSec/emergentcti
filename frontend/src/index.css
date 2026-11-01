@@ -3,90 +3,166 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * Design tokens. Components use semantic names only (bg-card, text-muted-foreground,
+   * bg-primary …); themes differ purely by these values.
+   *
+   *   --background   page canvas            --card / --surface   raised cards
+   *   --surface-2    inset tiles, inputs    --surface-3          chips, muted fills
+   *   --primary      interactive accent (nav active, links, focus, primary buttons)
+   *   --brand        alias of --primary for existing call sites
+   *   --logo         EmergentCTI mark only (red); not an interactive color
+   *   --masthead     page header band (dark navy in both themes)
+   */
   :root {
-    /* Light theme */
-    --background: #f2f4f8;
-    --foreground: #10141d;
+    --background: #f5f6f8;
+    --foreground: #101828;
     --surface: #ffffff;
-    --surface-2: #f7f9fc;
-    --surface-3: #eef1f6;
-    --hover: #f4f7fa;
+    --surface-2: #f5f6f8;
+    --surface-3: #eceff3;
+    --hover: #f2f4f7;
     --card: var(--surface);
     --popover: var(--surface);
-    --border: #e5e9f0;
-    --border-strong: #d3dae4;
+    --border: #e4e7ec;
+    --border-strong: #d0d5dd;
     --muted: var(--surface-3);
-    --muted-foreground: #576175;
-    --text-3: #8a94a6;
-    --primary: #a31f24;
-    --brand: #a31f24;
-    --brand-2: #851a1d;
-    --on-brand: #ffffff;
-    --destructive: #d23a3f;
-    /* backward-compat aliases */
+    --muted-foreground: #5b6474;
+    --text-3: #687181; /* 4.55:1 on background/surface-2, 4.92:1 on card */
+
+    --primary: #1f40af;
+    --primary-hover: #1a3696;
+    --primary-soft: #e8edfb;
+    --on-primary: #ffffff;
+    --brand: var(--primary);
+    --brand-2: var(--primary-hover);
+    --on-brand: var(--on-primary);
+    --logo: #b3262c;
+
+    --masthead: #101b33;
+    --masthead-foreground: #f2f5fc;
+    --masthead-muted: #a9b4cc;
+    --masthead-border: rgb(255 255 255 / 0.14);
+    /* Light action button that sits on the dark masthead band */
+    --masthead-action: #ffffff;
+    --masthead-action-hover: #e6ebf5;
+    --masthead-action-foreground: #101b33;
+
+    --destructive: #c8323a;
+    --on-destructive: #ffffff; /* 5.29:1 on --destructive */
+    --success: #12805c;
+    --warning: #a35f00;
+    /* Soft status fills + AA text ("ink") for badges/pills on them (>=5.3:1) */
+    --success-soft: color-mix(in srgb, var(--success) 10%, transparent);
+    --warning-soft: color-mix(in srgb, var(--warning) 10%, transparent);
+    --destructive-soft: color-mix(in srgb, var(--destructive) 10%, transparent);
+    --success-ink: #0c6a4b;
+    --warning-ink: #864e00;
+    --destructive-ink: #a8262d;
+
     --secondary: var(--surface-2);
     --secondary-foreground: var(--muted-foreground);
     --accent: var(--surface-3);
     --accent-foreground: var(--foreground);
 
-    /* Categorical (light) */
-    --cat-green: #1f9d63;
+    --cat-green: #1a9461;
     --cat-blue: #2f6fe0;
     --cat-purple: #7a4fd6;
-    --cat-orange: #d9710a;
-    --cat-pink: #cf4f93;
-    --cat-yellow: #b8860b;
+    --cat-orange: #d06a08;
+    --cat-pink: #c94a8c;
+    --cat-yellow: #a87a06;
+    /* AA text counterparts for category fills, including on 10% category badges */
+    --cat-green-ink: #0f6f47;
+    --cat-blue-ink: #2458b8;
+    --cat-purple-ink: #6540b5;
+    --cat-orange-ink: #934700;
+    --cat-pink-ink: #a73570;
+    --cat-yellow-ink: #765500;
 
-    /* Confidence bands (light) */
-    --conf-critical: #d23a3f;
-    --conf-high: #d9710a;
-    --conf-medium: #b8860b;
+    --conf-critical: #c8323a;
+    /* >=4.5:1 on card and surface-2 (high 5.01 / 4.63, medium 5.38 / 4.98) */
+    --conf-high: #b25500;
+    --conf-medium: #8a6400;
     --conf-low: #6b7585;
 
-    --radius: 0.8125rem; /* 13px cards */
+    /* Modal / drawer scrim and switch thumb */
+    --overlay: rgb(16 24 40 / 0.5);
+    --toggle-thumb: #ffffff;
+
+    --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04);
+    --radius: 0.875rem;
   }
 
   .dark {
-    /* Dark theme (default) */
-    --background: #0a0d13;
-    --foreground: #eef1f7;
-    --surface: #10141c;
-    --surface-2: #151a23;
-    --surface-3: #1b212c;
-    --hover: #181e28;
+    --background: #131926;
+    --foreground: #e7ebf3;
+    --surface: #1a2131;
+    --surface-2: #111725;
+    --surface-3: #252d3f;
+    --hover: #212a3b;
     --card: var(--surface);
-    --popover: var(--surface);
-    --border: #222a37;
-    --border-strong: #2f3a4a;
+    --popover: #1e2638;
+    --border: #2a3346;
+    --border-strong: #3a455c;
     --muted: var(--surface-3);
-    --muted-foreground: #9aa6b8;
-    --text-3: #646f82;
-    --primary: #e0484e;
-    --brand: #e0484e;
-    --brand-2: #b22f34;
-    --on-brand: #ffffff;
-    --destructive: #ef5350;
-    /* backward-compat aliases */
+    --muted-foreground: #a3adbf;
+    --text-3: #8590a4; /* 5.46:1 background, 5.00:1 card, 5.56:1 surface-2 */
+
+    --primary: #a9bcff;
+    --primary-hover: #c2cfff;
+    --primary-soft: rgb(169 188 255 / 0.12);
+    --on-primary: #0d1630;
+    --brand: var(--primary);
+    --brand-2: var(--primary-hover);
+    --on-brand: var(--on-primary);
+    --logo: #e0484e;
+
+    --masthead: #0e1424;
+    --masthead-foreground: #eef2fa;
+    --masthead-muted: #9aa6bf;
+    --masthead-border: rgb(255 255 255 / 0.1);
+    --masthead-action: #eef2fa;
+    --masthead-action-hover: #d6deee;
+    --masthead-action-foreground: #0e1424;
+
+    --destructive: #f0605f;
+    --on-destructive: #1d0a0b; /* 5.95:1 on --destructive */
+    --success: #3ccf91;
+    --warning: #f2b34a;
+    /* 8% keeps destructive ink >=4.5:1 on card; inks reuse the base colors */
+    --success-soft: color-mix(in srgb, var(--success) 8%, transparent);
+    --warning-soft: color-mix(in srgb, var(--warning) 8%, transparent);
+    --destructive-soft: color-mix(in srgb, var(--destructive) 8%, transparent);
+    --success-ink: var(--success);
+    --warning-ink: var(--warning);
+    --destructive-ink: var(--destructive);
+
     --secondary: var(--surface-2);
     --secondary-foreground: var(--muted-foreground);
     --accent: var(--surface-3);
     --accent-foreground: var(--foreground);
 
-    /* Categorical (dark) */
     --cat-green: #2fbf71;
-    --cat-blue: #4b8bf5;
-    --cat-purple: #9b6dff;
+    --cat-blue: #5b95f7;
+    --cat-purple: #a07cff;
     --cat-orange: #f0883e;
     --cat-pink: #ec6aa6;
     --cat-yellow: #e0a92a;
+    --cat-green-ink: var(--cat-green);
+    --cat-blue-ink: var(--cat-blue);
+    --cat-purple-ink: var(--cat-purple);
+    --cat-orange-ink: var(--cat-orange);
+    --cat-pink-ink: var(--cat-pink);
+    --cat-yellow-ink: var(--cat-yellow);
 
-    /* Confidence bands (dark) */
-    --conf-critical: #ef5350;
+    --conf-critical: #f0605f;
     --conf-high: #ff8a3d;
     --conf-medium: #ffc24b;
     --conf-low: #8b95a6;
 
-    --radius: 0.8125rem;
+    --overlay: rgb(3 6 14 / 0.65);
+    --toggle-thumb: #f2f5fc;
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25);
   }
 }
 
@@ -94,17 +170,23 @@
   * { @apply border-border; }
   body {
     @apply bg-background text-foreground;
-    font-family: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
 }
 
-.dark ::-webkit-scrollbar { width: 8px; height: 8px; }
-.dark ::-webkit-scrollbar-track { background: var(--surface); }
-.dark ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 4px; }
-.dark ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+/* Visible keyboard focus everywhere, in both themes */
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.focus-ring-inset:focus-visible { outline-offset: -2px; }
+
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }

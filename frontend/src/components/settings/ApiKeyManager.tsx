@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { X } from '@phosphor-icons/react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getApiKeys, createApiKey, revokeApiKey } from '@/api/settings'
 import { useToast } from '@/contexts/ToastContext'
@@ -7,6 +8,8 @@ import { Input } from '@/components/ui/Input'
 import { Dialog } from '@/components/ui/Dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { EmptyState } from '@/components/common/EmptyState'
+import { Card } from '@/components/ui/Card'
 import { formatDate, formatRelativeTime } from '@/lib/utils'
 import type { ApiKeyCreateResponse } from '@/types/auth'
 
@@ -85,9 +88,9 @@ export function ApiKeyManager() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-foreground">API keys</h2>
+          <h2 className="text-base font-semibold text-foreground">API keys</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Authenticate requests with the{' '}
             <code className="rounded bg-surface2 px-1 py-0.5 font-mono text-xs">X-API-Key</code>{' '}
@@ -100,7 +103,7 @@ export function ApiKeyManager() {
       </div>
 
       {/* Terminal curl example */}
-      <div className="overflow-hidden rounded-md border border-border bg-surface2">
+      <div className="overflow-hidden rounded-xl border border-border bg-surface2">
         <div className="flex items-center gap-2 border-b border-border bg-surface3 px-4 py-2">
           <span className="font-mono text-xs text-muted-foreground">$_</span>
         </div>
@@ -115,13 +118,19 @@ export function ApiKeyManager() {
           <LoadingSpinner />
         </div>
       ) : error ? (
-        <p className="text-sm text-destructive-foreground">Failed to load API keys</p>
+        <p className="text-sm text-destructive">Failed to load API keys</p>
       ) : !keys || keys.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No API keys found. Create one to get started.
-        </p>
+        <Card>
+          <EmptyState
+            title="No API keys found"
+            description="Create a key to authenticate API requests."
+          >
+            <Button onClick={() => setShowCreate(true)}>Create key</Button>
+          </EmptyState>
+        </Card>
       ) : (
-        <Table>
+        <Card className="overflow-hidden">
+          <Table className="min-w-[680px]">
           <TableHeader>
             <TableRow>
               <TableHead>NAME</TableHead>
@@ -162,22 +171,14 @@ export function ApiKeyManager() {
                     title="Revoke key"
                     aria-label={`Revoke key ${key.name}`}
                   >
-                    <svg
-                      width="15"
-                      height="15"
-                      viewBox="0 0 15 15"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                    >
-                      <path d="M11.5 3.5l-8 8M3.5 3.5l8 8" />
-                    </svg>
+                    <X size={15} aria-hidden="true" />
                   </button>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
-        </Table>
+          </Table>
+        </Card>
       )}
 
       {/* Create API Key Dialog */}
@@ -189,16 +190,12 @@ export function ApiKeyManager() {
         {createdKey ? (
           <div className="space-y-4">
             <div
-              className="rounded-md border p-4"
-              style={{
-                background: 'color-mix(in srgb, var(--cat-yellow) 12%, transparent)',
-                borderColor: 'color-mix(in srgb, var(--cat-yellow) 30%, transparent)',
-              }}
+              className="rounded-xl border border-warning bg-warning-soft p-4"
             >
-              <p className="mb-2 text-sm font-medium text-cat-yellow">
+              <p className="mb-2 text-sm font-medium text-warning-ink">
                 Save this key now — you will not be able to see it again.
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <code className="flex-1 break-all rounded bg-surface2 px-3 py-2 font-mono text-sm text-foreground">
                   {createdKey.key}
                 </code>

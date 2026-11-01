@@ -1,5 +1,7 @@
 import { MagnifyingGlass, Export, DownloadSimple, CaretDown } from '@phosphor-icons/react'
-import { Card } from '@/components/ui/Card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Slider } from '@/components/ui/Slider'
 import { Popover } from '@/components/ui/Popover'
@@ -34,37 +36,38 @@ export function ObservableFilters({ filters, onChange }: ObservableFiltersProps)
   const exportFilters = { type: filters.type || undefined, confidence_min: confValue > 0 ? confValue : undefined, source: filters.source }
 
   const exportTrigger = (
-    <div className="inline-flex h-9 cursor-pointer items-center rounded-md border border-input bg-background text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground select-none">
-      <span className="flex items-center gap-1.5 px-3 border-r border-input">
-        <Export size={14} weight="bold" />
-        Export
-      </span>
-      <span className="flex items-center px-2">
-        <CaretDown size={12} weight="bold" />
-      </span>
-    </div>
+    <Button type="button" variant="outline">
+      <Export size={14} weight="bold" />
+      Export
+      <CaretDown size={12} weight="bold" />
+    </Button>
   )
 
   return (
-    <Card className="p-4 space-y-3">
+    <Card>
+      <CardHeader className="pb-4">
+        <CardTitle>Filter observables</CardTitle>
+        <CardDescription>Search indicators and narrow results by type, source, or confidence.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
       {/* Row 1: search + type + source */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-[200px] flex-1">
+        <div className="relative w-full sm:min-w-0 sm:flex-1">
           <MagnifyingGlass
             size={14}
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
           />
-          <input
+          <Input
             type="text"
             placeholder="Search by value…"
             value={filters.q ?? ''}
             onChange={(e) => update({ q: e.target.value || undefined })}
             aria-label="Search observables by value"
-            className="flex h-9 w-full rounded-md border border-input bg-background py-1 pl-8 pr-3 text-sm text-foreground shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="pl-8"
           />
         </div>
 
-        <div className="w-44">
+        <div className="w-full sm:w-44">
           <Select
             options={typeOptions}
             value={filters.type ?? ''}
@@ -72,7 +75,7 @@ export function ObservableFilters({ filters, onChange }: ObservableFiltersProps)
           />
         </div>
 
-        <div className="w-48">
+        <div className="w-full sm:w-48">
           <Select
             options={sourceOptions}
             value={filters.source ?? ''}
@@ -82,8 +85,8 @@ export function ObservableFilters({ filters, onChange }: ObservableFiltersProps)
       </div>
 
       {/* Row 2: min confidence slider + export */}
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="flex flex-1 items-center gap-3 min-w-[220px]">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex w-full min-w-0 items-center gap-3 sm:flex-1">
           <span className="shrink-0 text-sm text-muted-foreground">Min conf</span>
           <Slider
             value={confValue}
@@ -114,7 +117,7 @@ export function ObservableFilters({ filters, onChange }: ObservableFiltersProps)
                 key={type}
                 href={blocklistUrl(type, exportFilters)}
                 download
-                className="flex items-center justify-between gap-3 rounded px-3 py-1.5 text-foreground hover:bg-accent"
+                className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-foreground hover:bg-hover"
               >
                 <span>{label}</span>
                 <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -130,7 +133,7 @@ export function ObservableFilters({ filters, onChange }: ObservableFiltersProps)
             <a
               href={jsonExportUrl(exportFilters)}
               download
-              className="flex items-center justify-between gap-3 rounded px-3 py-1.5 text-foreground hover:bg-accent"
+              className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-foreground hover:bg-hover"
             >
               <span>Full JSON export</span>
               <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -141,6 +144,7 @@ export function ObservableFilters({ filters, onChange }: ObservableFiltersProps)
           </div>
         </Popover>
       </div>
+      </CardContent>
     </Card>
   )
 }

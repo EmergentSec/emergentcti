@@ -1,94 +1,94 @@
 import { NavLink } from 'react-router-dom';
-import { SquaresFour, CrosshairSimple, Rss, GearSix, SignOut } from '@phosphor-icons/react';
+import { SignOut } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
-import { EmergentLogo } from '../common/EmergentLogo';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useAuth } from '@/contexts/AuthContext';
 import { compactNumber } from '@/lib/dashboardFormat';
+import { AppearanceSelector } from './AppearanceSelector';
+import { NAV_ITEMS, type NavCount } from './navigation';
 
 function getInitials(username: string): string {
   return username.slice(0, 2).toUpperCase();
 }
 
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  cn(
-    'flex items-center justify-between rounded-md px-3 py-2 text-sm transition-colors',
-    isActive
-      ? 'text-brand font-bold'
-      : 'font-medium text-muted-foreground hover:text-foreground hover:bg-hover',
-  );
+interface SidebarProps {
+  id?: string;
+  className?: string;
+  /** Called after a nav link is activated (the mobile drawer closes itself). */
+  onNavigate?: () => void;
+}
 
-const navLinkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties =>
-  isActive ? { background: 'color-mix(in srgb, var(--brand) 13%, transparent)' } : {};
-
-export function Sidebar() {
+export function Sidebar({ id, className, onNavigate }: SidebarProps) {
   const { data } = useDashboard();
   const { user, logout } = useAuth();
 
-  const observablesCount = data ? compactNumber(data.total_observables) : '—';
-  const feedsCount = data ? `${data.feeds_enabled}/${data.total_feeds}` : '—';
+  const counts: Record<NavCount, string> = {
+    observables: data ? compactNumber(data.total_observables) : '—',
+    feeds: data ? `${data.feeds_enabled}/${data.total_feeds}` : '—',
+  };
 
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-[236px] flex-col border-r border-border bg-card">
-      {/* Logo + wordmark */}
-      <div className="flex items-center gap-3 px-5 py-5">
-        <EmergentLogo size={28} />
-        <div className="flex flex-col">
-          <span className="text-[15px] font-bold leading-tight text-foreground">EmergentCTI</span>
-          <span className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
-            Threat Intelligence
-          </span>
-        </div>
-      </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 space-y-0.5 px-3 py-2">
-        <NavLink to="/" end className={navLinkClass} style={navLinkStyle}>
-          <span className="flex items-center gap-3">
-            <SquaresFour size={18} />
-            Dashboard
-          </span>
-        </NavLink>
-
-        <NavLink to="/observables" className={navLinkClass} style={navLinkStyle}>
-          <span className="flex items-center gap-3">
-            <CrosshairSimple size={18} />
-            Observables
-          </span>
-          <span className="font-mono text-xs">{observablesCount}</span>
-        </NavLink>
-
-        <NavLink to="/feeds" className={navLinkClass} style={navLinkStyle}>
-          <span className="flex items-center gap-3">
-            <Rss size={18} />
-            Feeds
-          </span>
-          <span className="font-mono text-xs">{feedsCount}</span>
-        </NavLink>
-
-        <NavLink to="/settings" className={navLinkClass} style={navLinkStyle}>
-          <span className="flex items-center gap-3">
-            <GearSix size={18} />
-            Settings
-          </span>
-        </NavLink>
+    <aside id={id} className={cn('flex w-64 flex-col bg-card', className)}>
+      <nav aria-label="Primary" className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
+        {NAV_ITEMS.map(({ to, label, icon: ItemIcon, end, count }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              cn(
+                'flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors',
+                isActive
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-hover hover:text-foreground',
+              )
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <ItemIcon size={18} weight={isActive ? 'fill' : 'regular'} aria-hidden="true" className="shrink-0" />
+                <span className="flex-1 truncate">{label}</span>
+                {count && (
+                  <span
+                    className={cn(
+                      'rounded-full px-2 py-0.5 font-mono text-[11px] leading-4 tabular-nums',
+                      isActive
+                        ? 'bg-[color-mix(in_srgb,var(--on-primary)_16%,transparent)] text-primary-foreground'
+                        : 'bg-surface3 text-muted-foreground',
+                    )}
+                  >
+                    {counts[count]}
+                  </span>
+                )}
+              </>
+            )}
+          </NavLink>
+        ))}
       </nav>
 
-      {/* Footer */}
-      <div className="border-t border-border px-4 py-3 space-y-3">
-        {/* API status row */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-2 w-2 rounded-full bg-cat-green" />
-            <span className="text-xs text-muted-foreground">API online</span>
-          </div>
-          <span className="font-mono text-xs text-muted-foreground">v2.0.0</span>
+      <div className="space-y-4 border-t border-border px-4 py-4">
+        <div className="space-y-2">
+          <p aria-hidden="true" className="text-xs font-medium text-muted-foreground">
+            Appearance
+          </p>
+          <AppearanceSelector />
         </div>
 
-        {/* User row */}
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span className="flex items-center gap-2">
+            <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-success" />
+            API online
+          </span>
+          <span className="font-mono text-text3">v2.0.0</span>
+        </div>
+
         {user && (
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-brand-foreground">
+          <div className="flex items-center gap-2.5">
+            <div
+              aria-hidden="true"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary"
+            >
               {getInitials(user.username)}
             </div>
             <div className="min-w-0 flex-1">
@@ -96,11 +96,13 @@ export function Sidebar() {
               <p className="text-xs capitalize text-muted-foreground">{user.role}</p>
             </div>
             <button
+              type="button"
               onClick={() => void logout()}
-              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+              className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
               aria-label="Sign out"
+              title="Sign out"
             >
-              <SignOut size={16} />
+              <SignOut size={16} aria-hidden="true" />
             </button>
           </div>
         )}

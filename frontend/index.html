@@ -8,13 +8,48 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <script>
+    <meta name="color-scheme" content="light dark" />
+    <!-- Appearance boot: resolve System/Light/Dark before first paint.
+         Mirrors src/lib/appearance.ts (verified by appearance.test.ts). -->
+    <script id="appearance-boot">
       (function () {
-        var t = localStorage.getItem('theme');
-        if (t !== 'light') document.documentElement.classList.add('dark');
+        var pref = 'system';
+        var currentRead = true;
+        try {
+          var s = localStorage.getItem('emergentcti.appearance');
+          if (s === 'system' || s === 'light' || s === 'dark') {
+            pref = s;
+            try {
+              localStorage.removeItem('theme');
+            } catch (e) {}
+          }
+        } catch (e) {
+          currentRead = false;
+        }
+        if (currentRead && !(s === 'system' || s === 'light' || s === 'dark')) {
+          var legacy;
+          try {
+            legacy = localStorage.getItem('theme');
+          } catch (e) {
+            legacy = null;
+          }
+          if (legacy === 'light' || legacy === 'dark') {
+            pref = legacy;
+            try {
+              localStorage.setItem('emergentcti.appearance', legacy);
+              localStorage.removeItem('theme');
+            } catch (e) {}
+          }
+        }
+        var dark = pref === 'dark' ||
+          (pref === 'system' && !!window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        var root = document.documentElement;
+        root.classList.toggle('dark', dark);
+        root.style.colorScheme = dark ? 'dark' : 'light';
+        root.dataset.appearance = pref;
       })();
     </script>
   </head>

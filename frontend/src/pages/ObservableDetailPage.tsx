@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   At,
@@ -20,11 +20,12 @@ import { useConfig } from '@/hooks/useConfig'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { Badge } from '@/components/ui/Badge'
-import { Card } from '@/components/ui/Card'
+import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { EmptyState } from '@/components/common/EmptyState'
 import { Tabs } from '@/components/ui/Tabs'
 import { ConfidenceRing } from '@/components/observables/ConfidenceRing'
 import { DecayChart } from '@/components/observables/DecayChart'
@@ -33,7 +34,7 @@ import { DetailRawTab } from '@/components/observables/DetailRawTab'
 import { jsonExportUrl } from '@/api/export'
 import { apiErrorMessage, apiErrorStatus } from '@/lib/apiError'
 import { REASON_MAX_LENGTH } from '@/lib/policyValidation'
-import { cn, formatDate, formatRelativeTime, typeLabels } from '@/lib/utils'
+import { formatDate, formatRelativeTime, typeColors, typeLabels } from '@/lib/utils'
 import type { ObservableType } from '@/types/observable'
 
 // ── Type helpers ──────────────────────────────────────────────────────────────
@@ -45,15 +46,6 @@ const TYPE_ICONS: Record<ObservableType, Icon> = {
   'file-hash': Fingerprint,
   'email-addr': At,
   'command-line': TerminalWindow,
-}
-
-const TYPE_CAT_VAR: Record<ObservableType, string> = {
-  'ip-addr': 'var(--cat-blue)',
-  'domain-name': 'var(--cat-purple)',
-  'url': 'var(--cat-green)',
-  'file-hash': 'var(--cat-orange)',
-  'email-addr': 'var(--cat-pink)',
-  'command-line': 'var(--cat-yellow)',
 }
 
 function getBand(score: number): { label: string; cssVar: string } {
@@ -76,14 +68,28 @@ export default function ObservableDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: obs, isLoading, error } = useObservable(id ?? null)
   const { data: cfg } = useConfig()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [copied, setCopied] = useState(false)
-  const [activeTab, setActiveTab] = useState('sources')
+  const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') === 'raw' ? 'raw' : 'sources')
   const { isAdmin } = useAuth()
   const { toast } = useToast()
   const createAllowlistEntry = useCreateAllowlistEntry()
   const [showAllowlist, setShowAllowlist] = useState(false)
   const [allowlistReason, setAllowlistReason] = useState('')
   const [allowlistError, setAllowlistError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const tab = searchParams.get('tab')
+    setActiveTab(tab === 'raw' ? 'raw' : 'sources')
+  }, [searchParams])
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab)
+    const next = new URLSearchParams(searchParams)
+    if (tab === 'raw') next.set('tab', 'raw')
+    else next.delete('tab')
+    setSearchParams(next, { replace: true })
+  }
 
   const closeAllowlistDialog = () => {
     setShowAllowlist(false)
@@ -142,18 +148,25 @@ export default function ObservableDetailPage() {
 
   if (error || !obs) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-center">
-        <p className="text-destructive-foreground">Failed to load observable</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {error instanceof Error ? error.message : 'Observable not found'}
-        </p>
-      </div>
+      <EmptyState
+        className="[&_h3]:text-destructive"
+        title="Failed to load observable"
+        description={error instanceof Error ? error.message : 'Observable not found'}
+      />
     )
   }
 
   const TypeIcon = TYPE_ICONS[obs.type]
-  const catColor = TYPE_CAT_VAR[obs.type] ?? 'var(--cat-blue)'
   const band = getBand(obs.confidence_score)
+  const nativeMax = obs.sources.length > 0
+    ? Math.max(obs.confidence_score, ...obs.sources.map((source) => source.native_confidence))
+    : obs.confidence_score
+  const ageDays = obs.last_seen
+    ? Math.floor((Date.now() - new Date(obs.last_seen).getTime()) / 86_400_000)
+    : 0
+  const decayDays = cfg?.confidence_decay_days ?? DECAY_DEFAULTS.days
+  const decayRate = cfg?.confidence_decay_rate ?? DECAY_DEFAULTS.rate
+  const decayFloor = cfg?.confidence_decay_floor ?? DECAY_DEFAULTS.floor
 
   return (
     <div className="space-y-4">
@@ -167,39 +180,25 @@ export default function ObservableDetailPage() {
       </Link>
 
       {/* ── Header card ────────────────────────────────────────────── */}
-      <Card className="p-5">
+      <Card>
+        <CardContent className="p-5">
         {/* Top row: icon tile + type/value/copy + action buttons */}
-        <div className="flex items-start gap-4">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
           {/* Type icon tile */}
-          <div
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg"
-            style={{
-              background: `color-mix(in srgb, ${catColor} 14%, transparent)`,
-              color: catColor,
-            }}
-          >
+          <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border ${typeColors[obs.type]}`}>
             <TypeIcon size={24} weight="duotone" />
           </div>
 
           {/* Type chip + confidence chip + large mono value + copy */}
           <div className="min-w-0 flex-1">
             {/* Chips */}
-            <div className="mb-1.5 flex items-center gap-2">
-              <span
-                className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium"
-                style={{
-                  background: `color-mix(in srgb, ${catColor} 14%, transparent)`,
-                  color: catColor,
-                }}
-              >
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className={typeColors[obs.type]}>
                 {typeLabels[obs.type] ?? obs.type}
-              </span>
-              <span
-                className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium"
-                style={{ color: band.cssVar }}
-              >
+              </Badge>
+              <Badge variant="secondary" style={{ color: band.cssVar }}>
                 {band.label} confidence
-              </span>
+              </Badge>
               {obs.allowlisted && (
                 <Badge
                   variant="outline"
@@ -212,59 +211,58 @@ export default function ObservableDetailPage() {
             </div>
 
             {/* Value + copy button */}
-            <div className="flex items-center gap-2">
-              <span className="break-all font-mono text-2xl font-semibold tracking-tight">
+            <div className="flex min-w-0 items-start gap-2">
+              <span className="min-w-0 break-all font-mono text-xl font-semibold tracking-tight sm:text-2xl">
                 {obs.value}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 aria-label="Copy value"
                 onClick={handleCopy}
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-input bg-transparent text-muted-foreground transition-colors hover:text-foreground"
+                className="h-8 w-8 px-0 text-muted-foreground"
               >
                 {copied ? <Check size={14} weight="bold" /> : <Copy size={14} />}
-              </button>
+              </Button>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {obs.allowlisted ? (
+                <Link
+                  to="/settings?tab=allowlist"
+                  className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  Manage allowlist
+                </Link>
+              ) : (
+                isAdmin && (
+                  <Button variant="outline" size="sm" onClick={() => setShowAllowlist(true)}>
+                    <ShieldCheck size={14} />
+                    Allowlist
+                  </Button>
+                )
+              )}
+              <a
+                href={jsonExportUrl({ type: obs.type })}
+                download
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                <Export size={14} />
+                Export
+              </a>
             </div>
           </div>
 
-          {/* Right-aligned action buttons */}
-          <div className="flex shrink-0 items-center gap-2 pt-1">
-            {obs.allowlisted ? (
-              <Link
-                to="/settings?tab=allowlist"
-                className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-              >
-                Manage allowlist
-              </Link>
-            ) : (
-              isAdmin && (
-                <Button variant="outline" size="sm" onClick={() => setShowAllowlist(true)}>
-                  <ShieldCheck size={14} className="mr-1.5" />
-                  Allowlist
-                </Button>
-              )
-            )}
-            <a
-              href={jsonExportUrl({ type: obs.type })}
-              download
-              className={cn(
-                'inline-flex items-center justify-center gap-1.5 font-medium transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                'focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                'bg-brand text-brand-foreground hover:bg-brand/90',
-                'h-8 rounded-sm px-3 text-xs',
-              )}
-            >
-              <Export size={14} />
-              Export
-            </a>
+          <div className="shrink-0 self-center rounded-xl bg-surface2 p-3 sm:self-start">
+            <ConfidenceRing decayed={obs.confidence_score} nativeMax={nativeMax} compact />
           </div>
         </div>
 
         {/* ── 4-cell key-facts strip ─────────────────────────────── */}
-        <div className="mt-5 grid grid-cols-4 divide-x divide-border overflow-hidden rounded-lg border border-border">
+        <div className="mt-5 grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-surface2 sm:grid-cols-4 sm:divide-x sm:divide-border">
           {/* FIRST SEEN */}
-          <div className="px-4 py-3">
+          <div className="border-b border-border px-4 py-3 sm:border-b-0">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
               First Seen
             </p>
@@ -273,7 +271,7 @@ export default function ObservableDetailPage() {
           </div>
 
           {/* LAST SEEN */}
-          <div className="px-4 py-3">
+          <div className="border-b border-l border-border px-4 py-3 sm:border-b-0 sm:border-l-0">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
               Last Seen
             </p>
@@ -291,7 +289,7 @@ export default function ObservableDetailPage() {
           </div>
 
           {/* CONFIDENCE */}
-          <div className="px-4 py-3">
+          <div className="border-l border-border px-4 py-3 sm:border-l-0">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
               Confidence
             </p>
@@ -301,44 +299,20 @@ export default function ObservableDetailPage() {
             </p>
           </div>
         </div>
+        </CardContent>
       </Card>
 
-      {/* ── Decay viz: ring (1 col) + chart (2 cols) ───────────────── */}
-      {(() => {
-        const nativeMax =
-          obs.sources.length > 0
-            ? Math.max(obs.confidence_score, ...obs.sources.map((s) => s.native_confidence))
-            : obs.confidence_score
-
-        const ageDays = obs.last_seen
-          ? Math.floor((Date.now() - new Date(obs.last_seen).getTime()) / 86_400_000)
-          : 0
-
-        const decayDays = cfg?.confidence_decay_days ?? DECAY_DEFAULTS.days
-        const decayRate = cfg?.confidence_decay_rate ?? DECAY_DEFAULTS.rate
-        const decayFloor = cfg?.confidence_decay_floor ?? DECAY_DEFAULTS.floor
-
-        return (
-          <div className="grid gap-3.5 lg:grid-cols-3">
-            <div className="lg:col-span-1">
-              <ConfidenceRing decayed={obs.confidence_score} nativeMax={nativeMax} />
-            </div>
-            <div className="lg:col-span-2">
-              <DecayChart
-                nativeMax={nativeMax}
-                ageDays={ageDays}
-                decayDays={decayDays}
-                decayRate={decayRate}
-                decayFloor={decayFloor}
-              />
-            </div>
-          </div>
-        )
-      })()}
+      <DecayChart
+        nativeMax={nativeMax}
+        ageDays={ageDays}
+        decayDays={decayDays}
+        decayRate={decayRate}
+        decayFloor={decayFloor}
+      />
 
       {/* ── Sources / Raw JSON tabs ─────────────────────────────────── */}
       <Card className="p-5">
-        <Tabs tabs={DETAIL_TABS} active={activeTab} onChange={setActiveTab} className="mb-4" />
+        <Tabs tabs={DETAIL_TABS} active={activeTab} onChange={handleTabChange} className="mb-4" />
         {activeTab === 'sources' && <DetailSourcesTab sources={obs.sources} />}
         {activeTab === 'raw' && <DetailRawTab observable={obs} />}
       </Card>

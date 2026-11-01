@@ -6,7 +6,14 @@ import type { ObservableFilters as Filters } from '@/types/observable'
 
 // Stub heavy sub-components to isolate the page shell
 vi.mock('@/components/observables/ObservableFilters', () => ({
-  ObservableFilters: () => <div data-testid="observable-filters" />,
+  ObservableFilters: ({ filters, onChange }: { filters: Filters; onChange: (filters: Filters) => void }) => (
+    <input
+      data-testid="observable-filters"
+      aria-label="Search observables by value"
+      value={filters.q ?? ''}
+      onChange={(event) => onChange({ ...filters, q: event.target.value || undefined, page: 1 })}
+    />
+  ),
 }))
 
 vi.mock('@/components/observables/ObservableTable', () => ({
@@ -72,6 +79,20 @@ describe('ObservablesPage', () => {
       </MemoryRouter>,
     )
     expect(screen.getByTestId('observable-filters')).toBeTruthy()
+  })
+
+  it('hydrates search from ?q= and keeps URL-driven search in sync', () => {
+    mockUseObservables.mockReturnValue({ data: DEFAULT_DATA, isLoading: false, error: null })
+    render(
+      <MemoryRouter initialEntries={['/observables?q=evil.example']}>
+        <ObservablesPage />
+      </MemoryRouter>,
+    )
+
+    expect((screen.getByLabelText('Search observables by value') as HTMLInputElement).value).toBe('evil.example')
+    expect(mockUseObservables).toHaveBeenCalledWith(
+      expect.objectContaining({ q: 'evil.example', page: 1 }),
+    )
   })
 
   it('renders count header with total observables', () => {
@@ -149,7 +170,7 @@ describe('ObservablesPage', () => {
     expect(screen.queryByTestId('observable-table')).toBeNull()
   })
 
-  it('opens the create dialog when routed with ?create=1 as admin (topbar Add Observable)', () => {
+  it('opens the create dialog when routed with ?create=1 as admin (page-header Add Observable)', () => {
     mockAuth.isAdmin = true
     mockUseObservables.mockReturnValue({ data: DEFAULT_DATA, isLoading: false, error: null })
     render(
@@ -158,6 +179,17 @@ describe('ObservablesPage', () => {
       </MemoryRouter>,
     )
     expect(screen.getByTestId('observable-form')).toBeTruthy()
+  })
+
+  it('has no in-page Add Observable button (it lives in the page header)', () => {
+    mockAuth.isAdmin = true
+    mockUseObservables.mockReturnValue({ data: DEFAULT_DATA, isLoading: false, error: null })
+    render(
+      <MemoryRouter initialEntries={['/observables']}>
+        <ObservablesPage />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByRole('button', { name: /add observable/i })).toBeNull()
   })
 
   it('does not open the create dialog from ?create=1 for non-admins', () => {

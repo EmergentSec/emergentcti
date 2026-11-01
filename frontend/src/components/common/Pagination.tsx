@@ -11,8 +11,8 @@ interface PaginationProps {
 
 export function Pagination({ page, pages, total, onPageChange, className }: PaginationProps) {
   return (
-    <div className={cn('flex items-center justify-between', className)}>
-      <p className="text-sm text-muted-foreground">
+    <nav aria-label="Pagination" className={cn('flex flex-wrap items-center justify-between gap-2', className)}>
+      <p className="text-sm tabular-nums text-muted-foreground">
         Page {page} of {pages} ({total} total)
       </p>
       <div className="flex items-center gap-2">
@@ -33,6 +33,6 @@ export function Pagination({ page, pages, total, onPageChange, className }: Pagi
           Next
         </Button>
       </div>
-    </div>
+    </nav>
   );
 }
