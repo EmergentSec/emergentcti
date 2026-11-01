@@ -6,7 +6,8 @@ does a bounded amount of work per input character (no nested unbounded
 quantifiers; unbounded runs are anchored by a lookbehind so each run is tried
 from one start position only).
 
-Pipeline: remove Unicode format characters (category Cf), refang the text
+Pipeline: remove Unicode format characters (category Cf), compose to NFC and
+map IDNA dot homoglyphs to ".", refang the text
 once (recording where substitutions happened), then
 run the type phases in order — URLs, emails, IPv6, IPv4, hashes, domains —
 masking what an earlier phase emitted so a URL's host or an email's domain is
@@ -85,11 +86,23 @@ def _format_char_re() -> re.Pattern[str]:
     return re.compile(f"[{body}]+")
 
 
-def strip_format_chars(text: str) -> str:
-    """Remove Unicode format characters (zero-width, bidi controls, BOM, ...)."""
+#: Characters IDNA treats as label separators: fullwidth full stop,
+#: ideographic full stop, halfwidth ideographic full stop.
+_DOT_HOMOGLYPHS = str.maketrans({"\uff0e": ".", "\u3002": ".", "\uff61": "."})
+
+
+def normalize_scan_text(text: str) -> str:
+    """Prepare text for matching so no host can be split into a shorter suffix.
+
+    Removes Unicode format characters (zero-width, bidi controls, BOM, ...),
+    composes to NFC so combining marks join their base letter, and maps the
+    IDNA dot homoglyphs to ``.``.
+    """
     if text.isascii():
-        return text  # Every Cf code point is non-ASCII.
-    return _format_char_re().sub("", text)
+        return text  # All three steps only affect non-ASCII code points.
+    text = _format_char_re().sub("", text)
+    text = unicodedata.normalize("NFC", text)
+    return text.translate(_DOT_HOMOGLYPHS)
 
 
 # ── Refanging ────────────────────────────────────────────────────────────
@@ -597,7 +610,7 @@ def extract(texts: Sequence[str]) -> ExtractionResult:
             text = text[:remaining]
             truncated = True
         remaining -= len(text)
-        text = strip_format_chars(text)
+        text = normalize_scan_text(text)
         scanned.append(text)
 
         hits, offsets = _scan(text)

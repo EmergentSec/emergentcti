@@ -416,3 +416,19 @@ def test_pathological_input_runs_in_linear_time(text: str) -> None:
     extract([text])
     # Quadratic behaviour on 2M chars would take minutes; generous bound for CI.
     assert time.perf_counter() - started < 10
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("evil\uff0eexample.com", (DOMAIN, "evil.example.com")),
+        ("evil\u3002example.com", (DOMAIN, "evil.example.com")),
+        ("sub\uff61domain.example.com", (DOMAIN, "sub.domain.example.com")),
+        ("évil.example", (DOMAIN, "xn--vil-9la.example")),
+        ("évil.example", (DOMAIN, "xn--vil-9la.example")),
+    ],
+)
+def test_dot_homoglyphs_and_combining_marks_never_yield_suffix_hosts(
+    text: str, expected: tuple[ObservableType, str]
+) -> None:
+    assert keys(text) == {expected}
