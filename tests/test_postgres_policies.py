@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -205,3 +205,64 @@ async def test_postgres_profile_foreign_key_restricts_raw_feed_deletion(pg_sessi
         assert await db.get(Feed, feed_id) is not None
         stored = await db.scalar(select(ExportProfile))
         assert stored is not None and stored.feed_id == feed_id
+
+
+async def test_postgres_report_import_upserts_and_attribution_constraints(pg_sessions):
+    """Migration 007 + import on PostgreSQL: ON CONFLICT paths, CHECK and SET NULL."""
+    from cti.models.report import Report, report_observables
+    from cti.models.user import User, UserRole
+    from cti.schemas.report import ImportItem
+    from cti.services import report_import_service, report_service
+
+    async with pg_sessions() as db:
+        user = User(username="pg-importer", password_hash="unused", role=UserRole.admin)
+        existing = Observable(
+            type=ObservableType.IP_ADDR, value="185.220.101.42", confidence_score=90
+        )
+        report = Report(
+            title="PG import",
+            origin="internal",
+            content="C2 evil-pg[.]example and 185.220.101.42",
+        )
+        db.add_all([user, existing, report])
+        await db.commit()
+        report = await report_service.get_report(db, report.id)
+        items = [
+            ImportItem(type="domain-name", value="evil-pg.example"),
+            ImportItem(type="ip-addr", value="185.220.101.42"),
+        ]
+
+        result = await report_import_service.import_candidates(
+            db, report, confidence=55, items=items, imported_by_id=user.id
+        )
+        await db.commit()
+        assert (result.created, result.attributed_existing, result.already_attributed) == (1, 1, 0)
+
+        again = await report_import_service.import_candidates(
+            db, report, confidence=5, items=items, imported_by_id=user.id
+        )
+        await db.commit()
+        assert (again.created, again.attributed_existing, again.already_attributed) == (0, 0, 2)
+        assert await db.scalar(select(func.count()).select_from(Observable)) == 2
+        assert (
+            await db.get(Observable, existing.id, populate_existing=True)
+        ).confidence_score == 90
+
+        with pytest.raises(IntegrityError):
+            await db.execute(
+                report_observables.update()
+                .where(report_observables.c.report_id == report.id)
+                .values(analyst_confidence=101)
+            )
+        await db.rollback()
+
+        await db.execute(delete(User).where(User.id == user.id))
+        await db.commit()
+        imported_by = (
+            await db.scalars(
+                select(report_observables.c.imported_by_id).where(
+                    report_observables.c.report_id == report.id
+                )
+            )
+        ).all()
+        assert imported_by == [None, None]

@@ -16,6 +16,9 @@ from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
 from cti.models.report import Report, ReportOrigin
 from cti.models.user import User
 from cti.schemas.report import (
+    ExtractionPreview,
+    ImportRequest,
+    ImportResult,
     LinkedObservable,
     ReportCreate,
     ReportDetail,
@@ -28,7 +31,7 @@ from cti.schemas.report import (
 from cti.schemas.report import (
     ReportAttachment as ReportAttachmentSchema,
 )
-from cti.services import report_service
+from cti.services import report_import_service, report_service
 
 router = APIRouter()
 
@@ -261,3 +264,41 @@ async def unlink_report_observable(
         raise HTTPException(status_code=404, detail="Report-observable link not found")
     await db.commit()
     return Response(status_code=204)
+
+
+@router.post("/{report_id}/extract", response_model=ExtractionPreview)
+async def extract_report_indicators(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(require_admin),
+) -> ExtractionPreview:
+    """Preview IOC candidates in the report. Read-only: performs no writes."""
+    report = await report_service.get_report(db, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return await report_import_service.build_preview(db, report)
+
+
+@router.post("/{report_id}/import", response_model=ImportResult)
+async def import_report_indicators(
+    report_id: uuid.UUID,
+    data: ImportRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthSubject = Depends(require_admin),
+) -> ImportResult:
+    """Import analyst-selected candidates in one transaction."""
+    report = await report_service.get_report(db, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    try:
+        result = await report_import_service.import_candidates(
+            db,
+            report,
+            confidence=data.confidence,
+            items=data.items,
+            imported_by_id=auth.id if isinstance(auth, User) else None,
+        )
+    except report_import_service.NotACandidateError as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from None
+    await db.commit()
+    return result

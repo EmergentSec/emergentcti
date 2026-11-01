@@ -16,6 +16,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    Integer,
     LargeBinary,
     String,
     Table,
@@ -55,6 +56,19 @@ report_observables = Table(
         primary_key=True,
     ),
     Column("created_at", DateTime(), nullable=False, server_default=func.now()),
+    # Import attribution (#14). All null for manual links from #12.
+    Column("imported_at", DateTime(), nullable=True),
+    Column(
+        "imported_by_id",
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("analyst_confidence", Integer(), nullable=True),
+    Column("source_excerpt", String(500), nullable=True),
+    CheckConstraint(
+        "analyst_confidence IS NULL OR (analyst_confidence >= 0 AND analyst_confidence <= 100)",
+        name="ck_report_observables_analyst_confidence",
+    ),
     Index("ix_report_observables_observable_id", "observable_id"),
 )
 
