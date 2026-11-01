@@ -414,6 +414,11 @@ def _phase_emails(text: str) -> tuple[list[_Hit], list[tuple[int, int]]]:
         start, end = match.span()
         if end < len(text) and _is_host_char(text[end]):
             continue  # Domain part longer than any valid hostname.
+        if start > 0 and text[start - 1].isalnum():
+            # The ASCII-only local part began mid-word ("jürgen@" would match
+            # as "rgen@"). Never emit a truncated address; the host can still
+            # surface from the domain phase.
+            continue
         local, _, domain = match.group().partition("@")
         stripped_local = local.lstrip(".")
         start += len(local) - len(stripped_local)

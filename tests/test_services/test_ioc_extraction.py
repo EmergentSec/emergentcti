@@ -321,6 +321,15 @@ def test_email_domain_is_not_double_emitted() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "text", ["contact jürgen@firma.de now", "üser@firma.de", "x 用户@firma.de"]
+)
+def test_email_local_part_is_never_truncated_at_non_ascii(text: str) -> None:
+    emitted = keys(text)
+    assert not any(kind == EMAIL for kind, _ in emitted)
+    assert (DOMAIN, "firma.de") in emitted
+
+
 def test_dedup_counts_occurrences_and_keeps_first_original() -> None:
     text = "First evil[.]example then EVIL.example then evil.example."
     candidate = by_key(text)[(DOMAIN, "evil.example")]
