@@ -325,6 +325,7 @@ async def preview_export_profile(
 @router.get("/profiles/{profile_id}/download", response_model=None)
 async def download_export_profile(
     profile_id: uuid.UUID,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     _auth: AuthSubject = Depends(get_current_auth),
 ) -> PlainTextResponse | JsonExportResponse:
@@ -349,6 +350,8 @@ async def download_export_profile(
         )
 
     allowlist = await allowlist_service.load_matcher(db)
+    _, _excluded, by_tlp = await export_profile_service.get_profile_values(db, profile)
+    response.headers["X-TLP-Excluded"] = str(sum(by_tlp.values()))
     observables = await observable_service.get_export_json(
         db,
         obs_type=profile.type,
