@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import func, insert, select
 
+from cti.models.feed import Feed
 from cti.models.observable import Observable
 from cti.models.report import Report, ReportAttachment, ReportOrigin, report_observables
 from cti.models.tag import observable_tags
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 OBS = "/api/v1/observables"
 REPORTS = "/api/v1/reports"
 TAGS = "/api/v1/tags"
+FEEDS = "/api/v1/feeds"
 MISSING = "00000000-0000-0000-0000-000000000000"
 
 
@@ -262,32 +264,137 @@ async def test_visible_report_detail_strips_red_observables(
     assert {o["value"] for o in full["observables"]} == {"203.0.113.230", "203.0.113.231"}
 
 
-async def test_extract_and_import_do_not_reveal_red_observables(
+_RED_VALUE = "203.0.113.240"
+_NEW_VALUE = "203.0.113.241"
+_IMPORT = {
+    "confidence": 60,
+    "items": [{"type": "ip-addr", "value": _RED_VALUE}, {"type": "ip-addr", "value": _NEW_VALUE}],
+}
+
+
+async def _extract_fixture(db: AsyncSession) -> tuple[Observable, Report]:
+    red_obs = await _red_observable(db, _RED_VALUE)
+    report = await _report(db, "Visible", "green", content=f"Seen: {_RED_VALUE} and {_NEW_VALUE}")
+    return red_obs, report
+
+
+async def test_extract_previews_red_match_as_new(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    red_obs = await _red_observable(db_session, "203.0.113.240")
-    report = await _report(
-        db_session, "Visible", "green", content="Seen: 203.0.113.240 and 203.0.113.241"
-    )
+    red_obs, report = await _extract_fixture(db_session)
+    await _link(db_session, report, red_obs)  # would show already_attributed
+
     preview = (await client.post(f"{REPORTS}/{report.id}/extract")).json()
     by_value = {c["value"]: c for c in preview["candidates"]}
-    assert by_value["203.0.113.240"]["existing_observable_id"] is None
-    assert by_value["203.0.113.240"]["existing_confidence"] is None
+    # Indistinguishable from a value that does not exist.
+    assert {k: v for k, v in by_value[_RED_VALUE].items() if k not in ("value", "original")} == {
+        k: v for k, v in by_value[_NEW_VALUE].items() if k not in ("value", "original")
+    }
+    assert by_value[_RED_VALUE]["status"] == "new"
+    assert by_value[_RED_VALUE]["already_attributed"] is False
+    assert preview["counts"] == {"total": 2, "new": 2, "existing": 0, "invalid": 0}
     assert str(red_obs.id) not in str(preview)
 
-    result = await client.post(
-        f"{REPORTS}/{report.id}/import",
-        json={
-            "confidence": 60,
-            "items": [
-                {"type": "ip-addr", "value": "203.0.113.240"},
-                {"type": "ip-addr", "value": "203.0.113.241"},
-            ],
-        },
+
+async def test_extract_session_still_sees_red_match_as_existing(
+    app: FastAPI, db_session: AsyncSession
+) -> None:
+    red_obs, report = await _extract_fixture(db_session)
+    async with non_admin_client(app, UserRole.admin) as admin:
+        preview = (await admin.post(f"{REPORTS}/{report.id}/extract")).json()
+    by_value = {c["value"]: c for c in preview["candidates"]}
+    assert by_value[_RED_VALUE]["status"] == "existing"
+    assert by_value[_RED_VALUE]["existing_observable_id"] == str(red_obs.id)
+    assert preview["counts"]["existing"] == 1
+
+
+async def test_import_skips_red_match_without_touching_it(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    red_obs, report = await _extract_fixture(db_session)
+    before = await db_session.scalar(
+        select(Observable.confidence_score).where(Observable.id == red_obs.id)
     )
+
+    result = await client.post(f"{REPORTS}/{report.id}/import", json=_IMPORT)
     assert result.status_code == 200, result.text
-    assert [o["value"] for o in result.json()["observables"]] == ["203.0.113.241"]
+    body = result.json()
+    # Counters cover only what the key can see; the RED value is skipped
+    # with a generic reason, not linked, and not duplicated.
+    assert (body["created"], body["attributed_existing"], body["already_attributed"]) == (1, 0, 0)
+    assert [o["value"] for o in body["observables"]] == [_NEW_VALUE]
+    assert body["skipped"] == [{"type": "ip-addr", "value": _RED_VALUE, "reason": "not_importable"}]
     assert str(red_obs.id) not in result.text
+    assert "red" not in result.text.lower()
+
+    red_id = red_obs.id
+    db_session.expire_all()
+    links = await db_session.scalar(
+        select(func.count())
+        .select_from(report_observables)
+        .where(report_observables.c.observable_id == red_id)
+    )
+    assert links == 0
+    after = await db_session.scalar(
+        select(Observable.confidence_score).where(Observable.id == red_id)
+    )
+    assert after == before
+    copies = await db_session.scalar(
+        select(func.count()).select_from(Observable).where(Observable.value == _RED_VALUE)
+    )
+    assert copies == 1
+
+
+async def test_import_session_attributes_red_match(app: FastAPI, db_session: AsyncSession) -> None:
+    red_obs, report = await _extract_fixture(db_session)
+    async with non_admin_client(app, UserRole.admin) as admin:
+        result = await admin.post(f"{REPORTS}/{report.id}/import", json=_IMPORT)
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert (body["created"], body["attributed_existing"], body["skipped"]) == (1, 1, [])
+    assert str(red_obs.id) in {o["id"] for o in body["observables"]}
+
+
+# ── feeds ────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("new_tlp", [None, "clear", "amber+strict"])
+async def test_api_key_cannot_declassify_red_feed(
+    client: AsyncClient, db_session: AsyncSession, new_tlp: str | None
+) -> None:
+    feed = await add_feed(db_session, "Red feed", tlp="red")
+    response = await client.put(
+        f"{FEEDS}/{feed.id}", json={"tlp": new_tlp, "tlp_change_reason": "declassify"}
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == (
+        "Declassifying a TLP:RED feed requires an interactive admin session"
+    )
+    feed_id = feed.id
+    db_session.expire_all()
+    assert await db_session.scalar(select(Feed.tlp).where(Feed.id == feed_id)) == "red"
+
+
+async def test_api_key_may_make_other_edits_to_red_feed(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    feed = await add_feed(db_session, "Red feed", tlp="red")
+    response = await client.put(f"{FEEDS}/{feed.id}", json={"description": "renamed", "tlp": "red"})
+    assert response.status_code == 200, response.text
+    assert response.json()["tlp"] == "red"
+    assert response.json()["description"] == "renamed"
+
+
+async def test_session_admin_may_declassify_red_feed(
+    app: FastAPI, db_session: AsyncSession
+) -> None:
+    feed = await add_feed(db_session, "Red feed", tlp="red")
+    async with non_admin_client(app, UserRole.admin) as admin:
+        response = await admin.put(
+            f"{FEEDS}/{feed.id}", json={"tlp": "green", "tlp_change_reason": "declassify"}
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()["tlp"] == "green"
 
 
 # ── interactive sessions and aggregates are unaffected ───────────────────

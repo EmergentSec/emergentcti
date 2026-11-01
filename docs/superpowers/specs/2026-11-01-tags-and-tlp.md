@@ -286,3 +286,25 @@ the coordinator; the rest only fix details the contract leaves open.
     404, and nested item lists omit or redact them. A mutation that newly makes
     an item RED succeeds but returns 204 instead of echoing it. Aggregate
     counts may still include RED items. Interactive sessions are unchanged.
+15. **API-key RED parity for feeds and report import (follow-up to 14).**
+    - A RED feed is visible to API keys (feeds are configuration, not intel),
+      but `PUT /feeds/{id}` with an API key returns 403 ("Declassifying a
+      TLP:RED feed requires an interactive admin session") for any `tlp` other
+      than `red`, reason or not. Other feed edits by API key are allowed.
+    - `POST /reports/{id}/extract` with an API key treats a candidate matching
+      an effective-RED observable exactly as a value that does not exist:
+      status `new`, no existing id/confidence, `already_attributed: false`,
+      and `counts` computed from those redacted candidates.
+    - `POST /reports/{id}/import` with an API key leaves such an item untouched
+      (no link, no confidence change, no duplicate row, since type+value is
+      unique) and lists it in the new `ImportResult.skipped`
+      (`[{type, value, reason: "not_importable"}]`). `created`,
+      `attributed_existing`, `already_attributed` and `observables` cover only
+      imported items. The RED check runs after the upsert, so a RED row created
+      concurrently is skipped too. `skipped` is always empty for interactive
+      sessions.
+    - Accepted residual: a value that is not created can't look like one that
+      is, so `skipped` shows that a value is unavailable to the key. This is
+      the same signal as `POST /observables` answering 404 for an existing RED
+      value (item 14). The reason never mentions TLP, and no id, marking,
+      confidence or other attribute is exposed.

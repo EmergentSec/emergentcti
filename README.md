@@ -132,7 +132,9 @@ What each export destination allows:
   or API key, including when a blocklist comes from the cache. For API-key
   callers RED observables and reports do not exist: lists leave them out,
   detail, attachment and edit endpoints return `404`, and reports drop linked
-  RED observables. Signed-in users still see and can open everything in the
+  RED observables. Report extraction previews RED matches as new values, and
+  import skips them (`skipped`, reason `not_importable`) without changing them.
+  An API key cannot change a RED feed's marking. Signed-in users still see and can open everything in the
   app; declassifying a RED item needs an interactive admin session. Every
   attachment response carries `X-TLP-Marking`.
 - TLP and the allowlist are independent: a value is exported only if it passes

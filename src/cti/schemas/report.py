@@ -267,8 +267,16 @@ class ImportedObservable(BaseModel):
     created: bool
 
 
+class SkippedImportItem(BaseModel):
+    type: CandidateType
+    value: str
+    reason: str
+
+
 class ImportResult(BaseModel):
     created: int
     attributed_existing: int
     already_attributed: int
     observables: list[ImportedObservable]
+    # API-key imports only: items left untouched, with a generic reason.
+    skipped: list[SkippedImportItem] = Field(default_factory=list)

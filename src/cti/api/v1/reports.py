@@ -353,17 +353,8 @@ async def extract_report_indicators(
     report = await report_service.get_report(db, report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
-    preview = await report_import_service.build_preview(db, report)
-    if hide_red_for(auth):
-        existing = [
-            c.existing_observable_id for c in preview.candidates if c.existing_observable_id
-        ]
-        red = await red_observable_ids(db, existing)
-        for candidate in preview.candidates:
-            if candidate.existing_observable_id in red:
-                candidate.existing_observable_id = None
-                candidate.existing_confidence = None
-    return preview
+    # API keys: RED matches are previewed exactly as values that do not exist.
+    return await report_import_service.build_preview(db, report, hide_red=hide_red_for(auth))
 
 
 @router.post("/{report_id}/import", response_model=ImportResult)
@@ -385,12 +376,10 @@ async def import_report_indicators(
             confidence=data.confidence,
             items=data.items,
             imported_by_id=auth.id if isinstance(auth, User) else None,
+            hide_red=hide_red_for(auth),
         )
     except report_import_service.NotACandidateError as exc:
         raise HTTPException(status_code=422, detail=exc.detail) from None
     await db.commit()
     await invalidate_observable_caches()
-    if hide_red_for(auth):
-        red = await red_observable_ids(db, (o.id for o in result.observables))
-        result.observables = [o for o in result.observables if o.id not in red]
     return result
