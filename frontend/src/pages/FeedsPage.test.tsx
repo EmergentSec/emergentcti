@@ -153,7 +153,8 @@ const mockDashboard = {
 const mockUpdateMutate = vi.fn()
 
 vi.mock('@/hooks/useFeeds', () => ({
-  useFeeds: () => ({ data: mockFeeds, isLoading: false, error: null }),
+  // A fresh array per render, like a react-query refetch after a mutation.
+  useFeeds: () => ({ data: [...mockFeeds], isLoading: false, error: null }),
   useCreateFeed: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateFeed: () => ({ mutate: mockUpdateMutate, isPending: false }),
 }))
@@ -311,17 +312,48 @@ describe('FeedsPage — Edit Feed', () => {
   })
 
   it('highlights the feed named in ?feed= and scrolls it into view', () => {
-    const scrollIntoView = vi.fn()
-    Element.prototype.scrollIntoView = scrollIntoView
+    const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
+    try {
+      render(
+        <MemoryRouter initialEntries={['/feeds?feed=f2']}>
+          <FeedsPage />
+        </MemoryRouter>,
+      )
 
-    render(
-      <MemoryRouter initialEntries={['/feeds?feed=f2']}>
-        <FeedsPage />
-      </MemoryRouter>,
-    )
+      expect(document.getElementById('feed-f2')?.getAttribute('data-highlighted')).toBe('true')
+      expect(document.getElementById('feed-f1')?.getAttribute('data-highlighted')).toBe('false')
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+      expect(screen.queryByText(/linked feed was not found/i)).toBeNull()
 
-    expect(document.getElementById('feed-f2')?.getAttribute('data-highlighted')).toBe('true')
-    expect(document.getElementById('feed-f1')?.getAttribute('data-highlighted')).toBe('false')
-    expect(scrollIntoView).toHaveBeenCalled()
+      // A rerender with refetched feeds (new array) must not scroll again.
+      fireEvent.click(screen.getByRole('button', { name: 'trigger-edit-f1' }))
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    } finally {
+      scrollIntoView.mockRestore()
+    }
+  })
+
+  it('shows a dismissible notice when ?feed= names an unknown or deleted feed', () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
+    try {
+      render(
+        <MemoryRouter initialEntries={['/feeds?feed=deleted-feed']}>
+          <FeedsPage />
+        </MemoryRouter>,
+      )
+
+      expect(screen.getByRole('status').textContent).toMatch(/linked feed was not found/i)
+      expect(scrollIntoView).not.toHaveBeenCalled()
+      // Existing feeds still render, none highlighted.
+      expect(screen.getAllByTestId('feed-card')).toHaveLength(mockFeeds.length)
+      expect(
+        screen.getAllByTestId('feed-card').every((el) => el.getAttribute('data-highlighted') === 'false'),
+      ).toBe(true)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+      expect(screen.queryByText(/linked feed was not found/i)).toBeNull()
+    } finally {
+      scrollIntoView.mockRestore()
+    }
   })
 })
