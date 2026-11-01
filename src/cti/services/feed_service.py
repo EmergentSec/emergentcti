@@ -11,11 +11,19 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cti.core.security import decrypt_config, encrypt_config
+from cti.core.security import encrypt_config
 from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.models.export_profile import ExportProfile
 from cti.models.feed import Feed, FeedRun, FeedRunStatus, FeedType
 from cti.models.observable_source import ObservableSource
+from cti.services.feed_auth import (
+    REPAIR_MESSAGE,
+    URL_TEMPLATE_URL_CHANGE_MESSAGE,
+    AuthConfigValidationError,
+    extract_partial_secret,
+    try_decrypt_stored_auth,
+    validate_auth_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +45,69 @@ async def _referencing_profile_names(db: AsyncSession, feed_id: uuid.UUID) -> li
         .order_by(ExportProfile.name)
     )
     return [row[0] for row in result.all()]
+
+
+def _normalize_clearable_string(value: str | None) -> str | None:
+    """Map explicit null or blank strings to NULL for nullable text columns."""
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped if stripped else None
+
+
+def _apply_auth_config_update(
+    feed: Feed,
+    auth_config: dict,
+    *,
+    partial_only: bool,
+) -> None:
+    """Apply full or partial auth_config mutation after validation."""
+    feed_url = feed.url
+
+    if not partial_only:
+        validated = validate_auth_config(auth_config, feed_url=feed_url)
+        feed.auth_config_encrypted = encrypt_config(validated)
+        return
+
+    secret = extract_partial_secret(auth_config)
+    if secret is None:
+        return
+
+    base: dict | None = None
+    if feed.auth_config_encrypted is not None:
+        decrypted = try_decrypt_stored_auth(feed.auth_config_encrypted)
+        if decrypted is None:
+            logger.warning(
+                "Feed auth could not be decrypted during partial rotation",
+                extra={"feed_id": str(feed.id)},
+            )
+        else:
+            try:
+                base = validate_auth_config(decrypted, feed_url=feed_url)
+            except AuthConfigValidationError:
+                base = None
+
+    if base is None:
+        template = _preconfigured_auth_template(feed)
+        if template and isinstance(template.get("auth_type"), str):
+            merged = dict(template)
+            merged["api_key_value"] = secret
+            if merged.get("auth_type") == "bearer":
+                merged["token"] = secret
+            try:
+                validated = validate_auth_config(merged, feed_url=feed_url)
+            except AuthConfigValidationError as exc:
+                raise AuthConfigValidationError(REPAIR_MESSAGE) from exc
+            feed.auth_config_encrypted = encrypt_config(validated)
+            return
+        raise AuthConfigValidationError(REPAIR_MESSAGE)
+
+    merged = dict(base)
+    merged["api_key_value"] = secret
+    if merged.get("auth_type") == "bearer":
+        merged["token"] = secret
+    validated = validate_auth_config(merged, feed_url=feed_url)
+    feed.auth_config_encrypted = encrypt_config(validated)
 
 
 async def list_feeds(db: AsyncSession) -> list[Feed]:
@@ -61,31 +132,94 @@ async def create_feed(db: AsyncSession, data: dict) -> Feed:
     # New feeds have no run history. Initialize it so response serialization
     # after commit never attempts relationship IO outside an async context.
     feed = Feed(**data, is_preconfigured=False, runs=[])
-    if auth_config:
-        feed.auth_config_encrypted = encrypt_config(auth_config)
+    if auth_config is not None:
+        validated = validate_auth_config(auth_config, feed_url=feed.url)
+        feed.auth_config_encrypted = encrypt_config(validated)
     db.add(feed)
     await db.flush()
     return feed
+
+
+def _preconfigured_auth_template(feed: Feed) -> dict | None:
+    """Return the auth_config_template for a preconfigured feed, or None."""
+    if not feed.is_preconfigured:
+        return None
+    for d in DEFAULT_FEEDS:
+        if d["name"] == feed.name:
+            template = d.get("auth_config_template")
+            # Return a copy — callers mutate this (e.g. set api_key_value) and
+            # must never write a secret back into the shared DEFAULT_FEEDS global.
+            return dict(template) if template else None
+    return None
 
 
 async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
     """Update a feed.
 
     For preconfigured feeds only ``enabled``, ``schedule_cron``,
-    ``default_confidence``, and ``auth_config`` may be modified.
+    ``default_confidence``, ``description``, and ``auth_config`` may be
+    modified (``name``/``url``/``feed_type``/``config`` are managed by the
+    platform and ignored).
+
+    If ``data`` contains ``auth_config``:
+    - When ``auth_type`` is present in the payload, the supplied dict fully
+      replaces the stored auth config.
+    - Otherwise the payload is treated as a *partial* update: ``api_key_value``
+      is merged into the existing decrypted config (if any) or the feed's
+      preconfigured template.  For bearer-auth feeds ``token`` is also set.
+    - Raises ``AuthConfigValidationError`` when auth_config is invalid.
     """
-    auth_config = data.pop("auth_config", None)
+    auth_config_provided = "auth_config" in data
+    auth_config = data.pop("auth_config", None) if auth_config_provided else None
+
+    url_change_without_auth = (
+        not feed.is_preconfigured
+        and not auth_config_provided
+        and "url" in data
+        and data["url"] != feed.url
+    )
+    previous_url = feed.url
 
     if feed.is_preconfigured:
-        allowed = {"enabled", "schedule_cron", "default_confidence", "auth_config"}
-        data = {k: v for k, v in data.items() if k in allowed and v is not None}
+        allowed = {
+            "enabled",
+            "schedule_cron",
+            "default_confidence",
+            "auth_config",
+            "description",
+        }
+        data = {k: v for k, v in data.items() if k in allowed}
 
     for key, value in data.items():
-        if value is not None:
+        if key in ("description", "schedule_cron"):
+            setattr(
+                feed,
+                key,
+                _normalize_clearable_string(value) if value is not None else None,
+            )
+        else:
             setattr(feed, key, value)
 
-    if auth_config:
-        feed.auth_config_encrypted = encrypt_config(auth_config)
+    if auth_config_provided and auth_config is not None:
+        partial_only = "auth_type" not in auth_config
+        _apply_auth_config_update(
+            feed, auth_config, partial_only=partial_only
+        )
+
+    if url_change_without_auth and feed.auth_config_encrypted is not None:
+        decrypted = try_decrypt_stored_auth(feed.auth_config_encrypted)
+        if decrypted is not None:
+            try:
+                validate_auth_config(decrypted, feed_url=previous_url)
+            except AuthConfigValidationError:
+                pass
+            else:
+                try:
+                    validate_auth_config(decrypted, feed_url=feed.url)
+                except AuthConfigValidationError as exc:
+                    raise AuthConfigValidationError(
+                        URL_TEMPLATE_URL_CHANGE_MESSAGE
+                    ) from exc
 
     await db.flush()
     # SQL-expression onupdate expires this field; load it while IO is awaited.

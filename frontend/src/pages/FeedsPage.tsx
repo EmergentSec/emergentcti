@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Plus } from '@phosphor-icons/react'
-import { useFeeds, useCreateFeed } from '@/hooks/useFeeds'
+import { useFeeds, useCreateFeed, useUpdateFeed } from '@/hooks/useFeeds'
 import { useDashboard } from '@/hooks/useDashboard'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
@@ -13,9 +13,10 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Tabs } from '@/components/ui/Tabs'
 import { FeedCard } from '@/components/feeds/FeedCard'
 import { FeedForm } from '@/components/feeds/FeedForm'
+import { apiErrorMessage } from '@/lib/apiError'
 import { compactNumber } from '@/lib/dashboardFormat'
 import { cn } from '@/lib/utils'
-import type { FeedCreate, FeedType } from '@/types/feed'
+import type { Feed, FeedCreate, FeedUpdate, FeedType } from '@/types/feed'
 
 type FilterSegment = 'all' | FeedType
 
@@ -52,10 +53,13 @@ export default function FeedsPage() {
   const { data: feeds, isLoading: feedsLoading, error: feedsError } = useFeeds()
   const { data: stats } = useDashboard()
   const createFeed = useCreateFeed()
+  const updateFeed = useUpdateFeed()
   const { toast } = useToast()
   const { isAdmin } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [activeSegment, setActiveSegment] = useState<FilterSegment>('all')
+  const [editingFeed, setEditingFeed] = useState<Feed | null>(null)
+  const [editSubmitError, setEditSubmitError] = useState<string | null>(null)
   const showCreateDialog = isAdmin && searchParams.get('create') === '1'
 
   const openCreateDialog = () => {
@@ -80,6 +84,26 @@ export default function FeedsPage() {
         toast(err instanceof Error ? err.message : 'Failed to create feed', 'error')
       },
     })
+  }
+
+  const handleEdit = (data: FeedUpdate) => {
+    if (!editingFeed) return
+    setEditSubmitError(null)
+    updateFeed.mutate(
+      { id: editingFeed.id, data },
+      {
+        onSuccess: () => {
+          toast('Feed updated', 'success')
+          setEditingFeed(null)
+          setEditSubmitError(null)
+        },
+        onError: (err) => {
+          const message = apiErrorMessage(err, 'Failed to update feed')
+          setEditSubmitError(message)
+          toast(message, 'error')
+        },
+      },
+    )
   }
 
   if (feedsLoading) {
@@ -160,7 +184,12 @@ export default function FeedsPage() {
             </EmptyState>
           </Card>
         ) : (
-          filteredFeeds.map((feed) => <FeedCard key={feed.id} feed={feed} />)
+          filteredFeeds.map((feed) => (
+            <FeedCard key={feed.id} feed={feed} onEdit={(feed) => {
+              setEditSubmitError(null)
+              setEditingFeed(feed)
+            }} />
+          ))
         )}
       </div>
 
@@ -171,6 +200,19 @@ export default function FeedsPage() {
           isLoading={createFeed.isPending}
         />
       </Dialog>
+
+      {/* ── Edit dialog ──────────────────────────────────────────────────── */}
+      {editingFeed && (
+        <Dialog open onClose={() => { setEditingFeed(null); setEditSubmitError(null) }} title="Edit Feed">
+          <FeedForm
+            initialValues={editingFeed}
+            onSubmit={handleEdit}
+            onCancel={() => { setEditingFeed(null); setEditSubmitError(null) }}
+            isLoading={updateFeed.isPending}
+            submitError={editSubmitError}
+          />
+        </Dialog>
+      )}
     </div>
   )
 }

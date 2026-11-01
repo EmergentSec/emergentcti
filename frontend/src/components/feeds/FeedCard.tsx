@@ -25,6 +25,7 @@ import { FeedRunHistory } from './FeedRunHistory'
 
 interface FeedCardProps {
   feed: Feed
+  onEdit?: (feed: Feed) => void
 }
 
 const FEED_TYPE_CONFIG: Record<
@@ -95,7 +96,7 @@ function FeedStatus({ feed }: { feed: Feed }) {
   return <Badge variant="success">OK</Badge>
 }
 
-export function FeedCard({ feed }: FeedCardProps) {
+export function FeedCard({ feed, onEdit }: FeedCardProps) {
   const [showHistory, setShowHistory] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
   const updateFeed = useUpdateFeed()
@@ -156,6 +157,15 @@ export function FeedCard({ feed }: FeedCardProps) {
                   <h3 className="font-semibold text-foreground">{feed.name}</h3>
                   <Badge variant="outline">{typeConfig.label}</Badge>
                   <FeedStatus feed={feed} />
+                  {feed.auth_needs_repair && (
+                    <Badge
+                      variant="warning"
+                      className="border border-warning"
+                      title="Stored authentication is invalid or unreadable; repair in Edit feed"
+                    >
+                      Auth needs repair
+                    </Badge>
+                  )}
                 </div>
                 {feed.description && (
                   <p className="mt-1 text-sm text-muted-foreground">{feed.description}</p>
@@ -222,6 +232,15 @@ export function FeedCard({ feed }: FeedCardProps) {
                   >
                     {showHistory ? 'Hide run history' : 'Show run history'}
                   </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="rounded-lg px-3 py-2 text-left text-sm hover:bg-hover"
+                      onClick={() => onEdit?.(feed)}
+                    >
+                      Edit
+                    </button>
+                  )}
                   {isAdmin && !feed.is_preconfigured && (
                     <button
                       type="button"

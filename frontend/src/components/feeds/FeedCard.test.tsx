@@ -41,6 +41,9 @@ const mockFeed: Feed = {
   schedule_cron: '0 */6 * * *',
   enabled: true,
   is_preconfigured: true,
+  has_auth: false,
+  auth_supported: true,
+  auth_needs_repair: false,
   default_confidence: 85,
   last_run_at: '2026-06-29T00:00:00Z',
   observable_count: 312480,
@@ -69,6 +72,16 @@ describe('FeedCard', () => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     mockIsAdmin.isAdmin = true
+  })
+
+  it('shows Auth needs repair badge when auth_needs_repair is true', () => {
+    render(<FeedCard feed={{ ...mockFeed, auth_needs_repair: true }} />)
+    expect(screen.getByText('Auth needs repair')).toBeTruthy()
+  })
+
+  it('does not show Auth needs repair badge when flag is false', () => {
+    render(<FeedCard feed={mockFeed} />)
+    expect(screen.queryByText('Auth needs repair')).toBeNull()
   })
 
   it('renders feed name and type chip', () => {
@@ -152,5 +165,33 @@ describe('FeedCard', () => {
     expect(runBtn.hasAttribute('disabled')).toBe(true)
     const toggle = screen.getByRole('switch')
     expect(toggle.hasAttribute('disabled')).toBe(true)
+  })
+
+  it('admin: opening the ⋮ menu shows Edit', () => {
+    render(<FeedCard feed={mockFeed} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Feed options' }))
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
+  })
+
+  it('admin: clicking Edit calls onEdit with the feed', () => {
+    const onEdit = vi.fn()
+    render(<FeedCard feed={mockFeed} onEdit={onEdit} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Feed options' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    expect(onEdit).toHaveBeenCalledWith(mockFeed)
+  })
+
+  it('non-admin: Edit is not rendered in the ⋮ menu', () => {
+    mockIsAdmin.isAdmin = false
+    render(<FeedCard feed={mockFeed} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Feed options' }))
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+  })
+
+  it('admin: Edit is shown for a preconfigured feed', () => {
+    const preconfigFeed = { ...mockFeed, is_preconfigured: true }
+    render(<FeedCard feed={preconfigFeed} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Feed options' }))
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
   })
 })
