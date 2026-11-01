@@ -380,6 +380,7 @@ async def test_api_key_cannot_delete_red_feed(
 ) -> None:
     feed = await add_feed(db_session, "Red feed", tlp="red")
     obs = await add_observable(db_session, "203.0.113.250", feed=feed)
+    obs_id = obs.id
     response = await client.delete(f"{FEEDS}/{feed.id}")
     assert response.status_code == 403
     assert response.json()["detail"] == (
@@ -388,7 +389,7 @@ async def test_api_key_cannot_delete_red_feed(
     feed_id = feed.id
     db_session.expire_all()
     assert await db_session.scalar(select(Feed.id).where(Feed.id == feed_id)) == feed_id
-    assert (await client.get(f"{OBS}/{obs.id}")).status_code == 404
+    assert (await client.get(f"{OBS}/{obs_id}")).status_code == 404
 
 
 async def test_api_key_may_make_other_edits_to_red_feed(
