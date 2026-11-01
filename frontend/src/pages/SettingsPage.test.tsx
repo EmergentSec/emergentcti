@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render as rtlRender, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render as rtlRender, screen, within } from '@testing-library/react'
 import { Link, MemoryRouter } from 'react-router-dom'
 import type { ReactElement } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -186,5 +186,16 @@ describe('SettingsPage', () => {
 
     expect(screen.getByText('AccountSettings')).toBeTruthy()
     expect(screen.queryByText('AiSettings')).toBeNull()
+  })
+
+  it('desktop sidebar switches panes (mobile tablist is md:hidden in layout)', () => {
+    mockUseAuth.mockReturnValue({ isAdmin: false } as ReturnType<typeof useAuth>)
+
+    render(<SettingsPage />)
+
+    const nav = screen.getByRole('navigation', { name: 'Settings sections' })
+    fireEvent.click(within(nav).getByRole('button', { name: 'Export profiles' }))
+    expect(screen.getByText('ExportProfileManager')).toBeTruthy()
+    expect(screen.queryByText('AccountSettings')).toBeNull()
   })
 })
