@@ -20,6 +20,13 @@ from pydantic_core import PydanticCustomError
 
 from cti.models.observable import ObservableType
 from cti.models.report import ContentFormat, ReportOrigin
+from cti.models.tlp import Tlp
+
+# Required when a feed/report marking is loosened (#15); trimmed, 1-500 chars.
+TlpChangeReason = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
+]
 
 TrimmedTitle = Annotated[
     str,
@@ -61,6 +68,7 @@ class ReportCreate(BaseModel):
     ai_provider: str | None = Field(default=None, max_length=255)
     ai_model: str | None = Field(default=None, max_length=255)
     ai_generated_at: datetime | None = None
+    tlp: Tlp | None = None
 
     _source_url_is_http = field_validator("source_url")(_validate_source_url)
 
@@ -84,6 +92,9 @@ class ReportUpdate(BaseModel):
     ai_provider: str | None = Field(default=None, max_length=255)
     ai_model: str | None = Field(default=None, max_length=255)
     ai_generated_at: datetime | None = None
+    # Explicit null = Unspecified. Loosening needs tlp_change_reason.
+    tlp: Tlp | None = None
+    tlp_change_reason: TlpChangeReason | None = None
 
     _source_url_is_http = field_validator("source_url")(_validate_source_url)
 
@@ -128,6 +139,8 @@ class ReportSummary(BaseModel):
     ai_provider: str | None
     ai_model: str | None
     has_attachment: bool
+    tlp: Tlp | None = None
+    tags: list[str] = []
     created_at: datetime
     updated_at: datetime
 
@@ -161,6 +174,8 @@ class ReportFilters(BaseModel):
     published_from: date | None = None
     published_to: date | None = None
     ai_generated: bool | None = None
+    tags: list[str] = []
+    tlp: list[str] = []
     page: int = Field(default=1, ge=1)
     size: int = Field(default=25, ge=1, le=100)
 

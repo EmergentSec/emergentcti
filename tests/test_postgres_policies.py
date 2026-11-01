@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import delete, func, inspect, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -344,3 +344,124 @@ async def test_postgres_confidence_recompute_and_constraints(pg_sessions):
                 )
                 await db.commit()
             await db.rollback()
+
+
+async def test_postgres_migration_009_tlp_and_tags(pg_sessions):
+    """Migration 009 on PostgreSQL: CHECKs, RESTRICT, effective SQL, export gate, down/up."""
+    from cti.models.report import Report, report_observables
+    from cti.models.tag import Tag, export_profile_tags, observable_tags
+    from cti.services import observable_service
+    from cti.services.tlp import effective_tlp_map
+
+    async with pg_sessions() as db:
+        # Rollout: pre-existing profiles default to internal.
+        profile = ExportProfile(name="PG 009", format=ExportFormat.TEXT, confidence_min=0)
+        red_feed = Feed(name="PG red", feed_type=FeedType.FILE, tlp="red")
+        unspecified_feed = Feed(name="PG unspecified", feed_type=FeedType.FILE)
+        green_report = Report(title="PG green", origin="internal", tlp="green")
+        amber_report = Report(title="PG amber", origin="internal", tlp="amber")
+        red_obs = Observable(type=ObservableType.IP_ADDR, value="192.0.2.90")
+        poisoned = Observable(type=ObservableType.IP_ADDR, value="192.0.2.91")
+        amber_obs = Observable(type=ObservableType.IP_ADDR, value="192.0.2.92")
+        manual = Observable(type=ObservableType.IP_ADDR, value="192.0.2.93", manual_tlp="clear")
+        db.add_all(
+            [
+                profile,
+                red_feed,
+                unspecified_feed,
+                green_report,
+                amber_report,
+                red_obs,
+                poisoned,
+                amber_obs,
+                manual,
+            ]
+        )
+        await db.flush()
+        db.add_all(
+            [
+                ObservableSource(observable_id=red_obs.id, feed_id=red_feed.id),
+                ObservableSource(observable_id=poisoned.id, feed_id=unspecified_feed.id),
+                ObservableSource(observable_id=amber_obs.id, feed_id=unspecified_feed.id),
+            ]
+        )
+        await db.execute(
+            report_observables.insert().values(
+                [
+                    {"report_id": green_report.id, "observable_id": red_obs.id},
+                    {"report_id": green_report.id, "observable_id": poisoned.id},
+                    {"report_id": amber_report.id, "observable_id": amber_obs.id},
+                ]
+            )
+        )
+        await db.commit()
+        assert (await db.get(ExportProfile, profile.id)).destination.value == "internal"
+
+        markings = await effective_tlp_map(db, [red_obs.id, poisoned.id, amber_obs.id, manual.id])
+        assert {k: (v.value if v else None) for k, v in markings.items()} == {
+            red_obs.id: "red",
+            poisoned.id: None,
+            amber_obs.id: "amber",
+            manual.id: "clear",
+        }
+        values, _allowlisted, by_tlp = await observable_service.get_export_values(
+            db, order="value", line_safe=True
+        )
+        assert values == ["192.0.2.91", "192.0.2.92", "192.0.2.93"]
+        assert by_tlp["red"] == 1
+        public, _a, _t = await observable_service.get_export_values(db, destination="public")
+        assert public == ["192.0.2.93"]
+
+        for statement in (
+            update(Feed).where(Feed.id == red_feed.id).values(tlp="TLP:RED"),
+            update(Report).where(Report.id == green_report.id).values(tlp="white"),
+            update(Observable).where(Observable.id == manual.id).values(tlp_override="red"),
+            update(ExportProfile)
+            .where(ExportProfile.id == profile.id)
+            .values(destination="external_ai"),
+        ):
+            with pytest.raises(IntegrityError):
+                await db.execute(statement)
+                await db.commit()
+            await db.rollback()
+
+        tag = Tag(name="pg-tag")
+        db.add(tag)
+        await db.flush()
+        await db.execute(observable_tags.insert().values(observable_id=red_obs.id, tag_id=tag.id))
+        await db.execute(
+            export_profile_tags.insert().values(export_profile_id=profile.id, tag_id=tag.id)
+        )
+        await db.commit()
+        tag_id = tag.id
+        with pytest.raises(IntegrityError):
+            await db.execute(delete(Tag).where(Tag.id == tag_id))
+            await db.commit()
+        await db.rollback()
+        # Deleting the observable cascades its tag assignments.
+        await db.execute(delete(Observable).where(Observable.id == red_obs.id))
+        await db.commit()
+        remaining = await db.scalar(
+            select(func.count())
+            .select_from(observable_tags)
+            .where(observable_tags.c.tag_id == tag_id)
+        )
+        assert remaining == 0
+
+    # Downgrade 009 -> 008 and upgrade again on the same schema.
+    path = MIGRATIONS / "009_add_tags_and_tlp.py"
+    spec = importlib.util.spec_from_file_location("cti_test_migration_009_pg", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def run(connection, direction):
+        with Operations.context(MigrationContext.configure(connection)):
+            getattr(module, direction)()
+
+    engine = pg_sessions.kw["bind"]
+    async with engine.begin() as connection:
+        await connection.run_sync(run, "downgrade")
+        tables = await connection.run_sync(lambda c: set(inspect(c).get_table_names()))
+        assert not {"tags", "observable_tags", "report_tags", "export_profile_tags"} & tables
+        await connection.run_sync(run, "upgrade")

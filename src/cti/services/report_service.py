@@ -12,6 +12,8 @@ from sqlalchemy.orm import selectinload, undefer
 
 from cti.models.observable import Observable
 from cti.models.report import Report, ReportAttachment, report_observables
+from cti.models.tag import Tag, report_tags
+from cti.services import tlp as tlp_policy
 from cti.services.confidence import recompute_effective_confidence
 
 if TYPE_CHECKING:
@@ -53,6 +55,7 @@ def _load_options() -> tuple[ExecutableOption, ...]:
         selectinload(Report.created_by),
         selectinload(Report.attachment),
         selectinload(Report.observables),
+        selectinload(Report.tags),
     )
 
 
@@ -81,6 +84,15 @@ async def list_reports(
         clauses.append(Report.published_at < exclusive_end)
     if filters.ai_generated is not None:
         clauses.append(Report.is_ai_generated == filters.ai_generated)
+    if filters.tags:
+        tagged = (
+            select(report_tags.c.report_id)
+            .join(Tag, Tag.id == report_tags.c.tag_id)
+            .where(Tag.name.in_(filters.tags))
+        )
+        clauses.append(Report.id.in_(tagged))
+    if filters.tlp:
+        clauses.append(tlp_policy.tlp_filter(Report.tlp, filters.tlp))
 
     count_query = select(func.count(Report.id)).where(*clauses)
     total = await db.scalar(count_query) or 0
@@ -107,8 +119,12 @@ async def list_sources(db: AsyncSession) -> list[str]:
     return [source for source in (await db.scalars(query)).all() if source is not None]
 
 
-async def get_report(db: AsyncSession, report_id: uuid.UUID) -> Report | None:
+async def get_report(
+    db: AsyncSession, report_id: uuid.UUID, *, refresh: bool = False
+) -> Report | None:
     query = select(Report).where(Report.id == report_id).options(*_load_options())
+    if refresh:
+        query = query.execution_options(populate_existing=True)
     return (await db.scalars(query)).unique().one_or_none()
 
 
@@ -118,7 +134,10 @@ async def create_report(
     *,
     created_by_id: uuid.UUID | None,
 ) -> Report:
-    report = Report(**data.model_dump(), created_by_id=created_by_id)
+    values = data.model_dump()
+    if values.get("tlp") is not None:
+        values["tlp"] = values["tlp"].value
+    report = Report(**values, created_by_id=created_by_id)
     db.add(report)
     await db.flush()
     result = await get_report(db, report.id)
@@ -146,6 +165,14 @@ async def update_report(
     if report is None:
         return None
     updates = data.model_dump(exclude_unset=True)
+    reason = updates.pop("tlp_change_reason", None)
+    if "tlp" in updates:
+        new_tlp = updates["tlp"].value if updates["tlp"] is not None else None
+        updates["tlp"] = new_tlp
+        try:
+            tlp_policy.check_marking_change("report", report.id, report.tlp, new_tlp, reason)
+        except tlp_policy.TlpDowngradeReasonRequiredError as exc:
+            raise ReportValidationError(str(exc)) from None
     _validate_merged_ai_provenance(report, updates)
     for field, value in updates.items():
         setattr(report, field, value)
@@ -166,6 +193,7 @@ async def delete_report(db: AsyncSession, report_id: uuid.UUID) -> bool:
     )
     # Explicit child deletion keeps SQLite tests correct when FK enforcement is off.
     await db.execute(delete(report_observables).where(report_observables.c.report_id == report_id))
+    await db.execute(delete(report_tags).where(report_tags.c.report_id == report_id))
     await db.execute(delete(ReportAttachment).where(ReportAttachment.report_id == report_id))
     await db.execute(delete(Report).where(Report.id == report_id))
     await recompute_effective_confidence(db, observable_ids)
@@ -257,6 +285,11 @@ async def delete_attachment(db: AsyncSession, report_id: uuid.UUID) -> bool:
     await db.delete(attachment)
     await db.flush()
     return True
+
+
+async def get_report_tlp(db: AsyncSession, report_id: uuid.UUID) -> str | None:
+    """The report's own marking (the attachment inherits it)."""
+    return await db.scalar(select(Report.tlp).where(Report.id == report_id))
 
 
 async def get_attachment_for_download(

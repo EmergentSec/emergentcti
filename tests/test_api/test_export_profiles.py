@@ -15,7 +15,13 @@ from cti.models.export_profile import ExportProfile
 from cti.models.feed import Feed
 from cti.models.observable import ObservableType
 from cti.services import export_profile_service, feed_service
-from tests.policy_helpers import add_feed, add_observable, allow, non_admin_client
+from tests.policy_helpers import (
+    NO_TLP_EXCLUSIONS,
+    add_feed,
+    add_observable,
+    allow,
+    non_admin_client,
+)
 
 BASE = "/api/v1/export/profiles"
 DOMAIN = ObservableType.DOMAIN_NAME
@@ -280,6 +286,7 @@ async def test_text_download_applies_saved_filters_and_policy(
     assert preview == {
         "count": 2,
         "excluded_allowlisted": 1,
+        "excluded_by_tlp": NO_TLP_EXCLUSIONS,
         "sample": ["203.0.113.1", "203.0.113.9"],
     }
 
@@ -312,7 +319,7 @@ async def test_json_download_uses_export_shape(
     assert data["count"] == 2
     assert {o["value"] for o in data["observables"]} == {"203.0.113.1", "203.0.113.9"}
     assert set(data["observables"][0]) == {
-        "type", "value", "confidence_score", "last_seen", "sources",
+        "type", "value", "confidence_score", "last_seen", "sources", "tlp", "tags",
     }
     assert data["observables"][0]["sources"] == ["Feed A"]
     assert data["filters"] == {
@@ -386,7 +393,12 @@ async def test_preview_excluded_counts_only_rows_matching_other_filters(
     profile = await create_profile(client)
 
     preview = (await client.get(f"{BASE}/{profile['id']}/preview")).json()
-    assert preview == {"count": 1, "excluded_allowlisted": 1, "sample": ["203.0.113.5"]}
+    assert preview == {
+        "count": 1,
+        "excluded_allowlisted": 1,
+        "excluded_by_tlp": NO_TLP_EXCLUSIONS,
+        "sample": ["203.0.113.5"],
+    }
 
 
 async def test_empty_profile_result(client: AsyncClient) -> None:
@@ -395,7 +407,12 @@ async def test_empty_profile_result(client: AsyncClient) -> None:
     assert response.text == ""
     assert response.headers["X-Observable-Count"] == "0"
     preview = (await client.get(f"{BASE}/{profile['id']}/preview")).json()
-    assert preview == {"count": 0, "excluded_allowlisted": 0, "sample": []}
+    assert preview == {
+        "count": 0,
+        "excluded_allowlisted": 0,
+        "excluded_by_tlp": NO_TLP_EXCLUSIONS,
+        "sample": [],
+    }
 
 
 async def test_profile_reflects_current_data_and_policy(
@@ -490,7 +507,12 @@ async def test_dangling_feed_reference_fails_closed(
 
     assert (await client.get(f"{BASE}/{profile['id']}/download")).text == ""
     preview = (await client.get(f"{BASE}/{profile['id']}/preview")).json()
-    assert preview == {"count": 0, "excluded_allowlisted": 0, "sample": []}
+    assert preview == {
+        "count": 0,
+        "excluded_allowlisted": 0,
+        "excluded_by_tlp": NO_TLP_EXCLUSIONS,
+        "sample": [],
+    }
 
 
 async def test_deprecated_preconfigured_feed_kept_while_referenced(

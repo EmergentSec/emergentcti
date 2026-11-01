@@ -4,11 +4,12 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, JSON, String, Text, func
+from sqlalchemy import JSON, Boolean, CheckConstraint, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from cti.models.base import Base, TimestampMixin, UUIDMixin
+from cti.models.tlp import TLP_COLUMN_LENGTH, tlp_check_sql
 
 
 class FeedType(str, enum.Enum):
@@ -25,6 +26,7 @@ class FeedRunStatus(str, enum.Enum):
 
 class Feed(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "feeds"
+    __table_args__ = (CheckConstraint(tlp_check_sql("tlp"), name="ck_feeds_tlp"),)
 
     name: Mapped[str] = mapped_column(String(256), unique=True)
     description: Mapped[str | None] = mapped_column(Text, default=None)
@@ -41,6 +43,8 @@ class Feed(UUIDMixin, TimestampMixin, Base):
     auth_config_encrypted: Mapped[bytes | None] = mapped_column(default=None)
     default_confidence: Mapped[int] = mapped_column(Integer, default=50)
     last_run_at: Mapped[datetime | None] = mapped_column(default=None)
+    # TLP (#15): applies to everything this feed contributes. NULL = Unspecified.
+    tlp: Mapped[str | None] = mapped_column(String(TLP_COLUMN_LENGTH), default=None)
 
     runs: Mapped[list[FeedRun]] = relationship(
         back_populates="feed",

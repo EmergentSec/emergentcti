@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.models.observable import ObservableType
 from cti.services.observable_service import is_line_safe
-from tests.policy_helpers import add_observable, allow
+from tests.policy_helpers import NO_TLP_EXCLUSIONS, add_observable, allow
 
 DOMAIN = ObservableType.DOMAIN_NAME
 PROFILES = "/api/v1/export/profiles"
@@ -108,7 +108,12 @@ async def test_text_profile_download_and_preview_omit_injected_values(
     assert download.headers["X-Observable-Count"] == "1"
 
     preview = (await client.get(f"{PROFILES}/{profile_id}/preview")).json()
-    assert preview == {"count": 1, "excluded_allowlisted": 0, "sample": ["203.0.113.1"]}
+    assert preview == {
+        "count": 1,
+        "excluded_allowlisted": 0,
+        "excluded_by_tlp": NO_TLP_EXCLUSIONS,
+        "sample": ["203.0.113.1"],
+    }
 
 
 async def test_injection_cannot_smuggle_other_types_either(

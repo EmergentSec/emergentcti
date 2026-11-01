@@ -17,6 +17,16 @@ from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
 from cti.models.user import User, UserRole
 
+# ExportProfilePreview.excluded_by_tlp when nothing is withheld by TLP (#15).
+NO_TLP_EXCLUSIONS = {
+    "unspecified": 0,
+    "clear": 0,
+    "green": 0,
+    "amber": 0,
+    "amber+strict": 0,
+    "red": 0,
+}
+
 
 async def add_feed(db: AsyncSession, name: str = "Feed A", **kwargs: object) -> Feed:
     feed = Feed(name=name, feed_type=FeedType.FILE, **kwargs)

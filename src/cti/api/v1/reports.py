@@ -10,12 +10,16 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cti.api.v1.filters import parse_tag_names, parse_tlp_tokens
 from cti.core.config import get_settings
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
 from cti.core.redis import invalidate_observable_caches
+from cti.models.api_key import ApiKey
 from cti.models.report import Report, ReportOrigin
+from cti.models.tlp import Tlp
 from cti.models.user import User
+from cti.schemas.observable import TagsUpdate
 from cti.schemas.report import (
     ExtractionPreview,
     ImportRequest,
@@ -32,7 +36,8 @@ from cti.schemas.report import (
 from cti.schemas.report import (
     ReportAttachment as ReportAttachmentSchema,
 )
-from cti.services import report_import_service, report_service
+from cti.services import report_import_service, report_service, tag_service
+from cti.services.tlp import marking_key
 
 router = APIRouter()
 
@@ -49,6 +54,8 @@ def report_to_summary(report: Report) -> ReportSummary:
         ai_provider=report.ai_provider,
         ai_model=report.ai_model,
         has_attachment=report.attachment is not None,
+        tlp=report.tlp,
+        tags=sorted(tag.name for tag in report.tags),
         created_at=report.created_at,
         updated_at=report.updated_at,
     )
@@ -82,10 +89,14 @@ async def list_reports(
     published_from: date | None = None,
     published_to: date | None = None,
     ai_generated: bool | None = None,
+    tag: list[str] | None = Query(default=None, description="Match ANY listed tag"),
+    tlp: list[str] | None = Query(default=None, description="Marking or 'unspecified'"),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=25, ge=1, le=100),
 ) -> ReportListResponse:
     filters = ReportFilters(
+        tags=parse_tag_names(tag),
+        tlp=parse_tlp_tokens(tlp),
         q=q,
         origin=origin,
         source_name=source_name,
@@ -152,6 +163,29 @@ async def update_report(
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
     await db.commit()
+    if "tlp" in data.model_fields_set:
+        # A report marking feeds its linked observables' effective markings.
+        await invalidate_observable_caches()
+    return report_to_detail(report)
+
+
+@router.put("/{report_id}/tags", response_model=ReportDetail)
+async def set_report_tags(
+    report_id: uuid.UUID,
+    data: TagsUpdate,
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(require_admin),
+) -> ReportDetail:
+    """Replace the report's tag set (names are normalized; new ones created)."""
+    if await report_service.get_report(db, report_id) is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    try:
+        await tag_service.set_report_tags(db, report_id, data.tags)
+    except tag_service.TagValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    await db.commit()
+    report = await report_service.get_report(db, report_id, refresh=True)
+    assert report is not None
     return report_to_detail(report)
 
 
@@ -217,11 +251,24 @@ async def delete_report_attachment(
 async def download_report_attachment(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(get_current_auth),
+    auth: AuthSubject = Depends(get_current_auth),
 ) -> Response:
     attachment = await report_service.get_attachment_for_download(db, report_id)
     if attachment is None:
         raise HTTPException(status_code=404, detail="Report attachment not found")
+    # The attachment inherits the report's marking. TLP:RED never leaves through
+    # an API key; interactive user sessions may still download it in-app.
+    marking = await report_service.get_report_tlp(db, report_id)
+    tlp_header = marking_key(marking)
+    if marking == Tlp.RED.value and isinstance(auth, ApiKey):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "This attachment is marked TLP:RED and cannot be downloaded with an API key; "
+                "TLP:RED content does not leave the application"
+            ),
+            headers={"X-TLP-Marking": tlp_header},
+        )
     encoded_filename = quote(attachment.original_filename, safe="")
     return Response(
         content=attachment.content,
@@ -231,6 +278,7 @@ async def download_report_attachment(
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "sandbox; default-src 'none'",
             "Cache-Control": "private, no-store",
+            "X-TLP-Marking": tlp_header,
         },
     )
 
