@@ -52,6 +52,8 @@ const ITEMS = [
     type: 'ip-addr' as const,
     value: '1.2.3.4',
     confidence_score: 80,
+    manual_confidence: null,
+    confidence_override: null,
     first_seen: null,
     last_seen: null,
     source_count: 0,

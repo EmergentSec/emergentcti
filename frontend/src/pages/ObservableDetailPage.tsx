@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   TerminalWindow,
 } from '@phosphor-icons/react'
-import { useObservable } from '@/hooks/useObservables'
+import { useObservable, useSetConfidenceOverride, useClearConfidenceOverride } from '@/hooks/useObservables'
 import { useObservableReports } from '@/hooks/useReports'
 import { useCreateAllowlistEntry } from '@/hooks/useAllowlist'
 import { useConfig } from '@/hooks/useConfig'
@@ -34,6 +34,10 @@ import { DetailSourcesTab } from '@/components/observables/DetailSourcesTab'
 import { DetailRawTab } from '@/components/observables/DetailRawTab'
 import { jsonExportUrl } from '@/api/export'
 import { apiErrorMessage, apiErrorStatus } from '@/lib/apiError'
+import {
+  CONFIDENCE_OVERRIDE_HELP,
+  validateConfidenceOverrideInput,
+} from '@/lib/confidenceOverrideValidation'
 import { REASON_MAX_LENGTH } from '@/lib/policyValidation'
 import { formatDate, formatRelativeTime, typeColors, typeLabels } from '@/lib/utils'
 import type { ObservableType } from '@/types/observable'
@@ -76,9 +80,20 @@ export default function ObservableDetailPage() {
   const { isAdmin } = useAuth()
   const { toast } = useToast()
   const createAllowlistEntry = useCreateAllowlistEntry()
+  const setConfidenceOverride = useSetConfidenceOverride()
+  const clearConfidenceOverride = useClearConfidenceOverride()
   const [showAllowlist, setShowAllowlist] = useState(false)
   const [allowlistReason, setAllowlistReason] = useState('')
   const [allowlistError, setAllowlistError] = useState<string | null>(null)
+  const [overrideInput, setOverrideInput] = useState('')
+  const [overrideError, setOverrideError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (obs) {
+      setOverrideInput(String(obs.confidence_score))
+      setOverrideError(null)
+    }
+  }, [obs?.id, obs?.confidence_score])
 
   useEffect(() => {
     const tab = searchParams.get('tab')
@@ -138,6 +153,49 @@ export default function ObservableDetailPage() {
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)
     }).catch(() => {})
+  }
+
+  const handleSetOverride = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!obs || !id) return
+    const parsed = validateConfidenceOverrideInput(overrideInput)
+    if (!parsed.ok) {
+      setOverrideError(parsed.message)
+      return
+    }
+    setOverrideError(null)
+    setConfidenceOverride.mutate(
+      { id, confidence: parsed.value },
+      {
+        onSuccess: () => {
+          toast('Confidence override set', 'success')
+        },
+        onError: (err) => {
+          const message = apiErrorMessage(err, 'Failed to set confidence override')
+          setOverrideError(message)
+          toast(message, 'error')
+        },
+      },
+    )
+  }
+
+  const handleClearOverride = () => {
+    if (!obs || !id) return
+    const confirmed = window.confirm(
+      'Clear the pinned override? Confidence will be recomputed from feeds and analyst decisions.',
+    )
+    if (!confirmed) return
+    setOverrideError(null)
+    clearConfidenceOverride.mutate(id, {
+      onSuccess: () => {
+        toast('Confidence override cleared', 'success')
+      },
+      onError: (err) => {
+        const message = apiErrorMessage(err, 'Failed to clear confidence override')
+        setOverrideError(message)
+        toast(message, 'error')
+      },
+    })
   }
 
   if (isLoading) {
@@ -208,6 +266,12 @@ export default function ObservableDetailPage() {
                   title="Allowlisted — excluded from exports"
                 >
                   Allowlisted
+                </Badge>
+              )}
+              {obs.confidence_override && (
+                <Badge variant="warning" title="Confidence is pinned by an admin override">
+                  Pinned by {obs.confidence_override.set_by ?? 'deleted user'},{' '}
+                  {formatRelativeTime(obs.confidence_override.set_at)}
                 </Badge>
               )}
             </div>
@@ -303,6 +367,66 @@ export default function ObservableDetailPage() {
         </div>
         </CardContent>
       </Card>
+
+      {(obs.manual_confidence != null || (isAdmin && id)) && (
+        <Card>
+          <CardContent className="space-y-4 p-5">
+            <div>
+              <h3 className="text-sm font-semibold">Analyst confidence</h3>
+              {obs.manual_confidence != null && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Analyst floor:{' '}
+                  <span className="font-mono font-medium text-foreground">{obs.manual_confidence}</span>
+                </p>
+              )}
+            </div>
+            {isAdmin && id && (
+              <form onSubmit={handleSetOverride} noValidate className="space-y-3">
+                <p className="text-sm font-medium">Override confidence</p>
+                <p className="text-sm text-muted-foreground">{CONFIDENCE_OVERRIDE_HELP}</p>
+                <div className="flex max-w-xs flex-col gap-2 sm:flex-row sm:items-end">
+                  <Input
+                    id="confidence-override"
+                    label="Confidence (0–100)"
+                    type="text"
+                    inputMode="numeric"
+                    value={overrideInput}
+                    onChange={(e) => setOverrideInput(e.target.value)}
+                    aria-invalid={overrideError ? true : undefined}
+                    className="sm:flex-1"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="submit"
+                      variant="outline"
+                      size="sm"
+                      disabled={setConfidenceOverride.isPending}
+                    >
+                      {setConfidenceOverride.isPending ? 'Setting…' : 'Set override'}
+                    </Button>
+                    {obs.confidence_override && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={clearConfidenceOverride.isPending}
+                        onClick={handleClearOverride}
+                      >
+                        {clearConfidenceOverride.isPending ? 'Clearing…' : 'Clear override'}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                {overrideError && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {overrideError}
+                  </p>
+                )}
+              </form>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <DecayChart
         nativeMax={nativeMax}
