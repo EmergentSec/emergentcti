@@ -8,6 +8,7 @@ const mockUpdate = vi.fn()
 const mockDelete = vi.fn()
 const mockUploadAttachment = vi.fn()
 const mockRemoveAttachment = vi.fn()
+const mockExtract = vi.fn()
 const mockToast = vi.fn()
 
 vi.mock('@/hooks/useReports', () => ({
@@ -18,6 +19,7 @@ vi.mock('@/hooks/useReports', () => ({
   useRemoveReportAttachment: () => ({ mutate: mockRemoveAttachment, isPending: false }),
   useLinkReportObservable: () => ({ mutate: vi.fn(), isPending: false }),
   useUnlinkReportObservable: () => ({ mutate: vi.fn(), isPending: false }),
+  useExtractReportIndicators: () => ({ mutate: mockExtract, isPending: false }),
 }))
 
 vi.mock('@/hooks/useObservables', () => ({
@@ -90,6 +92,7 @@ afterEach(() => {
   mockDelete.mockReset()
   mockUploadAttachment.mockReset()
   mockRemoveAttachment.mockReset()
+  mockExtract.mockReset()
   mockToast.mockReset()
 })
 
@@ -110,6 +113,7 @@ describe('ReportDetailPage', () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Link observable' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Extract indicators' })).toBeNull()
   })
 
   it('requires confirmation before delete', () => {

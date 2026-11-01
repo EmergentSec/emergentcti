@@ -10,6 +10,7 @@ import {
   Trash,
   UploadSimple,
   X,
+  MagnifyingGlass,
 } from '@phosphor-icons/react'
 import {
   useReport,
@@ -19,6 +20,7 @@ import {
   useRemoveReportAttachment,
   useLinkReportObservable,
   useUnlinkReportObservable,
+  useExtractReportIndicators,
 } from '@/hooks/useReports'
 import { useObservables } from '@/hooks/useObservables'
 import { downloadReportAttachment } from '@/api/reports'
@@ -33,9 +35,11 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { ReportContent, formatProvenance, isSafeHttpUrl } from '@/components/reports/ReportContent'
 import { ReportForm } from '@/components/reports/ReportForm'
+import { IndicatorImportReview } from '@/components/reports/IndicatorImportReview'
 import { formatDate, typeLabels } from '@/lib/utils'
 import { apiErrorMessage } from '@/lib/apiError'
 import type { ReportCreate } from '@/types/report'
+import type { ExtractionPreview } from '@/types/reportIocExtraction'
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
@@ -59,12 +63,15 @@ export default function ReportDetailPage() {
   const removeAttachment = useRemoveReportAttachment()
   const linkObservable = useLinkReportObservable()
   const unlinkObservable = useUnlinkReportObservable()
+  const extractIndicators = useExtractReportIndicators()
 
   const [showEdit, setShowEdit] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
   const [showRemoveAttachment, setShowRemoveAttachment] = useState(false)
   const [linkQuery, setLinkQuery] = useState('')
   const [showLinkSearch, setShowLinkSearch] = useState(false)
+  const [importPreview, setImportPreview] = useState<ExtractionPreview | null>(null)
+  const [showImportReview, setShowImportReview] = useState(false)
 
   const linkSearchActive = showLinkSearch && linkQuery.trim().length > 0
   const { data: searchResults } = useObservables(
@@ -171,6 +178,22 @@ export default function ReportDetailPage() {
     )
   }
 
+  const handleExtractIndicators = () => {
+    if (!report) return
+    extractIndicators.mutate(report.id, {
+      onSuccess: (preview) => {
+        setImportPreview(preview)
+        setShowImportReview(true)
+      },
+      onError: (err) => toast(apiErrorMessage(err, 'Failed to extract indicators'), 'error'),
+    })
+  }
+
+  const closeImportReview = () => {
+    setShowImportReview(false)
+    setImportPreview(null)
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -223,6 +246,15 @@ export default function ReportDetailPage() {
             </div>
             {isAdmin && (
               <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={extractIndicators.isPending}
+                  onClick={handleExtractIndicators}
+                >
+                  <MagnifyingGlass size={14} />
+                  {extractIndicators.isPending ? 'Extracting…' : 'Extract indicators'}
+                </Button>
                 <Button variant="outline" size="sm" onClick={() => setShowEdit(true)}>
                   <PencilSimple size={14} />
                   Edit
@@ -485,6 +517,14 @@ export default function ReportDetailPage() {
           </Button>
         </div>
       </Dialog>
+
+      {importPreview && (
+        <IndicatorImportReview
+          open={showImportReview}
+          onClose={closeImportReview}
+          preview={importPreview}
+        />
+      )}
     </div>
   )
 }
