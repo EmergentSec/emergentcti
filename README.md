@@ -90,6 +90,14 @@ uv run alembic upgrade head
 
 Tags, TLP markings, research exports including allowlisted indicators, STIX/TAXII/MISP, audit logging, and runtime policy configuration are not included in this slice.
 
+## Reports & attachments storage/backup
+
+Reports and their attachments are stored in PostgreSQL, including the original
+attachment bytes. Back up reports with the rest of the database using `pg_dump`;
+there is no separate report-upload directory to copy. Attachments are limited to
+20 MiB by default. Set `REPORT_MAX_UPLOAD_BYTES` to change the API limit and keep
+the nginx `client_max_body_size` setting above that value.
+
 ## Development
 
 Backend — run the API and tests with [uv](https://docs.astral.sh/uv/):
