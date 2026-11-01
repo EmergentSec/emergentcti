@@ -279,7 +279,7 @@ export function FeedForm(props: FeedFormProps) {
     <>
     <form onSubmit={handleSubmit} className="space-y-4">
       {errors.form && (
-        <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <p role="alert" className="rounded-lg border border-destructive bg-destructive-soft px-3 py-2 text-sm text-destructive-ink">
           {errors.form}
         </p>
       )}
