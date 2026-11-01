@@ -12,6 +12,7 @@ from cti.core.redis import cache_delete, invalidate_blocklist_cache
 from cti.models.observable import Observable
 from cti.models.observable_source import ObservableSource
 from cti.models.report import report_observables
+from cti.models.tag import observable_tags
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,6 +72,9 @@ async def enforce_retention(
             # observables, including under SQLite where FK cascades are disabled.
             await db.execute(
                 delete(report_observables).where(report_observables.c.observable_id.in_(ids))
+            )
+            await db.execute(
+                delete(observable_tags).where(observable_tags.c.observable_id.in_(ids))
             )
             # Explicit source deletion also works on SQLite with FK checks disabled.
             await db.execute(

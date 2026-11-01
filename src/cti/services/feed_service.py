@@ -15,6 +15,7 @@ from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.models.export_profile import ExportProfile
 from cti.models.feed import Feed, FeedRun, FeedRunStatus
 from cti.models.observable_source import ObservableSource
+from cti.services import tlp as tlp_policy
 from cti.services.confidence import recompute_effective_confidence
 from cti.services.feed_auth import (
     REPAIR_MESSAGE,
@@ -134,6 +135,8 @@ async def create_feed(db: AsyncSession, data: dict) -> Feed:
     separately from the plain-text columns.
     """
     auth_config = data.pop("auth_config", None)
+    if data.get("tlp") is not None:
+        data["tlp"] = str(getattr(data["tlp"], "value", data["tlp"]))
     # New feeds have no run history. Initialize it so response serialization
     # after commit never attempts relationship IO outside an async context.
     feed = Feed(**data, is_preconfigured=False, runs=[])
@@ -177,6 +180,14 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
     auth_config_provided = "auth_config" in data
     auth_config = data.pop("auth_config", None) if auth_config_provided else None
 
+    # TLP (#15) is organization policy, editable on preconfigured feeds too.
+    tlp_reason = data.pop("tlp_change_reason", None)
+    if "tlp" in data:
+        new_tlp = data["tlp"]
+        new_tlp = None if new_tlp is None else str(getattr(new_tlp, "value", new_tlp))
+        data["tlp"] = new_tlp
+        tlp_policy.check_marking_change("feed", feed.id, feed.tlp, new_tlp, tlp_reason)
+
     url_change_without_auth = (
         not feed.is_preconfigured
         and not auth_config_provided
@@ -192,6 +203,7 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
             "default_confidence",
             "auth_config",
             "description",
+            "tlp",
         }
         data = {k: v for k, v in data.items() if k in allowed}
 

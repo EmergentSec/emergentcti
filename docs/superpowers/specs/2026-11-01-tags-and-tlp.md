@@ -234,3 +234,55 @@ and header; external_ai gate; tags normalization/duplicates/limits/admin
 guards/filters/profile tag filter/409 on referenced delete; migration up/down.
 Frontend tests for badges, filters, override/tag/admin controls, preview
 feedback. Run full pytest, Vitest, TypeScript/Vite build, Alembic offline SQL.
+
+## Backend notes
+
+Clarifications made while implementing the backend. Items 1–3 were answered by
+the coordinator; the rest only fix details the contract leaves open.
+
+1. **Downgrade definition (coordinator decision).** A downgrade is a specified
+   marking replaced by a lower rank or by Unspecified. Unspecified → any marking
+   is an initial classification by an authorized editor, not a downgrade, and
+   needs no `tlp_change_reason`.
+2. **Profile tags must exist (coordinator decision).** Export profile `tags` that
+   name a missing tag return 422 `Tag not found: <name>`. Profiles never create
+   tags; tag assignment (`PUT …/tags`) does.
+3. **Observable create field (coordinator decision).** `POST /observables` takes
+   `tlp`; `manual_tlp` is accepted as an alias. The response field is `manual_tlp`.
+4. Feed `tlp` is editable on preconfigured feeds too: it is organization policy,
+   not platform-managed configuration.
+5. Report PATCH and feed PUT treat an explicit `"tlp": null` as "set to
+   Unspecified". That is a downgrade when a marking was set.
+6. `X-TLP-Excluded` counts rows that match the request's filters and pass the
+   allowlist but are withheld by TLP. It counts across the whole filtered set,
+   so a `limit`ed JSON export still reports every withheld row. Text profile
+   downloads also send it.
+7. Rows that are both allowlisted and TLP-withheld count in
+   `excluded_allowlisted`, not in `excluded_by_tlp`, so `excluded_allowlisted`
+   means the same as before #15.
+8. Profile JSON downloads add `filters.destination` only when it is not
+   `internal`, and `filters.tags` only when tags are set. Ad-hoc JSON adds
+   `filters.tags` only when tags are given. Pre-#15 requests therefore return
+   byte-identical metadata. The only additions are `tlp: null` and `tags: []` on
+   each `ExportObservable`, as the contract specifies.
+9. Superseded by item 14: a RED attachment now returns 404, not 403, to API
+   keys. Every allowed attachment response carries `X-TLP-Marking`.
+10. `tlp` filter tokens are case-insensitive. Unknown tokens return 422. The `tag`
+    filter normalizes names, and an invalid name returns 422.
+11. Tag limits: at most 100 tags per `PUT …/tags` or profile, raw names at most
+    200 characters before normalization (then 1–50 after). `GET /tags?q=`
+    normalizes the prefix like a name and matches `%`/`_` literally.
+12. API keys pass `require_admin` (existing behavior), so an override set with an
+    API key has `set_by: null`.
+13. Implementation: the effective marking is one correlated SQL subquery
+    (`services/tlp.py: effective_tlp_expr`) used by list filters, detail
+    payloads and every export. Blocklist cache entries stay pre-policy: on every
+    request, hit or miss, the TLP check queries current markings, the same way
+    the allowlist is applied. Marking, override and tag changes also invalidate
+    observable caches (best effort).
+14. **API-key RED visibility (coordinator decision).** Effective-RED
+    observables and RED reports do not exist for API-key callers on item read
+    paths: lists filter them before pagination, direct and mutation paths use
+    404, and nested item lists omit or redact them. A mutation that newly makes
+    an item RED succeeds but returns 204 instead of echoing it. Aggregate
+    counts may still include RED items. Interactive sessions are unchanged.
