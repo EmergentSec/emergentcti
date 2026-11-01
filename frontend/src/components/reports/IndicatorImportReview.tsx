@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/Table'
 import { useImportReportIndicators } from '@/hooks/useReports'
 import { useToast } from '@/contexts/ToastContext'
-import { apiErrorMessage } from '@/lib/apiError'
+import { importValidationErrorDetail } from '@/lib/apiError'
 import {
   CONFIDENCE_HELP_TEXT,
   EXPORT_ELIGIBILITY_NOTICE,
@@ -23,7 +23,7 @@ import {
   isDefaultSelectedCandidate,
   isSelectableCandidate,
 } from '@/lib/extractionWarnings'
-import { typeLabels } from '@/lib/utils'
+import { cn, typeLabels } from '@/lib/utils'
 import type { ExtractionCandidate, ExtractionPreview, ExtractionSource } from '@/types/reportIocExtraction'
 
 export interface IndicatorImportReviewProps {
@@ -41,9 +41,17 @@ function sourceLabel(source: ExtractionSource): string {
 function sourceStatusText(source: ExtractionSource): string {
   if (source.status === 'extracted') return 'Text extracted'
   if (source.status === 'empty') return 'Empty'
-  if (source.reason === 'pdf_text_extraction_unavailable') return PDF_EXTRACTION_MESSAGE
+  if (source.reason === 'pdf_text_extraction_unavailable') return 'Unsupported (PDF)'
   if (source.reason) return source.reason.replace(/_/g, ' ')
   return 'Unsupported'
+}
+
+function parseConfidenceInput(raw: string): { valid: boolean; value: number } {
+  const trimmed = raw.trim()
+  if (trimmed === '') return { valid: false, value: NaN }
+  const n = Number(trimmed)
+  if (!Number.isInteger(n) || n < 0 || n > 100) return { valid: false, value: n }
+  return { valid: true, value: n }
 }
 
 function statusBadgeVariant(status: ExtractionCandidate['status']): 'default' | 'secondary' | 'destructive' {
@@ -73,17 +81,27 @@ function buildInitialSelection(candidates: ExtractionCandidate[]): Set<string> {
 export function IndicatorImportReview({ open, onClose, preview }: IndicatorImportReviewProps) {
   const { toast } = useToast()
   const importIndicators = useImportReportIndicators()
+  const submittingRef = useRef(false)
   const [selected, setSelected] = useState<Set<string>>(() => buildInitialSelection(preview.candidates))
   const [confidence, setConfidence] = useState('50')
   const [importDetail, setImportDetail] = useState<string | null>(null)
+  const [highlightedKeys, setHighlightedKeys] = useState<Set<string>>(() => new Set())
+
+  const clearImportFeedback = () => {
+    setImportDetail(null)
+    setHighlightedKeys(new Set())
+  }
 
   useEffect(() => {
     if (open) {
       setSelected(buildInitialSelection(preview.candidates))
       setConfidence('50')
-      setImportDetail(null)
+      clearImportFeedback()
     }
   }, [open, preview])
+
+  const confidenceParsed = useMemo(() => parseConfidenceInput(confidence), [confidence])
+  const confidenceError = confidenceParsed.valid ? undefined : 'Input error'
 
   const selectableKeys = useMemo(
     () =>
@@ -101,6 +119,7 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
 
   const toggleRow = (candidate: ExtractionCandidate) => {
     if (!isSelectableCandidate(candidate)) return
+    clearImportFeedback()
     const key = candidateKey(candidate.type, candidate.value)
     setSelected((prev) => {
       const next = new Set(prev)
@@ -111,33 +130,47 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
   }
 
   const selectAll = () => {
+    clearImportFeedback()
     setSelected(new Set(selectableKeys))
   }
 
   const selectNone = () => {
+    clearImportFeedback()
     setSelected(new Set())
   }
 
   const handleImport = () => {
-    const conf = Number(confidence)
+    if (submittingRef.current || !confidenceParsed.valid) return
+    submittingRef.current = true
+    clearImportFeedback()
+
     const items = preview.candidates
       .filter((c) => selected.has(candidateKey(c.type, c.value)))
       .map((c) => ({ type: c.type, value: c.value }))
 
     importIndicators.mutate(
-      { reportId: preview.report_id, payload: { confidence: conf, items } },
+      { reportId: preview.report_id, payload: { confidence: confidenceParsed.value, items } },
       {
         onSuccess: (result) => {
-          const parts = [
-            result.created ? `${result.created} created` : null,
-            result.attributed_existing ? `${result.attributed_existing} attributed` : null,
-            result.already_attributed ? `${result.already_attributed} already linked` : null,
-          ].filter(Boolean)
-          toast(parts.length ? `Import complete: ${parts.join(', ')}` : 'Import complete', 'success')
+          toast(
+            `Import complete: ${result.created} created, ${result.attributed_existing} attributed, ${result.already_attributed} already linked`,
+            'success',
+          )
           onClose()
         },
         onError: (err) => {
-          setImportDetail(apiErrorMessage(err, 'Import failed'))
+          const parsed = importValidationErrorDetail(err)
+          if (parsed) {
+            setImportDetail(parsed.messages.join('\n'))
+            setHighlightedKeys(
+              new Set(parsed.highlightedItems.map((item) => candidateKey(item.type, item.value))),
+            )
+          } else {
+            setImportDetail('Import failed')
+          }
+        },
+        onSettled: () => {
+          submittingRef.current = false
         },
       },
     )
@@ -147,10 +180,13 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
     (s) => s.status === 'unsupported' && s.reason === 'pdf_text_extraction_unavailable',
   )
 
+  const importPending = importIndicators.isPending
+  const handleDialogClose = importPending ? () => {} : onClose
+
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={handleDialogClose}
       title="Import indicators from report"
       className="max-h-[90vh] w-full max-w-5xl overflow-hidden"
     >
@@ -167,7 +203,9 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
             ))}
           </ul>
           {showPdfNotice && (
-            <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">{PDF_EXTRACTION_MESSAGE}</p>
+            <p className="mt-2 rounded-lg border border-warning bg-warning-soft px-3 py-2 text-sm text-warning-ink">
+              {PDF_EXTRACTION_MESSAGE}
+            </p>
           )}
           {preview.truncated && (
             <p className="text-xs text-muted-foreground">
@@ -217,13 +255,18 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
                   const selectable = isSelectableCandidate(candidate)
                   const checked = selectable && selected.has(key)
                   const showOriginal = candidate.original !== candidate.value
+                  const rowHighlighted = highlightedKeys.has(key)
 
                   return (
-                    <TableRow key={key} data-testid={`candidate-row-${key}`}>
+                    <TableRow
+                      key={key}
+                      data-testid={`candidate-row-${key}`}
+                      className={cn(rowHighlighted && 'bg-destructive/10 ring-1 ring-inset ring-destructive/40')}
+                    >
                       <TableCell>
                         <input
                           type="checkbox"
-                          className="h-4 w-4 rounded border-border"
+                          className="h-4 w-4 accent-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
                           checked={checked}
                           disabled={!selectable}
                           aria-label={`Select ${candidate.type} ${candidate.value}`}
@@ -288,6 +331,7 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
               min={0}
               max={100}
               value={confidence}
+              error={confidenceError}
               onChange={(e) => setConfidence(e.target.value)}
               aria-describedby="import-confidence-help"
             />
@@ -299,22 +343,22 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
         <p className="text-xs text-muted-foreground">{EXPORT_ELIGIBILITY_NOTICE}</p>
 
         {importDetail && (
-          <p className="text-sm text-destructive" role="alert">
+          <p className="whitespace-pre-line text-sm text-destructive" role="alert">
             {importDetail}
           </p>
         )}
 
         <div className="flex justify-end gap-2 border-t border-border pt-3">
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="outline" disabled={importPending} onClick={handleDialogClose}>
             Cancel
           </Button>
           <Button
             type="button"
             variant="brand"
-            disabled={selectedCount === 0 || importIndicators.isPending}
+            disabled={selectedCount === 0 || importPending || !confidenceParsed.valid}
             onClick={handleImport}
           >
-            {importIndicators.isPending
+            {importPending
               ? 'Importing…'
               : `Import ${selectedCount} indicator${selectedCount === 1 ? '' : 's'}`}
           </Button>

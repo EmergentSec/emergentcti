@@ -20,6 +20,7 @@ vi.mock('@/hooks/useReports', () => ({
   useLinkReportObservable: () => ({ mutate: vi.fn(), isPending: false }),
   useUnlinkReportObservable: () => ({ mutate: vi.fn(), isPending: false }),
   useExtractReportIndicators: () => ({ mutate: mockExtract, isPending: false }),
+  useImportReportIndicators: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
 vi.mock('@/hooks/useObservables', () => ({
@@ -114,6 +115,47 @@ describe('ReportDetailPage', () => {
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Link observable' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Extract indicators' })).toBeNull()
+  })
+
+  it('shows extract button for admins and opens import review on success', () => {
+    mockUseReport.mockReturnValue({ data: AI_REPORT, isLoading: false, error: null })
+    mockExtract.mockImplementation((_id, options) => {
+      options?.onSuccess?.({
+        report_id: 'rep-1',
+        sources: [],
+        candidates: [],
+        truncated: false,
+        counts: { total: 0, new: 0, existing: 0, invalid: 0 },
+      })
+    })
+
+    renderPage()
+
+    const extractBtn = screen.getByRole('button', { name: 'Extract indicators' })
+    fireEvent.click(extractBtn)
+
+    expect(mockExtract).toHaveBeenCalledWith('rep-1', expect.any(Object))
+    expect(screen.getByRole('dialog', { name: 'Import indicators from report' })).toBeTruthy()
+  })
+
+  it('toasts on extract failure', () => {
+    mockUseReport.mockReturnValue({ data: AI_REPORT, isLoading: false, error: null })
+    mockExtract.mockImplementation((_id, options) => {
+      const err = new AxiosError('Request failed')
+      err.response = {
+        status: 500,
+        data: { detail: 'Extract failed' },
+        statusText: 'Error',
+        headers: {},
+        config: {} as never,
+      }
+      options?.onError?.(err)
+    })
+
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Extract indicators' }))
+
+    expect(mockToast).toHaveBeenCalledWith('Extract failed', 'error')
   })
 
   it('requires confirmation before delete', () => {

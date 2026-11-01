@@ -135,6 +135,8 @@ export function useImportReportIndicators() {
       importReportIndicators(reportId, payload),
     onSuccess: (_data, { reportId }) => {
       queryClient.invalidateQueries({ queryKey: ['report', reportId] })
+      queryClient.invalidateQueries({ queryKey: ['observables'] })
+      queryClient.invalidateQueries({ queryKey: ['observableReports'] })
     },
   })
 }

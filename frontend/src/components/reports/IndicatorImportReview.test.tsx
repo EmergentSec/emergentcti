@@ -4,15 +4,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { IndicatorImportReview } from './IndicatorImportReview'
 import type { ExtractionPreview } from '@/types/reportIocExtraction'
-import { CONFIDENCE_HELP_TEXT, PDF_EXTRACTION_MESSAGE } from '@/lib/extractionWarnings'
+import {
+  CONFIDENCE_HELP_TEXT,
+  EXPORT_ELIGIBILITY_NOTICE,
+  PDF_EXTRACTION_MESSAGE,
+} from '@/lib/extractionWarnings'
 
 const mockImport = vi.fn()
 const mockToast = vi.fn()
+let mockIsPending = false
 
 vi.mock('@/hooks/useReports', () => ({
   useImportReportIndicators: () => ({
     mutate: mockImport,
-    isPending: false,
+    isPending: mockIsPending,
   }),
 }))
 
@@ -26,6 +31,24 @@ function httpError(status: number, detail: unknown) {
     data: { detail },
   } as AxiosResponse)
 }
+
+const PINNED_422_DETAIL = [
+  {
+    type: 'greater_than_equal',
+    loc: ['body', 'confidence'],
+    msg: 'Input should be greater than or equal to 0',
+    input: -1,
+  },
+  {
+    type: 'not_a_candidate',
+    loc: ['body', 'items'],
+    msg: '2 item(s) are not valid candidates extracted from this report: url http://x, domain-name bad',
+    items: [
+      { index: 0, type: 'url', value: 'https://evil.example/path' },
+      { index: 1, type: 'domain-name', value: 'evil.example' },
+    ],
+  },
+]
 
 const BASE_PREVIEW: ExtractionPreview = {
   report_id: 'rep-1',
@@ -119,23 +142,35 @@ const BASE_PREVIEW: ExtractionPreview = {
   counts: { total: 5, new: 2, existing: 2, invalid: 1 },
 }
 
-function renderReview(preview: ExtractionPreview = BASE_PREVIEW) {
+function renderReview(preview: ExtractionPreview = BASE_PREVIEW, onClose = vi.fn<() => void>()) {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
-  return render(
-    <QueryClientProvider client={client}>
-      <IndicatorImportReview open preview={preview} onClose={vi.fn()} />
-    </QueryClientProvider>,
-  )
+  return {
+    onClose,
+    ...render(
+      <QueryClientProvider client={client}>
+        <IndicatorImportReview open preview={preview} onClose={onClose} />
+      </QueryClientProvider>,
+    ),
+  }
 }
 
 function checkboxFor(type: string, value: string): HTMLInputElement {
   return screen.getByRole('checkbox', { name: `Select ${type} ${value}` }) as HTMLInputElement
 }
 
+function confidenceInput(): HTMLInputElement {
+  return screen.getByLabelText('Confidence for new observables') as HTMLInputElement
+}
+
+function importButton(): HTMLButtonElement {
+  return screen.getByRole('button', { name: /^Import \d+ indicator/ }) as HTMLButtonElement
+}
+
 afterEach(() => {
   cleanup()
   mockImport.mockReset()
   mockToast.mockReset()
+  mockIsPending = false
 })
 
 describe('IndicatorImportReview', () => {
@@ -152,9 +187,13 @@ describe('IndicatorImportReview', () => {
 
   it('defaults confidence to 50 with contract help text', () => {
     renderReview()
-    const input = screen.getByLabelText('Confidence for new observables') as HTMLInputElement
-    expect(input.value).toBe('50')
+    expect(confidenceInput().value).toBe('50')
     expect(screen.getByText(CONFIDENCE_HELP_TEXT)).toBeTruthy()
+  })
+
+  it('shows export eligibility notice', () => {
+    renderReview()
+    expect(screen.getByText(EXPORT_ELIGIBILITY_NOTICE)).toBeTruthy()
   })
 
   it('does not call import until confirm and sends selected items with confidence', () => {
@@ -162,7 +201,7 @@ describe('IndicatorImportReview', () => {
 
     expect(mockImport).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Import 2 indicators' }))
+    fireEvent.click(importButton())
 
     expect(mockImport).toHaveBeenCalledTimes(1)
     const [args, options] = mockImport.mock.calls[0]
@@ -182,24 +221,108 @@ describe('IndicatorImportReview', () => {
   it('disables import when nothing is selected', () => {
     renderReview()
     fireEvent.click(screen.getByRole('button', { name: 'Select none' }))
-    const btn = screen.getByRole('button', { name: 'Import 0 indicators' }) as HTMLButtonElement
-    expect(btn.disabled).toBe(true)
+    expect(importButton().disabled).toBe(true)
   })
 
-  it('shows 422 detail and keeps selection', () => {
+  it('select all selects only selectable rows including already-attributed existing', () => {
+    renderReview()
+    fireEvent.click(screen.getByRole('button', { name: 'Select none' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Select all' }))
+
+    expect(checkboxFor('domain-name', 'evil.example').checked).toBe(true)
+    expect(checkboxFor('url', 'https://evil.example/path').checked).toBe(true)
+    expect(checkboxFor('ip-addr', '8.8.8.8').checked).toBe(true)
+    expect(checkboxFor('domain-name', 'safe.internal').checked).toBe(true)
+    expect(checkboxFor('ip-addr', '999.1.1.1').checked).toBe(false)
+  })
+
+  it('allows toggling a selected row off', () => {
+    renderReview()
+    expect(checkboxFor('domain-name', 'evil.example').checked).toBe(true)
+    fireEvent.click(checkboxFor('domain-name', 'evil.example'))
+    expect(checkboxFor('domain-name', 'evil.example').checked).toBe(false)
+  })
+
+  it.each(['', '101', '-1', '50.5'])('rejects invalid confidence %j', (value) => {
+    renderReview()
+    fireEvent.change(confidenceInput(), { target: { value } })
+    expect(screen.getByText('Input error')).toBeTruthy()
+    expect(importButton().disabled).toBe(true)
+    fireEvent.click(importButton())
+    expect(mockImport).not.toHaveBeenCalled()
+  })
+
+  it('shows string 422 detail and keeps selection', () => {
     renderReview()
     mockImport.mockImplementation((_args, options) => {
       options?.onError?.(httpError(422, 'Item not_a_candidate: evil.example'))
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Import 2 indicators' }))
+    fireEvent.click(importButton())
 
     expect(screen.getByRole('alert').textContent).toContain('Item not_a_candidate: evil.example')
     expect(checkboxFor('domain-name', 'evil.example').checked).toBe(true)
     expect(checkboxFor('url', 'https://evil.example/path').checked).toBe(true)
   })
 
-  it('shows unsupported PDF message in source list', () => {
+  it('shows every pinned 422 msg and highlights not_a_candidate rows', () => {
+    renderReview()
+    mockImport.mockImplementation((_args, options) => {
+      options?.onError?.(httpError(422, PINNED_422_DETAIL))
+    })
+
+    fireEvent.click(importButton())
+
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('Input should be greater than or equal to 0')
+    expect(alert.textContent).toContain(
+      '2 item(s) are not valid candidates extracted from this report: url http://x, domain-name bad',
+    )
+
+    expect(screen.getByTestId('candidate-row-domain-name\0evil.example').className).toContain('ring-destructive')
+    expect(screen.getByTestId('candidate-row-url\0https://evil.example/path').className).toContain(
+      'ring-destructive',
+    )
+  })
+
+  it('clears 422 alert when selection changes', () => {
+    renderReview()
+    mockImport.mockImplementation((_args, options) => {
+      options?.onError?.(httpError(422, 'Item not_a_candidate: evil.example'))
+    })
+    fireEvent.click(importButton())
+    expect(screen.getByRole('alert')).toBeTruthy()
+
+    fireEvent.click(checkboxFor('domain-name', 'evil.example'))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('toasts all three counts and closes on success', () => {
+    const onClose = vi.fn()
+    renderReview(BASE_PREVIEW, onClose)
+    mockImport.mockImplementation((_args, options) => {
+      options?.onSuccess?.({ created: 2, attributed_existing: 0, already_attributed: 1, observables: [] })
+    })
+
+    fireEvent.click(importButton())
+
+    expect(mockToast).toHaveBeenCalledWith(
+      'Import complete: 2 created, 0 attributed, 1 already linked',
+      'success',
+    )
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows pending import state', () => {
+    mockIsPending = true
+    renderReview()
+    const pendingBtn = screen.getByRole('button', { name: 'Importing…' }) as HTMLButtonElement
+    expect(pendingBtn).toBeTruthy()
+    expect(pendingBtn.disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('shows PDF notice once with unsupported status in source list', () => {
     const preview: ExtractionPreview = {
       ...BASE_PREVIEW,
       sources: [
@@ -214,7 +337,8 @@ describe('IndicatorImportReview', () => {
       candidates: [],
     }
     renderReview(preview)
-    expect(screen.getAllByText(PDF_EXTRACTION_MESSAGE).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Unsupported (PDF)')).toBeTruthy()
+    expect(screen.getAllByText(PDF_EXTRACTION_MESSAGE)).toHaveLength(1)
   })
 
   it('renders extracted URL values as plain text, not links', () => {
