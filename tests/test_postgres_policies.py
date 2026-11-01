@@ -226,42 +226,45 @@ async def test_postgres_report_import_upserts_and_attribution_constraints(pg_ses
         )
         db.add_all([user, existing, report])
         await db.commit()
-        report = await report_service.get_report(db, report.id)
+        # Capture ids now: rollback() below expires every instance, and reading
+        # an expired attribute would trigger a sync lazy load under asyncio.
+        user_id, existing_id, report_id = user.id, existing.id, report.id
+        report = await report_service.get_report(db, report_id)
         items = [
             ImportItem(type="domain-name", value="evil-pg.example"),
             ImportItem(type="ip-addr", value="185.220.101.42"),
         ]
 
         result = await report_import_service.import_candidates(
-            db, report, confidence=55, items=items, imported_by_id=user.id
+            db, report, confidence=55, items=items, imported_by_id=user_id
         )
         await db.commit()
         assert (result.created, result.attributed_existing, result.already_attributed) == (1, 1, 0)
 
         again = await report_import_service.import_candidates(
-            db, report, confidence=5, items=items, imported_by_id=user.id
+            db, report, confidence=5, items=items, imported_by_id=user_id
         )
         await db.commit()
         assert (again.created, again.attributed_existing, again.already_attributed) == (0, 0, 2)
         assert await db.scalar(select(func.count()).select_from(Observable)) == 2
         assert (
-            await db.get(Observable, existing.id, populate_existing=True)
+            await db.get(Observable, existing_id, populate_existing=True)
         ).confidence_score == 90
 
         with pytest.raises(IntegrityError):
             await db.execute(
                 report_observables.update()
-                .where(report_observables.c.report_id == report.id)
+                .where(report_observables.c.report_id == report_id)
                 .values(analyst_confidence=101)
             )
         await db.rollback()
 
-        await db.execute(delete(User).where(User.id == user.id))
+        await db.execute(delete(User).where(User.id == user_id))
         await db.commit()
         imported_by = (
             await db.scalars(
                 select(report_observables.c.imported_by_id).where(
-                    report_observables.c.report_id == report.id
+                    report_observables.c.report_id == report_id
                 )
             )
         ).all()
