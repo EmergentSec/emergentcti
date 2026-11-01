@@ -26,6 +26,7 @@ import { FeedRunHistory } from './FeedRunHistory'
 interface FeedCardProps {
   feed: Feed
   onEdit?: (feed: Feed) => void
+  highlighted?: boolean
 }
 
 const FEED_TYPE_CONFIG: Record<
@@ -96,7 +97,7 @@ function FeedStatus({ feed }: { feed: Feed }) {
   return <Badge variant="success">OK</Badge>
 }
 
-export function FeedCard({ feed, onEdit }: FeedCardProps) {
+export function FeedCard({ feed, onEdit, highlighted }: FeedCardProps) {
   const [showHistory, setShowHistory] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
   const updateFeed = useUpdateFeed()
@@ -138,7 +139,14 @@ export function FeedCard({ feed, onEdit }: FeedCardProps) {
 
   return (
     <>
-      <Card className={cn('transition-colors hover:border-borderStrong', !feed.enabled && 'opacity-75')}>
+      <Card
+        id={`feed-${feed.id}`}
+        className={cn(
+          'scroll-mt-24 transition-colors hover:border-borderStrong',
+          !feed.enabled && 'opacity-75',
+          highlighted && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
+        )}
+      >
         <CardContent className="p-4 sm:p-5">
           <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start">
             <div className="flex min-w-0 flex-1 gap-3 sm:gap-4">

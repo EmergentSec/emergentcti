@@ -8,8 +8,22 @@ import { FEED_TLP_FIELD } from '@/test/fixtures/feed'
 // ── Stub heavy sub-components ────────────────────────────────────────────────
 
 vi.mock('@/components/feeds/FeedCard', () => ({
-  FeedCard: ({ feed, onEdit }: { feed: Feed; onEdit?: (feed: Feed) => void }) => (
-    <div data-testid="feed-card" data-feed-type={feed.feed_type}>
+  FeedCard: ({
+    feed,
+    onEdit,
+    highlighted,
+  }: {
+    feed: Feed
+    onEdit?: (feed: Feed) => void
+    highlighted?: boolean
+  }) => (
+    <div
+      data-testid="feed-card"
+      id={`feed-${feed.id}`}
+      data-feed-id={feed.id}
+      data-highlighted={highlighted ? 'true' : 'false'}
+      data-feed-type={feed.feed_type}
+    >
       {feed.name}
       {onEdit && (
         <button onClick={() => onEdit(feed)}>trigger-edit-{feed.id}</button>
@@ -294,5 +308,20 @@ describe('FeedsPage — Edit Feed', () => {
       { id: 'f1', data: { name: 'AbuseIPDB' } },
       expect.anything(),
     )
+  })
+
+  it('highlights the feed named in ?feed= and scrolls it into view', () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+
+    render(
+      <MemoryRouter initialEntries={['/feeds?feed=f2']}>
+        <FeedsPage />
+      </MemoryRouter>,
+    )
+
+    expect(document.getElementById('feed-f2')?.getAttribute('data-highlighted')).toBe('true')
+    expect(document.getElementById('feed-f1')?.getAttribute('data-highlighted')).toBe('false')
+    expect(scrollIntoView).toHaveBeenCalled()
   })
 })

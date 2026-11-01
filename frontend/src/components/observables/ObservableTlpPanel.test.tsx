@@ -50,7 +50,21 @@ describe('ObservableTlpPanel', () => {
       </MemoryRouter>,
     )
     expect(screen.getByText('Why this marking')).toBeTruthy()
-    expect(screen.getAllByLabelText(/TLP:AMBER\./).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'TLP:AMBER' }).length).toBeGreaterThan(0)
+  })
+
+  it('links feed sources to the feeds page with a feed query param', () => {
+    const obs: Observable = {
+      ...BASE,
+      tlp_sources: [{ kind: 'feed', id: 'feed-abc', name: 'Threat feed', tlp: 'green' }],
+    }
+    render(
+      <MemoryRouter>
+        <ObservableTlpPanel observable={obs} observableId="obs-1" />
+      </MemoryRouter>,
+    )
+    const link = screen.getByRole('link', { name: 'Threat feed' })
+    expect(link.getAttribute('href')).toBe('/feeds?feed=feed-abc')
   })
 
   it('requires reason for admin override', () => {

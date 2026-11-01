@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Plus } from '@phosphor-icons/react'
 import { useFeeds, useCreateFeed, useUpdateFeed } from '@/hooks/useFeeds'
@@ -61,6 +61,13 @@ export default function FeedsPage() {
   const [editingFeed, setEditingFeed] = useState<Feed | null>(null)
   const [editSubmitError, setEditSubmitError] = useState<string | null>(null)
   const showCreateDialog = isAdmin && searchParams.get('create') === '1'
+  const highlightFeedId = searchParams.get('feed')
+
+  useEffect(() => {
+    if (!highlightFeedId || feedsLoading) return
+    const el = document.getElementById(`feed-${highlightFeedId}`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [highlightFeedId, feedsLoading, feeds])
 
   const openCreateDialog = () => {
     const params = new URLSearchParams(searchParams)
@@ -185,7 +192,11 @@ export default function FeedsPage() {
           </Card>
         ) : (
           filteredFeeds.map((feed) => (
-            <FeedCard key={feed.id} feed={feed} onEdit={(feed) => {
+            <FeedCard
+              key={feed.id}
+              feed={feed}
+              highlighted={highlightFeedId === feed.id}
+              onEdit={(feed) => {
               setEditSubmitError(null)
               setEditingFeed(feed)
             }} />
