@@ -115,10 +115,6 @@ async def get_blocklist(
         db,
         candidates,
         obs_type=obs_type,
-        confidence_min=confidence_min,
-        max_age_days=max_age_days,
-        feed_id=feed_id,
-        tags=tags,
         destination=_AD_HOC_DESTINATION,
     )
 

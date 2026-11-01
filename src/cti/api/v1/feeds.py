@@ -146,7 +146,7 @@ async def update_feed(
     except AuthConfigValidationError as e:
         raise HTTPException(status_code=422, detail=e.message) from None
     except TlpDowngradeReasonRequiredError as e:
-        await db.rollback()
+        # Raised before any field is applied, so nothing needs rolling back.
         raise HTTPException(status_code=422, detail=str(e)) from None
     await db.commit()
     await db.refresh(feed)

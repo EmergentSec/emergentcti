@@ -24,6 +24,7 @@ from cti.services.tlp import (
     MARKING_KEYS,
     effective_tlp_expr,
     marking_key,
+    not_red_clause,
     shareable_clause,
     tlp_filter,
     tlp_rank_expr,
@@ -62,6 +63,7 @@ async def get_observables(
     last_seen_after: datetime | None = None,
     tags: Sequence[str] | None = None,
     tlp: Sequence[str] | None = None,
+    exclude_red: bool = False,
     page: int = 1,
     size: int = 50,
     sort: str = "last_seen",
@@ -117,6 +119,10 @@ async def get_observables(
     if tlp:
         filters.append(tlp_filter(effective_tlp_expr(), tlp))
 
+    if exclude_red:
+        # API-key callers: RED is filtered before pagination, so totals agree.
+        filters.append(not_red_clause(effective_tlp_expr()))
+
     if filters:
         base = base.where(and_(*filters))
         count_q = count_q.where(and_(*filters))
@@ -163,6 +169,14 @@ def _tag_filter(tag_names: Sequence[str]):  # type: ignore[no-untyped-def]
         .where(Tag.name.in_(list(tag_names)))
     )
     return Observable.id.in_(tagged)
+
+
+async def find_observable_id(
+    db: AsyncSession, obs_type: ObservableType, value: str
+) -> uuid.UUID | None:
+    return await db.scalar(
+        select(Observable.id).where(Observable.type == obs_type, Observable.value == value)
+    )
 
 
 async def get_observable(db: AsyncSession, observable_id: uuid.UUID) -> Observable | None:
@@ -583,15 +597,7 @@ async def get_blocklist(
     values = [row[0] for row in result.all() if is_line_safe(row[0])]
     if not apply_allowlist:
         return values
-    served, _withheld = await apply_blocklist_policy(
-        db,
-        values,
-        obs_type=obs_type,
-        confidence_min=confidence_min,
-        max_age_days=max_age_days,
-        feed_id=feed_id,
-        tags=tags,
-    )
+    served, _withheld = await apply_blocklist_policy(db, values, obs_type=obs_type)
     return served
 
 
@@ -600,10 +606,6 @@ async def apply_blocklist_policy(
     candidates: Sequence[str],
     *,
     obs_type: ObservableType,
-    confidence_min: int,
-    max_age_days: int | None,
-    feed_id: uuid.UUID | None,
-    tags: Sequence[str] | None,
     destination: str = "internal",
     allowlist: AllowlistMatcher | None = None,
 ) -> tuple[list[str], int]:
@@ -612,13 +614,22 @@ async def apply_blocklist_policy(
     Safe for cached candidates: markings are read from the database on every
     call, so a new RED marking or override is honored on the next request.
 
+    The withheld set is looked up by type alone, deliberately *without* the
+    request's age/confidence/feed/tag filters: a cached candidate may no
+    longer match those filters (time moved on, confidence decayed), and it
+    must still be withheld if its marking forbids the destination.
+
     Returns ``(values, tlp_withheld)`` where *tlp_withheld* counts candidates
     that pass the allowlist but are withheld by TLP.
     """
     matcher = allowlist if allowlist is not None else await allowlist_service.load_matcher(db)
-    filters = _export_filters(obs_type, confidence_min, max_age_days, feed_id, tags)
     # (type, value) is unique, so within one type a value is one observable.
-    blocked = {value async for _type, value, _marking in _stream_withheld(db, filters, destination)}
+    blocked = {
+        value
+        async for _type, value, _marking in _stream_withheld(
+            db, [Observable.type == obs_type], destination
+        )
+    }
     values: list[str] = []
     withheld = 0
     for value in candidates:

@@ -8,9 +8,17 @@ from typing import TYPE_CHECKING
 import pytest
 
 from cti.models.observable import ObservableType
-from tests.policy_helpers import NO_TLP_EXCLUSIONS, add_feed, add_observable, allow
+from cti.models.user import UserRole
+from tests.policy_helpers import (
+    NO_TLP_EXCLUSIONS,
+    add_feed,
+    add_observable,
+    allow,
+    non_admin_client,
+)
 
 if TYPE_CHECKING:
+    from fastapi import FastAPI
     from httpx import AsyncClient
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,7 +86,7 @@ async def test_red_excluded_from_all_ad_hoc_exports(
 
 
 async def test_red_excluded_even_after_cached_blocklist(
-    client: AsyncClient, db_session: AsyncSession, fake_cache: dict[str, str]
+    app: FastAPI, client: AsyncClient, db_session: AsyncSession, fake_cache: dict[str, str]
 ) -> None:
     obs = await add_observable(db_session, "203.0.113.50")
     await add_observable(db_session, "203.0.113.51")
@@ -93,7 +101,7 @@ async def test_red_excluded_even_after_cached_blocklist(
     response = await client.put(
         f"{OBS}/{obs.id}/tlp-override", json={"tlp": "red", "reason": "named recipients"}
     )
-    assert response.status_code == 200
+    assert response.status_code == 204  # applied; RED is not echoed to an API key
     # The fake cache is not invalidated, so the pre-policy entry survives.
     assert list(fake_cache.values()) == ["203.0.113.50\n203.0.113.51"]
 
@@ -102,8 +110,10 @@ async def test_red_excluded_even_after_cached_blocklist(
     assert cached.text == "203.0.113.51"
     assert cached.headers["X-TLP-Excluded"] == "1"
 
-    # Clearing the override is reflected on the next request too.
-    await client.delete(f"{OBS}/{obs.id}/tlp-override")
+    # Clearing the override is reflected on the next request too. (A RED item
+    # is invisible to API keys, so an interactive admin clears it.)
+    async with non_admin_client(app, UserRole.admin) as admin:
+        assert (await admin.delete(f"{OBS}/{obs.id}/tlp-override")).status_code == 200
     again = await client.get(url)
     assert again.headers["X-Cache"] == "HIT"
     assert again.text == "203.0.113.50\n203.0.113.51"
@@ -336,3 +346,25 @@ async def test_profile_destination_update_and_preview_shows_exclusions(
     assert (
         await client.put(f"{PROFILES}/{profile['id']}", json={"destination": None})
     ).status_code == 422
+
+
+async def test_cached_red_value_withheld_after_it_drifts_out_of_filters(
+    client: AsyncClient, db_session: AsyncSession, fake_cache: dict[str, str]
+) -> None:
+    """A cached candidate that no longer matches the filters is still TLP-checked."""
+    obs = await add_observable(db_session, "203.0.113.95", confidence=90)
+    await add_observable(db_session, "203.0.113.96", confidence=90)
+    url = f"{EXPORT}/blocklist/ip-addr?confidence_min=80&max_age_days=1"
+    assert (await client.get(url)).text == "203.0.113.95\n203.0.113.96"
+
+    # Marked RED, then decays below confidence_min and ages past max_age_days
+    # while the pre-policy cache entry still lists it.
+    await client.put(f"{OBS}/{obs.id}/tlp-override", json={"tlp": "red", "reason": "r"})
+    obs.confidence_score = 10
+    obs.last_seen = datetime.now(UTC) - timedelta(days=30)
+    await db_session.commit()
+
+    cached = await client.get(url)
+    assert cached.headers["X-Cache"] == "HIT"
+    assert cached.text == "203.0.113.96"
+    assert cached.headers["X-TLP-Excluded"] == "1"

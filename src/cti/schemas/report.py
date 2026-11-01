@@ -176,6 +176,7 @@ class ReportFilters(BaseModel):
     ai_generated: bool | None = None
     tags: list[str] = []
     tlp: list[str] = []
+    exclude_red: bool = False  # API-key callers never see RED reports
     page: int = Field(default=1, ge=1)
     size: int = Field(default=25, ge=1, le=100)
 

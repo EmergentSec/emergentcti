@@ -23,6 +23,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.functions import FunctionElement
 
+from cti.models.api_key import ApiKey
 from cti.models.feed import Feed
 from cti.models.observable import Observable
 from cti.models.observable_source import ObservableSource
@@ -296,6 +297,40 @@ async def describe_markings(
             inputs.append(MarkingInput("manual", None, "Manual", parse_tlp(obs.manual_tlp)))
         out[obs.id] = MarkingContext(effective.get(obs.id), inputs)
     return out
+
+
+# ── TLP:RED and API-key callers ──────────────────────────────────────────
+#
+# "RED never leaves through any API-key path." For API-key callers, items whose
+# (effective) marking is RED do not exist: lists omit them before pagination,
+# detail and mutation endpoints answer 404, and nested lists drop them.
+# Interactive user sessions are unaffected (TLP is not access control in-app).
+
+
+def hide_red_for(auth: object) -> bool:
+    """Whether RED items must be invisible to this caller (API keys)."""
+    return isinstance(auth, ApiKey)
+
+
+def not_red_clause(marking: ColumnElement[Any]) -> ColumnElement[bool]:
+    """NULL-safe ``marking IS DISTINCT FROM 'red'``."""
+    return func.coalesce(marking, literal(UNSPECIFIED)) != Tlp.RED.value
+
+
+async def red_observable_ids(
+    db: AsyncSession, observable_ids: Iterable[uuid.UUID]
+) -> set[uuid.UUID]:
+    """The subset of ids whose effective marking is RED."""
+    markings = await effective_tlp_map(db, observable_ids)
+    return {obs_id for obs_id, marking in markings.items() if marking is Tlp.RED}
+
+
+async def is_red_observable(db: AsyncSession, observable_id: uuid.UUID) -> bool:
+    return bool(await red_observable_ids(db, [observable_id]))
+
+
+async def is_red_report(db: AsyncSession, report_id: uuid.UUID) -> bool:
+    return (await db.scalar(select(Report.tlp).where(Report.id == report_id))) == Tlp.RED.value
 
 
 # ── External AI gate ─────────────────────────────────────────────────────

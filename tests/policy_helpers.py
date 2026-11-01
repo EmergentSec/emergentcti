@@ -83,9 +83,11 @@ async def allow(
 
 
 @asynccontextmanager
-async def non_admin_client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
-    """An authenticated client whose subject is a regular (non-admin) user."""
-    user = User(id=uuid.uuid4(), username="bob", password_hash="x", role=UserRole.user)
+async def non_admin_client(
+    app: FastAPI, role: UserRole = UserRole.user
+) -> AsyncGenerator[AsyncClient, None]:
+    """An authenticated interactive-session client (a regular user by default)."""
+    user = User(id=uuid.uuid4(), username="bob", password_hash="x", role=role)
 
     async def _auth() -> User:
         return user

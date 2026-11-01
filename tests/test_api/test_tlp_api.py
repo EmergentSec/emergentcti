@@ -64,19 +64,19 @@ async def _feed(client: AsyncClient, name: str, **extra: object) -> dict:
 
 @pytest.mark.parametrize("marking", MARKINGS)
 async def test_marking_round_trips_on_feed_report_and_observable(
-    client: AsyncClient, marking: str | None
+    admin_client: AsyncClient, marking: str | None
 ) -> None:
-    feed = await _feed(client, f"Feed {marking}", tlp=marking)
+    feed = await _feed(admin_client, f"Feed {marking}", tlp=marking)
     assert feed["tlp"] == marking
-    assert (await client.get(f"{FEEDS}/{feed['id']}")).json()["tlp"] == marking
+    assert (await admin_client.get(f"{FEEDS}/{feed['id']}")).json()["tlp"] == marking
 
-    report = await _report(client, tlp=marking)
+    report = await _report(admin_client, tlp=marking)
     assert report["tlp"] == marking
-    assert (await client.get(f"{REPORTS}/{report['id']}")).json()["tlp"] == marking
-    listed = (await client.get(REPORTS)).json()["items"]
+    assert (await admin_client.get(f"{REPORTS}/{report['id']}")).json()["tlp"] == marking
+    listed = (await admin_client.get(REPORTS)).json()["items"]
     assert [item["tlp"] for item in listed] == [marking]
 
-    created = await client.post(
+    created = await admin_client.post(
         OBS, json={"type": "domain-name", "value": "rt.example", "tlp": marking}
     )
     assert created.status_code == 201, created.text
@@ -84,7 +84,7 @@ async def test_marking_round_trips_on_feed_report_and_observable(
     assert body["manual_tlp"] == marking
     assert body["effective_tlp"] == marking
     assert body["tlp_sources"] == [{"kind": "manual", "id": None, "name": "Manual", "tlp": marking}]
-    detail = (await client.get(f"{OBS}/{body['id']}")).json()
+    detail = (await admin_client.get(f"{OBS}/{body['id']}")).json()
     assert detail["manual_tlp"] == marking and detail["effective_tlp"] == marking
 
 
@@ -219,25 +219,25 @@ async def test_override_404_and_admin_guard(
     ],
 )
 async def test_feed_and_report_downgrade_rule(
-    client: AsyncClient, old: str | None, new: str | None, needs_reason: bool
+    admin_client: AsyncClient, old: str | None, new: str | None, needs_reason: bool
 ) -> None:
-    feed = await _feed(client, f"F {old}->{new}", tlp=old)
-    report = await _report(client, tlp=old)
+    feed = await _feed(admin_client, f"F {old}->{new}", tlp=old)
+    report = await _report(admin_client, tlp=old)
 
-    feed_response = await client.put(f"{FEEDS}/{feed['id']}", json={"tlp": new})
-    report_response = await client.patch(f"{REPORTS}/{report['id']}", json={"tlp": new})
+    feed_response = await admin_client.put(f"{FEEDS}/{feed['id']}", json={"tlp": new})
+    report_response = await admin_client.patch(f"{REPORTS}/{report['id']}", json={"tlp": new})
     if needs_reason:
         assert feed_response.status_code == 422
         assert "tlp_change_reason" in feed_response.text
         assert report_response.status_code == 422
         assert "tlp_change_reason" in report_response.text
         # Nothing changed.
-        assert (await client.get(f"{FEEDS}/{feed['id']}")).json()["tlp"] == old
-        assert (await client.get(f"{REPORTS}/{report['id']}")).json()["tlp"] == old
-        feed_response = await client.put(
+        assert (await admin_client.get(f"{FEEDS}/{feed['id']}")).json()["tlp"] == old
+        assert (await admin_client.get(f"{REPORTS}/{report['id']}")).json()["tlp"] == old
+        feed_response = await admin_client.put(
             f"{FEEDS}/{feed['id']}", json={"tlp": new, "tlp_change_reason": "approved"}
         )
-        report_response = await client.patch(
+        report_response = await admin_client.patch(
             f"{REPORTS}/{report['id']}", json={"tlp": new, "tlp_change_reason": "approved"}
         )
     assert feed_response.status_code == 200, feed_response.text
@@ -255,10 +255,12 @@ async def test_downgrade_reason_is_trimmed_and_bounded(client: AsyncClient) -> N
         assert response.status_code == 422
 
 
-async def test_downgrade_is_logged(client: AsyncClient, caplog: pytest.LogCaptureFixture) -> None:
-    report = await _report(client, tlp="red")
+async def test_downgrade_is_logged(
+    admin_client: AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    report = await _report(admin_client, tlp="red")
     with caplog.at_level("INFO", logger="cti.services.tlp"):
-        response = await client.patch(
+        response = await admin_client.patch(
             f"{REPORTS}/{report['id']}", json={"tlp": "green", "tlp_change_reason": "public now"}
         )
     assert response.status_code == 200
@@ -278,7 +280,7 @@ async def test_preconfigured_feed_tlp_is_editable(
 
 
 async def test_observable_tlp_filter_uses_effective_marking(
-    client: AsyncClient, db_session: AsyncSession
+    admin_client: AsyncClient, db_session: AsyncSession
 ) -> None:
     red_feed = await add_feed(db_session, "Red", tlp="red")
     green_feed = await add_feed(db_session, "Green", tlp="green")
@@ -287,23 +289,23 @@ async def test_observable_tlp_filter_uses_effective_marking(
     await add_observable(db_session, "198.51.100.42")  # manual, unspecified
 
     async def values(query: str) -> set[str]:
-        response = await client.get(f"{OBS}?{query}")
+        response = await admin_client.get(f"{OBS}?{query}")
         assert response.status_code == 200, response.text
         return {item["value"] for item in response.json()["items"]}
 
     assert await values("tlp=red") == {"198.51.100.40"}
     assert await values("tlp=unspecified") == {"198.51.100.42"}
     assert await values("tlp=red&tlp=green") == {"198.51.100.40", "198.51.100.41"}
-    assert (await client.get(f"{OBS}?tlp=TLP:RED")).status_code == 422
+    assert (await admin_client.get(f"{OBS}?tlp=TLP:RED")).status_code == 422
 
 
-async def test_report_tlp_filter(client: AsyncClient) -> None:
-    await _report(client, tlp="red", title="R")
-    await _report(client, tlp="clear", title="C")
-    await _report(client, title="U")
+async def test_report_tlp_filter(admin_client: AsyncClient) -> None:
+    await _report(admin_client, tlp="red", title="R")
+    await _report(admin_client, tlp="clear", title="C")
+    await _report(admin_client, title="U")
 
     async def titles(query: str) -> set[str]:
-        return {r["title"] for r in (await client.get(f"{REPORTS}?{query}")).json()["items"]}
+        return {r["title"] for r in (await admin_client.get(f"{REPORTS}?{query}")).json()["items"]}
 
     assert await titles("tlp=red") == {"R"}
     assert await titles("tlp=unspecified&tlp=clear") == {"C", "U"}
@@ -322,18 +324,22 @@ async def _report_with_attachment(client: AsyncClient, tlp: str | None) -> dict:
     return report
 
 
-async def test_red_attachment_rejects_api_key(client: AsyncClient) -> None:
-    report = await _report_with_attachment(client, "red")
+async def test_red_attachment_is_404_for_api_key(client: AsyncClient) -> None:
+    report = await _report_with_attachment(client, "amber")
+    # Tightening needs no reason; afterwards the report is invisible to API keys.
+    tightened = await client.patch(f"{REPORTS}/{report['id']}", json={"tlp": "red"})
+    assert tightened.status_code == 204  # applied, but the RED report is not echoed
     response = await client.get(f"{REPORTS}/{report['id']}/attachment")
-    assert response.status_code == 403
-    assert "TLP:RED" in response.json()["detail"]
-    assert response.headers["X-TLP-Marking"] == "red"
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Report attachment not found"
+    assert "secret notes" not in response.text
 
 
-async def test_red_attachment_allows_interactive_user(client: AsyncClient, app: FastAPI) -> None:
-    report = await _report_with_attachment(client, "red")
-    async with non_admin_client(app) as user:
-        response = await user.get(f"{REPORTS}/{report['id']}/attachment")
+async def test_red_attachment_allows_interactive_user(
+    admin_client: AsyncClient, app: FastAPI
+) -> None:
+    report = await _report_with_attachment(admin_client, "red")
+    response = await admin_client.get(f"{REPORTS}/{report['id']}/attachment")
     assert response.status_code == 200
     assert response.content == b"secret notes"
     assert response.headers["X-TLP-Marking"] == "red"
@@ -349,24 +355,27 @@ async def test_non_red_attachment_header_for_api_key(
     assert response.headers["X-TLP-Marking"] == (marking or "unspecified")
 
 
-async def test_report_json_is_not_filtered_by_tlp(client: AsyncClient) -> None:
-    report = await _report_with_attachment(client, "red")
-    detail = await client.get(f"{REPORTS}/{report['id']}")
+async def test_report_json_is_not_filtered_for_interactive_users(
+    admin_client: AsyncClient, app: FastAPI
+) -> None:
+    report = await _report_with_attachment(admin_client, "red")
+    async with non_admin_client(app) as user:
+        detail = await user.get(f"{REPORTS}/{report['id']}")
     assert detail.status_code == 200
     assert detail.json()["tlp"] == "red"
     assert detail.json()["has_attachment"] is True
 
 
 async def test_linked_observable_inherits_report_marking(
-    client: AsyncClient, db_session: AsyncSession
+    admin_client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    report = await _report(client, tlp="red")
+    report = await _report(admin_client, tlp="red")
     obs = await add_observable(db_session, "198.51.100.50")
     await db_session.execute(
         insert(report_observables).values(report_id=uuid.UUID(report["id"]), observable_id=obs.id)
     )
     await db_session.commit()
-    body = (await client.get(f"{OBS}/{obs.id}")).json()
+    body = (await admin_client.get(f"{OBS}/{obs.id}")).json()
     assert body["effective_tlp"] == "red"
     # A manual observable linked to a report: manual NULL is not an input.
     assert [s["kind"] for s in body["tlp_sources"]] == ["report"]

@@ -129,9 +129,12 @@ What each export destination allows:
 - **Unspecified is internal-only.** It is exported to your own controls, never
   to community or public destinations.
 - **TLP:RED never leaves the application** through any export, profile download
-  or API key, including when a blocklist comes from the cache. A RED report
-  attachment returns `403` to API-key callers; signed-in users can still open it
-  in the app. Every attachment response carries `X-TLP-Marking`.
+  or API key, including when a blocklist comes from the cache. For API-key
+  callers RED observables and reports do not exist: lists leave them out,
+  detail, attachment and edit endpoints return `404`, and reports drop linked
+  RED observables. Signed-in users still see and can open everything in the
+  app; declassifying a RED item needs an interactive admin session. Every
+  attachment response carries `X-TLP-Marking`.
 - TLP and the allowlist are independent: a value is exported only if it passes
   both. Ad-hoc exports report withheld rows in `X-TLP-Excluded`, and a profile
   preview lists them per marking (`excluded_by_tlp`) before you change its

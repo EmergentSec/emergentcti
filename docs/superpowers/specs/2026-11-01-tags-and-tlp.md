@@ -265,7 +265,8 @@ the coordinator; the rest only fix details the contract leaves open.
    `filters.tags` only when tags are given. Pre-#15 requests therefore return
    byte-identical metadata. The only additions are `tlp: null` and `tags: []` on
    each `ExportObservable`, as the contract specifies.
-9. The RED attachment 403 response also carries `X-TLP-Marking: red`.
+9. Superseded by item 14: a RED attachment now returns 404, not 403, to API
+   keys. Every allowed attachment response carries `X-TLP-Marking`.
 10. `tlp` filter tokens are case-insensitive. Unknown tokens return 422. The `tag`
     filter normalizes names, and an invalid name returns 422.
 11. Tag limits: at most 100 tags per `PUT …/tags` or profile, raw names at most

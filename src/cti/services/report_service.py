@@ -93,6 +93,8 @@ async def list_reports(
         clauses.append(Report.id.in_(tagged))
     if filters.tlp:
         clauses.append(tlp_policy.tlp_filter(Report.tlp, filters.tlp))
+    if filters.exclude_red:
+        clauses.append(tlp_policy.not_red_clause(Report.tlp))
 
     count_query = select(func.count(Report.id)).where(*clauses)
     total = await db.scalar(count_query) or 0

@@ -6,15 +6,17 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.api.v1.filters import parse_tag_names, parse_tlp_tokens
 from cti.api.v1.reports import report_to_summary
+from cti.api.v1.tlp_guard import ensure_observable_visible
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
 from cti.core.redis import invalidate_observable_caches
 from cti.models.observable import ObservableType
+from cti.models.tlp import Tlp
 from cti.models.user import User
 from cti.schemas.observable import (
     ConfidenceOverrideRequest,
@@ -31,20 +33,56 @@ from cti.schemas.observable import (
 from cti.schemas.report import ReportSummary
 from cti.services import allowlist_service, observable_service, report_service, tag_service
 from cti.services.allowlist_service import AllowlistMatcher
-from cti.services.tlp import MarkingContext, describe_markings
+from cti.services.tlp import (
+    MarkingContext,
+    MarkingInput,
+    describe_markings,
+    hide_red_for,
+    is_red_observable,
+)
 
 router = APIRouter()
 
+_RESTRICTED_REPORT = "Restricted report"
 
-async def observables_to_responses(db: AsyncSession, observables) -> list[ObservableResponse]:
+
+def _redact_red_reports(marking: MarkingContext) -> MarkingContext:
+    """For API-key callers: keep a RED report's restriction, not its identity."""
+    return MarkingContext(
+        marking.effective,
+        [
+            MarkingInput("report", None, _RESTRICTED_REPORT, src.tlp)
+            if src.kind == "report" and src.tlp is Tlp.RED
+            else src
+            for src in marking.sources
+        ],
+    )
+
+
+async def observables_to_responses(
+    db: AsyncSession, observables, auth: object = None
+) -> list[ObservableResponse]:
     """Serialize observables with the current allowlist and TLP state."""
     allowlist = await allowlist_service.load_matcher(db)
     markings = await describe_markings(db, observables)
+    if hide_red_for(auth):
+        markings = {k: _redact_red_reports(v) for k, v in markings.items()}
     return [_obs_to_response(obs, allowlist, markings[obs.id]) for obs in observables]
 
 
-async def observable_to_response(db: AsyncSession, obs) -> ObservableResponse:
-    return (await observables_to_responses(db, [obs]))[0]
+async def observable_to_response(db: AsyncSession, obs, auth: object = None) -> ObservableResponse:
+    return (await observables_to_responses(db, [obs], auth))[0]
+
+
+async def _mutation_response(db: AsyncSession, obs, auth: object) -> ObservableResponse | Response:
+    """Response after a successful change.
+
+    If an API key's change left the observable RED (e.g. it set a RED
+    override), the change stands but the RED item is not echoed back: 204.
+    """
+    if hide_red_for(auth) and await is_red_observable(db, obs.id):
+        return Response(status_code=204)
+    return await observable_to_response(db, obs, auth)
 
 
 def _obs_to_response(
@@ -111,7 +149,7 @@ def _obs_to_response(
 @router.get("", response_model=ObservableListResponse)
 async def list_observables(
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(get_current_auth),
+    auth: AuthSubject = Depends(get_current_auth),
     q: str | None = None,
     type: ObservableType | None = None,
     confidence_min: int | None = Query(default=None, ge=0, le=100),
@@ -150,6 +188,7 @@ async def list_observables(
         last_seen_after=last_seen_after,
         tags=parse_tag_names(tag),
         tlp=parse_tlp_tokens(tlp),
+        exclude_red=hide_red_for(auth),
         page=page,
         size=size,
         sort=sort,
@@ -159,7 +198,7 @@ async def list_observables(
     pages = (total + size - 1) // size if total > 0 else 0
 
     return ObservableListResponse(
-        items=await observables_to_responses(db, items),
+        items=await observables_to_responses(db, items, auth),
         total=total,
         page=page,
         size=size,
@@ -171,8 +210,12 @@ async def list_observables(
 async def create_observable(
     data: ObservableCreate,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
-) -> ObservableResponse:
+    auth: AuthSubject = Depends(require_admin),
+) -> ObservableResponse | Response:
+    existing_id = await observable_service.find_observable_id(db, data.type, data.value)
+    if existing_id is not None:
+        # An API key cannot upsert (and so read back) an existing RED observable.
+        await ensure_observable_visible(db, auth, existing_id)
     obs, _created = await observable_service.create_observable(
         db,
         obs_type=data.type,
@@ -184,30 +227,34 @@ async def create_observable(
     # Even an upsert of an existing value can raise its confidence (MAX), which
     # changes blocklist eligibility, so invalidate on every successful create.
     await invalidate_observable_caches()
-    return await observable_to_response(db, obs)
+    return await _mutation_response(db, obs, auth)
 
 
 @router.get("/{observable_id}", response_model=ObservableResponse)
 async def get_observable(
     observable_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(get_current_auth),
+    auth: AuthSubject = Depends(get_current_auth),
 ) -> ObservableResponse:
+    await ensure_observable_visible(db, auth, observable_id)
     obs = await observable_service.get_observable(db, observable_id)
     if not obs:
         raise HTTPException(status_code=404, detail="Observable not found")
-    return await observable_to_response(db, obs)
+    return await observable_to_response(db, obs, auth)
 
 
 @router.get("/{observable_id}/reports", response_model=list[ReportSummary])
 async def get_observable_reports(
     observable_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(get_current_auth),
+    auth: AuthSubject = Depends(get_current_auth),
 ) -> list[ReportSummary]:
+    await ensure_observable_visible(db, auth, observable_id)
     reports = await report_service.list_reports_for_observable(db, observable_id)
     if reports is None:
         raise HTTPException(status_code=404, detail="Observable not found")
+    if hide_red_for(auth):
+        reports = [r for r in reports if r.tlp != Tlp.RED.value]
     return [report_to_summary(report) for report in reports]
 
 
@@ -217,7 +264,8 @@ async def set_confidence_override(
     data: ConfidenceOverrideRequest,
     db: AsyncSession = Depends(get_db),
     auth: AuthSubject = Depends(require_admin),
-) -> ObservableResponse:
+) -> ObservableResponse | Response:
+    await ensure_observable_visible(db, auth, observable_id)
     obs = await observable_service.set_confidence_override(
         db,
         observable_id,
@@ -228,21 +276,22 @@ async def set_confidence_override(
         raise HTTPException(status_code=404, detail="Observable not found")
     await db.commit()
     await invalidate_observable_caches()
-    return await observable_to_response(db, obs)
+    return await _mutation_response(db, obs, auth)
 
 
 @router.delete("/{observable_id}/confidence-override", response_model=ObservableResponse)
 async def clear_confidence_override(
     observable_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
-) -> ObservableResponse:
+    auth: AuthSubject = Depends(require_admin),
+) -> ObservableResponse | Response:
+    await ensure_observable_visible(db, auth, observable_id)
     obs = await observable_service.clear_confidence_override(db, observable_id)
     if obs is None:
         raise HTTPException(status_code=404, detail="Observable not found")
     await db.commit()
     await invalidate_observable_caches()
-    return await observable_to_response(db, obs)
+    return await _mutation_response(db, obs, auth)
 
 
 @router.put("/{observable_id}/tlp-override", response_model=ObservableResponse)
@@ -251,8 +300,9 @@ async def set_tlp_override(
     data: TlpOverrideRequest,
     db: AsyncSession = Depends(get_db),
     auth: AuthSubject = Depends(require_admin),
-) -> ObservableResponse:
+) -> ObservableResponse | Response:
     """Reclassify an observable (may loosen or tighten). Reason required."""
+    await ensure_observable_visible(db, auth, observable_id)
     obs = await observable_service.set_tlp_override(
         db,
         observable_id,
@@ -264,21 +314,22 @@ async def set_tlp_override(
         raise HTTPException(status_code=404, detail="Observable not found")
     await db.commit()
     await invalidate_observable_caches()
-    return await observable_to_response(db, obs)
+    return await _mutation_response(db, obs, auth)
 
 
 @router.delete("/{observable_id}/tlp-override", response_model=ObservableResponse)
 async def clear_tlp_override(
     observable_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
-) -> ObservableResponse:
+    auth: AuthSubject = Depends(require_admin),
+) -> ObservableResponse | Response:
+    await ensure_observable_visible(db, auth, observable_id)
     obs = await observable_service.clear_tlp_override(db, observable_id)
     if obs is None:
         raise HTTPException(status_code=404, detail="Observable not found")
     await db.commit()
     await invalidate_observable_caches()
-    return await observable_to_response(db, obs)
+    return await _mutation_response(db, obs, auth)
 
 
 @router.put("/{observable_id}/tags", response_model=ObservableResponse)
@@ -286,9 +337,10 @@ async def set_observable_tags(
     observable_id: uuid.UUID,
     data: TagsUpdate,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
-) -> ObservableResponse:
+    auth: AuthSubject = Depends(require_admin),
+) -> ObservableResponse | Response:
     """Replace the observable's tag set (names are normalized; new ones created)."""
+    await ensure_observable_visible(db, auth, observable_id)
     if await observable_service.get_observable(db, observable_id) is None:
         raise HTTPException(status_code=404, detail="Observable not found")
     try:
@@ -300,15 +352,16 @@ async def set_observable_tags(
     await invalidate_observable_caches()
     obs = await observable_service.get_observable(db, observable_id)
     assert obs is not None
-    return await observable_to_response(db, obs)
+    return await _mutation_response(db, obs, auth)
 
 
 @router.delete("/{observable_id}", status_code=204)
 async def delete_observable(
     observable_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(require_admin),
 ) -> None:
+    await ensure_observable_visible(db, auth, observable_id)
     deleted = await observable_service.delete_observable(db, observable_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Observable not found")
