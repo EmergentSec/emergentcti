@@ -11,7 +11,10 @@ import {
   linkReportObservable,
   unlinkReportObservable,
   getObservableReports,
+  extractReportIndicators,
+  importReportIndicators,
 } from '@/api/reports'
+import type { ImportRequest } from '@/types/reportIocExtraction'
 import type { ReportCreate, ReportFilters, ReportUpdate } from '@/types/report'
 
 export function useReports(filters: ReportFilters) {
@@ -115,6 +118,25 @@ export function useUnlinkReportObservable() {
     onSuccess: (_data, { reportId, observableId }) => {
       queryClient.invalidateQueries({ queryKey: ['report', reportId] })
       queryClient.invalidateQueries({ queryKey: ['observableReports', observableId] })
+    },
+  })
+}
+
+export function useExtractReportIndicators() {
+  return useMutation({
+    mutationFn: (reportId: string) => extractReportIndicators(reportId),
+  })
+}
+
+export function useImportReportIndicators() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ reportId, payload }: { reportId: string; payload: ImportRequest }) =>
+      importReportIndicators(reportId, payload),
+    onSuccess: (_data, { reportId }) => {
+      queryClient.invalidateQueries({ queryKey: ['report', reportId] })
+      queryClient.invalidateQueries({ queryKey: ['observables'] })
+      queryClient.invalidateQueries({ queryKey: ['observableReports'] })
     },
   })
 }
