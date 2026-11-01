@@ -408,3 +408,6 @@ async def test_json_profile_download_sends_x_tlp_excluded_header(
     download = await client.get(f"{PROFILES}/{profile['id']}/download")
     assert download.headers["X-TLP-Excluded"] == "1"
     assert [o["value"] for o in download.json()["observables"]] == ["203.0.113.98"]
+    # Same count semantics as the preview (and the text download path).
+    preview = (await client.get(f"{PROFILES}/{profile['id']}/preview")).json()
+    assert sum(preview["excluded_by_tlp"].values()) == 1

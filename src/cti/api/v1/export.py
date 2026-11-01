@@ -350,7 +350,19 @@ async def download_export_profile(
         )
 
     allowlist = await allowlist_service.load_matcher(db)
-    _, _excluded, by_tlp = await export_profile_service.get_profile_values(db, profile)
+    # Count-only query (same withheld-row classification as the text path and
+    # the preview) — building the full value list here would scan every
+    # exportable row a second time just to discard it.
+    by_tlp = await observable_service.count_tlp_excluded(
+        db,
+        obs_type=profile.type,
+        confidence_min=profile.confidence_min,
+        max_age_days=profile.max_age_days,
+        feed_id=profile.feed_id,
+        tags=tags,
+        destination=profile.destination.value,
+        allowlist=allowlist,
+    )
     response.headers["X-TLP-Excluded"] = str(sum(by_tlp.values()))
     observables = await observable_service.get_export_json(
         db,
