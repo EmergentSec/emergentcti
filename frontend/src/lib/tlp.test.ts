@@ -27,6 +27,6 @@ describe('formatExcludedByTlp', () => {
       'amber+strict': 0,
       red: 3,
     })
-    expect(lines).toEqual(['3 excluded: TLP:RED never leaves the application (indicators)'])
+    expect(lines).toEqual(['3 indicators excluded: TLP:RED never leaves the application'])
   })
 })

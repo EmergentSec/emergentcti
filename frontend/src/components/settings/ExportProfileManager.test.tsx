@@ -265,7 +265,7 @@ describe('ExportProfileManager — preview', () => {
     )
     renderLoaded()
     fireEvent.click(screen.getByRole('button', { name: 'Preview Firewall IPs' }))
-    expect(screen.getByText(/2 excluded: TLP:RED never leaves the application/)).toBeTruthy()
+    expect(screen.getByText(/2 indicators excluded: TLP:RED never leaves the application/)).toBeTruthy()
   })
 
   it('shows a preview error', () => {

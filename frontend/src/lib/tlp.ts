@@ -73,12 +73,14 @@ export function needsTlpChangeReason(previous: Tlp | null, next: Tlp | null): bo
   return false
 }
 
+const NOT_ALLOWED = "isn't allowed for this destination"
+
 const EXCLUSION_PHRASES: Record<keyof ExcludedByTlpCounts, string> = {
-  unspecified: 'Unspecified (internal destinations only)',
-  clear: 'TLP:CLEAR',
-  green: 'TLP:GREEN',
-  amber: 'TLP:AMBER',
-  'amber+strict': 'TLP:AMBER+STRICT',
+  unspecified: 'Unspecified markings are allowed for internal destinations only',
+  clear: `TLP:CLEAR ${NOT_ALLOWED}`,
+  green: `TLP:GREEN ${NOT_ALLOWED}`,
+  amber: `TLP:AMBER ${NOT_ALLOWED}`,
+  'amber+strict': `TLP:AMBER+STRICT ${NOT_ALLOWED}`,
   red: 'TLP:RED never leaves the application',
 }
 
@@ -89,7 +91,7 @@ export function formatExcludedByTlp(excluded: ExcludedByTlpCounts): string[] {
     const count = excluded[key]
     if (count <= 0) continue
     const noun = count === 1 ? 'indicator' : 'indicators'
-    lines.push(`${count} excluded: ${EXCLUSION_PHRASES[key]} (${noun})`)
+    lines.push(`${count} ${noun} excluded: ${EXCLUSION_PHRASES[key]}`)
   }
   return lines
 }

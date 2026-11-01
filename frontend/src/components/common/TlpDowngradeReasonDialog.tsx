@@ -38,6 +38,7 @@ export function TlpDowngradeReasonDialog({
       return
     }
     setError(null)
+    setReason('')
     onConfirm(trimmed)
   }
 
@@ -45,8 +46,8 @@ export function TlpDowngradeReasonDialog({
     <Dialog open={open} onClose={handleClose} title="Reason for TLP change">
       <form onSubmit={handleSubmit} className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Loosening a TLP marking (or clearing it to Unspecified) requires a short reason for the
-          audit log.
+          Loosening a TLP marking (or clearing it to Unspecified) requires a short reason. It is
+          recorded in the server log.
         </p>
         <Input
           id="tlp-change-reason"
