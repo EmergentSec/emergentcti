@@ -27,6 +27,10 @@ import {
 } from '@/components/ui/Table'
 import { Toggle } from '@/components/ui/Toggle'
 import { ReportForm } from '@/components/reports/ReportForm'
+import { TlpBadge } from '@/components/common/TlpBadge'
+import { TagChips } from '@/components/common/TagChips'
+import { TagMultiFilter } from '@/components/common/TagMultiFilter'
+import { TlpMultiFilter } from '@/components/common/TlpMultiFilter'
 import { formatDate } from '@/lib/utils'
 import { apiErrorMessage } from '@/lib/apiError'
 import type { ReportCreate, ReportFilters, ReportOrigin } from '@/types/report'
@@ -161,6 +165,16 @@ export default function ReportsPage() {
             label="AI-generated only"
             className="pb-1 sm:pb-2"
           />
+          <TagMultiFilter
+            selected={filters.tag ?? []}
+            onChange={(tag) => updateFilters({ tag: tag.length ? tag : undefined })}
+            className="w-full sm:w-auto"
+          />
+          <TlpMultiFilter
+            selected={filters.tlp ?? []}
+            onChange={(tlp) => updateFilters({ tlp: tlp.length ? tlp : undefined })}
+            className="w-full sm:w-auto"
+          />
         </CardContent>
       </Card>
 
@@ -208,6 +222,8 @@ export default function ReportsPage() {
                     <TableHead>Origin</TableHead>
                     <TableHead>Source</TableHead>
                     <TableHead>Published</TableHead>
+                    <TableHead className="w-28">TLP</TableHead>
+                    <TableHead className="w-36">Tags</TableHead>
                     <TableHead className="w-24">Flags</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -235,6 +251,12 @@ export default function ReportsPage() {
                       </TableCell>
                       <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
                         {formatDate(report.published_at)}
+                      </TableCell>
+                      <TableCell>
+                        <TlpBadge tlp={report.tlp} />
+                      </TableCell>
+                      <TableCell>
+                        <TagChips tags={report.tags ?? []} />
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
@@ -274,6 +296,7 @@ export default function ReportsPage() {
           onSubmit={handleCreate}
           onCancel={closeCreateDialog}
           isLoading={createReport.isPending}
+          isAdmin={isAdmin}
         />
       </Dialog>
     </div>

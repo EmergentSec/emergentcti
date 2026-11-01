@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ObservableTable } from './ObservableTable'
 import type { Observable } from '@/types/observable'
+import { EMPTY_TLP_OBSERVABLE_FIELDS } from '@/test/fixtures/tlp'
 
 // Spy on navigate — must be set before vi.mock runs
 const mockNavigate = vi.fn()
@@ -45,6 +46,7 @@ const OBSERVABLES: Observable[] = [
     ],
     allowlisted: false,
     allowlist_entry_ids: [],
+    ...EMPTY_TLP_OBSERVABLE_FIELDS,
     created_at: '2026-06-27T00:00:00Z',
     updated_at: '2026-06-28T00:00:00Z',
   },
@@ -90,6 +92,7 @@ const OBSERVABLES: Observable[] = [
     ],
     allowlisted: false,
     allowlist_entry_ids: [],
+    ...EMPTY_TLP_OBSERVABLE_FIELDS,
     created_at: '2026-06-29T00:00:00Z',
     updated_at: '2026-06-29T20:00:00Z',
   },
@@ -120,6 +123,23 @@ describe('ObservableTable', () => {
     )
     expect(screen.getByText('5.188.206.18')).toBeTruthy()
     expect(screen.getByText('http://194.5.250.100/payload')).toBeTruthy()
+  })
+
+  it('renders effective TLP badges', () => {
+    const observables = [
+      {
+        ...OBSERVABLES[0],
+        effective_tlp: 'red' as const,
+        tags: ['c2'],
+      },
+    ]
+    render(
+      <MemoryRouter>
+        <ObservableTable observables={observables} />
+      </MemoryRouter>,
+    )
+    expect(screen.getByLabelText(/TLP:RED\./)).toBeTruthy()
+    expect(screen.getByText('c2')).toBeTruthy()
   })
 
   it('renders confidence band labels (Low for 38, High for 78)', () => {

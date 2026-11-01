@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import api from './client'
-import { extractReportIndicators, importReportIndicators } from './reports'
+import { createReport, extractReportIndicators, importReportIndicators, updateReport } from './reports'
 import type { ExtractionPreview, ImportResult } from '@/types/reportIocExtraction'
 
 afterEach(() => vi.restoreAllMocks())
@@ -35,5 +35,46 @@ describe('report indicator extraction API', () => {
       confidence: 50,
       items: [{ type: 'ip-addr', value: '1.2.3.4' }],
     })
+  })
+})
+
+describe('report create/update with tags', () => {
+  const DETAIL = { id: 'rep-1', tags: [] as string[] }
+
+  it('omits tags from POST (backend ignores them) and saves them via PUT /reports/{id}/tags', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue({ data: DETAIL })
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { ...DETAIL, tags: ['apt'] } })
+
+    const result = await createReport({ title: 'T', origin: 'internal', tlp: 'amber', tags: ['apt'] })
+
+    expect(post).toHaveBeenCalledWith('/reports', { title: 'T', origin: 'internal', tlp: 'amber' })
+    expect(put).toHaveBeenCalledWith('/reports/rep-1/tags', { tags: ['apt'] })
+    expect(result.tags).toEqual(['apt'])
+  })
+
+  it('does not PUT tags on create when none were chosen', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue({ data: DETAIL })
+    const put = vi.spyOn(api, 'put')
+    await createReport({ title: 'T', origin: 'internal', tags: [] })
+    expect(put).not.toHaveBeenCalled()
+  })
+
+  it('omits tags from PATCH and replaces them via PUT when provided', async () => {
+    const patch = vi.spyOn(api, 'patch').mockResolvedValue({ data: DETAIL })
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ data: DETAIL })
+
+    await updateReport('rep-1', { tlp: null, tlp_change_reason: 'public now', tags: [] })
+
+    expect(patch).toHaveBeenCalledWith('/reports/rep-1', { tlp: null, tlp_change_reason: 'public now' })
+    expect(put).toHaveBeenCalledWith('/reports/rep-1/tags', { tags: [] })
+  })
+
+  it('does not PUT tags on update when tags were not sent (non-admin)', async () => {
+    vi.spyOn(api, 'patch').mockResolvedValue({ data: DETAIL })
+    const put = vi.spyOn(api, 'put')
+    await updateReport('rep-1', { title: 'New' })
+    expect(put).not.toHaveBeenCalled()
   })
 })

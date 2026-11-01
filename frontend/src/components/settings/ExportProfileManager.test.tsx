@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { AxiosError, type AxiosResponse } from 'axios'
 import { ExportProfileManager } from './ExportProfileManager'
 import type { ExportProfile } from '@/types/exportProfile'
+import { ZERO_EXCLUDED_BY_TLP } from '@/test/fixtures/tlp'
 
 // ── Mock hooks and contexts ───────────────────────────────────────────────────
 
@@ -16,6 +17,8 @@ const PROFILES: ExportProfile[] = [
     confidence_min: 80,
     max_age_days: 30,
     feed_id: 'feed-1',
+    destination: 'internal',
+    tags: [],
     created_at: '2026-10-01T00:00:00Z',
     updated_at: '2026-10-01T00:00:00Z',
   },
@@ -28,6 +31,8 @@ const PROFILES: ExportProfile[] = [
     confidence_min: 0,
     max_age_days: null,
     feed_id: null,
+    destination: 'internal',
+    tags: [],
     created_at: '2026-10-02T00:00:00Z',
     updated_at: '2026-10-02T00:00:00Z',
   },
@@ -60,6 +65,10 @@ vi.mock('@/hooks/useFeeds', () => ({
   useFeeds: () => mockUseFeeds(),
 }))
 
+vi.mock('@/hooks/useTags', () => ({
+  useTags: () => ({ data: [] }),
+}))
+
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => mockAuth,
 }))
@@ -75,8 +84,19 @@ function httpError(status: number, detail: unknown) {
   } as AxiosResponse)
 }
 
-function previewResult(data: { count: number; excluded_allowlisted: number; sample: string[] }) {
-  return { data, isLoading: false, isFetching: false, error: null, refetch: mockRefetch }
+function previewResult(data: {
+  count: number
+  excluded_allowlisted: number
+  excluded_by_tlp?: typeof ZERO_EXCLUDED_BY_TLP
+  sample: string[]
+}) {
+  return {
+    data: { excluded_by_tlp: ZERO_EXCLUDED_BY_TLP, ...data },
+    isLoading: false,
+    isFetching: false,
+    error: null,
+    refetch: mockRefetch,
+  }
 }
 
 function renderLoaded(profiles: ExportProfile[] = PROFILES) {
@@ -234,6 +254,20 @@ describe('ExportProfileManager — preview', () => {
     expect(screen.getByText('No indicators currently match this profile.')).toBeTruthy()
   })
 
+  it('shows TLP exclusion lines in preview', () => {
+    mockUsePreview.mockReturnValue(
+      previewResult({
+        count: 10,
+        excluded_allowlisted: 0,
+        excluded_by_tlp: { ...ZERO_EXCLUDED_BY_TLP, red: 2 },
+        sample: [],
+      }),
+    )
+    renderLoaded()
+    fireEvent.click(screen.getByRole('button', { name: 'Preview Firewall IPs' }))
+    expect(screen.getByText(/2 indicators excluded: TLP:RED never leaves the application/)).toBeTruthy()
+  })
+
   it('shows a preview error', () => {
     mockUsePreview.mockReturnValue({
       data: undefined,
@@ -264,6 +298,8 @@ describe('ExportProfileManager — create and edit', () => {
       confidence_min: 70,
       max_age_days: null,
       feed_id: null,
+      destination: 'internal',
+      tags: [],
     })
 
     act(() => mockCreate.mock.calls[0][1].onSuccess())
@@ -291,6 +327,8 @@ describe('ExportProfileManager — create and edit', () => {
       confidence_min: 55,
       max_age_days: 14,
       feed_id: 'feed-2',
+      destination: 'internal',
+      tags: [],
     })
   })
 
@@ -355,6 +393,8 @@ describe('ExportProfileManager — create and edit', () => {
         confidence_min: 80,
         max_age_days: null,
         feed_id: null,
+        destination: 'internal',
+        tags: [],
       },
     })
 

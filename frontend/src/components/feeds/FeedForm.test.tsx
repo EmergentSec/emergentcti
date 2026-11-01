@@ -2,6 +2,7 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { FeedForm } from './FeedForm'
 import type { Feed } from '@/types/feed'
+import { FEED_TLP_FIELD } from '@/test/fixtures/feed'
 
 afterEach(cleanup)
 
@@ -21,6 +22,7 @@ const baseEditFeed: Feed = {
   auth_supported: true,
   auth_needs_repair: false,
   default_confidence: 85,
+  ...FEED_TLP_FIELD,
   last_run_at: null,
   observable_count: 0,
   latest_run: null,

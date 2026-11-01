@@ -12,6 +12,10 @@ vi.mock('@/hooks/useFeeds', () => ({
   }),
 }))
 
+vi.mock('@/hooks/useTags', () => ({
+  useTags: () => ({ data: [] }),
+}))
+
 afterEach(cleanup)
 
 const defaultFilters: Filters = {

@@ -1,9 +1,16 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field, model_validator
+from typing import Annotated
 
-from cti.models.feed import FeedType, FeedRunStatus
+from pydantic import BaseModel, Field, StringConstraints, model_validator
+
+from cti.models.feed import FeedRunStatus, FeedType
+from cti.models.tlp import Tlp
+
+TlpChangeReason = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+]
 
 _FEED_UPDATE_NON_NULLABLE = frozenset(
     {"name", "url", "feed_type", "enabled", "default_confidence", "config"}
@@ -36,6 +43,7 @@ class FeedResponse(BaseModel):
     auth_supported: bool = False
     auth_needs_repair: bool = False
     default_confidence: int
+    tlp: Tlp | None = None
     last_run_at: datetime | None
     observable_count: int = 0
     latest_run: FeedRunResponse | None = None
@@ -55,6 +63,7 @@ class FeedCreate(BaseModel):
     enabled: bool = True
     auth_config: dict | None = None  # Will be encrypted before storage
     default_confidence: int = Field(default=50, ge=0, le=100)
+    tlp: Tlp | None = None
 
 
 class FeedUpdate(BaseModel):
@@ -67,6 +76,9 @@ class FeedUpdate(BaseModel):
     enabled: bool | None = None
     auth_config: dict | None = None
     default_confidence: int | None = Field(default=None, ge=0, le=100)
+    # Explicit null = Unspecified. Loosening requires tlp_change_reason.
+    tlp: Tlp | None = None
+    tlp_change_reason: TlpChangeReason | None = None
 
     @model_validator(mode="before")
     @classmethod

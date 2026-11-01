@@ -1,15 +1,46 @@
 import uuid
 from datetime import datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, StringConstraints
 
 from cti.models.observable import ObservableType
+from cti.models.tlp import Tlp
+
+# Reasons are trimmed; 1-500 characters remain.
+TlpReason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
 
 class ObservableCreate(BaseModel):
     type: ObservableType
     value: str = Field(..., min_length=1, max_length=2048)
     confidence_score: int = Field(default=75, ge=0, le=100)
+    # Manual marking (#15). ``tlp`` is canonical; ``manual_tlp`` is accepted too.
+    tlp: Tlp | None = Field(default=None, validation_alias=AliasChoices("tlp", "manual_tlp"))
+
+
+class TlpOverrideRequest(BaseModel):
+    # Required and never null: an override is always one of the five markings.
+    tlp: Tlp
+    reason: TlpReason
+
+
+class TlpOverrideResponse(BaseModel):
+    tlp: Tlp
+    reason: str
+    set_at: datetime
+    set_by: str | None
+
+
+class TlpSource(BaseModel):
+    kind: Literal["feed", "report", "manual"]
+    id: uuid.UUID | None
+    name: str
+    tlp: Tlp | None
+
+
+class TagsUpdate(BaseModel):
+    tags: list[Annotated[str, StringConstraints(max_length=200)]] = Field(max_length=100)
 
 
 class ObservableSourceResponse(BaseModel):
@@ -47,6 +78,12 @@ class ObservableResponse(BaseModel):
     # Derived at read time from the current allowlist; never persisted.
     allowlisted: bool = False
     allowlist_entry_ids: list[uuid.UUID] = []
+    # TLP and tags (#15). effective_tlp is derived at read time; null = Unspecified.
+    tags: list[str] = []
+    manual_tlp: Tlp | None = None
+    effective_tlp: Tlp | None = None
+    tlp_sources: list[TlpSource] = []
+    tlp_override: TlpOverrideResponse | None = None
     created_at: datetime
     updated_at: datetime
 

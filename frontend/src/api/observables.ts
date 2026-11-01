@@ -1,15 +1,18 @@
 import api from './client'
-import type { Observable, ObservableListResponse, ObservableFilters, ObservableCreate } from '@/types/observable'
+import { buildListParams } from './listParams'
+import type {
+  Observable,
+  ObservableListResponse,
+  ObservableFilters,
+  ObservableCreate,
+  ObservableTagsUpdate,
+  TlpOverrideRequest,
+} from '@/types/observable'
 
 export async function getObservables(params: ObservableFilters = {}): Promise<ObservableListResponse> {
-  // Strip empty/undefined params before sending
-  const cleanParams: Record<string, unknown> = {}
-  for (const [key, val] of Object.entries(params)) {
-    if (val !== undefined && val !== '' && val !== null) {
-      cleanParams[key] = val
-    }
-  }
-  const { data } = await api.get<ObservableListResponse>('/observables', { params: cleanParams })
+  const { data } = await api.get<ObservableListResponse>('/observables', {
+    params: buildListParams(params as Record<string, unknown>),
+  })
   return data
 }
 
@@ -36,5 +39,20 @@ export async function setConfidenceOverride(id: string, confidence: number): Pro
 
 export async function clearConfidenceOverride(id: string): Promise<Observable> {
   const { data } = await api.delete<Observable>(`/observables/${id}/confidence-override`)
+  return data
+}
+
+export async function setTlpOverride(id: string, body: TlpOverrideRequest): Promise<Observable> {
+  const { data } = await api.put<Observable>(`/observables/${id}/tlp-override`, body)
+  return data
+}
+
+export async function clearTlpOverride(id: string): Promise<Observable> {
+  const { data } = await api.delete<Observable>(`/observables/${id}/tlp-override`)
+  return data
+}
+
+export async function setObservableTags(id: string, body: ObservableTagsUpdate): Promise<Observable> {
+  const { data } = await api.put<Observable>(`/observables/${id}/tags`, body)
   return data
 }

@@ -16,6 +16,7 @@ from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
 from cti.core.redis import invalidate_observable_caches
 from cti.feeds.defaults import DEFAULT_FEEDS
+from cti.models.tlp import Tlp
 from cti.schemas.feed import FeedCreate, FeedResponse, FeedRunResponse, FeedUpdate
 from cti.services import feed_service
 from cti.services.feed_auth import (
@@ -23,6 +24,7 @@ from cti.services.feed_auth import (
     stored_auth_needs_repair,
     try_decrypt_stored_auth,
 )
+from cti.services.tlp import TlpDowngradeReasonRequiredError, hide_red_for
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,7 @@ def _feed_to_response(feed, observable_count: int = 0) -> FeedResponse:
         auth_supported=feed.is_preconfigured and feed.name in _AUTH_FEED_NAMES,
         auth_needs_repair=_feed_auth_needs_repair(feed),
         default_confidence=feed.default_confidence,
+        tlp=feed.tlp,
         last_run_at=feed.last_run_at,
         observable_count=observable_count,
         latest_run=latest_run,
@@ -133,18 +136,35 @@ async def update_feed(
     feed_id: uuid.UUID,
     data: FeedUpdate,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(require_admin),
 ) -> FeedResponse:
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
+    if (
+        hide_red_for(auth)
+        and feed.tlp == Tlp.RED.value
+        and "tlp" in data.model_fields_set
+        and data.tlp is not Tlp.RED
+    ):
+        # Declassifying a RED feed would make its observables exportable.
+        raise HTTPException(
+            status_code=403,
+            detail="Declassifying a TLP:RED feed requires an interactive admin session",
+        )
 
     try:
         feed = await feed_service.update_feed(db, feed, data.model_dump(exclude_unset=True))
     except AuthConfigValidationError as e:
         raise HTTPException(status_code=422, detail=e.message) from None
+    except TlpDowngradeReasonRequiredError as e:
+        # Raised before any field is applied, so nothing needs rolling back.
+        raise HTTPException(status_code=422, detail=str(e)) from None
     await db.commit()
     await db.refresh(feed)
+    if "tlp" in data.model_fields_set:
+        # The feed marking feeds every contributed observable's effective marking.
+        await invalidate_observable_caches()
 
     # Sync scheduler after feed update
     from cti.services.scheduler import sync_feed_jobs
@@ -159,11 +179,17 @@ async def update_feed(
 async def delete_feed(
     feed_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(require_admin),
 ) -> None:
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
+    if hide_red_for(auth) and feed.tlp == Tlp.RED.value:
+        # Removing the feed drops its RED marking from every contributed observable.
+        raise HTTPException(
+            status_code=403,
+            detail="Deleting a TLP:RED feed requires an interactive admin session",
+        )
 
     try:
         deleted = await feed_service.delete_feed(db, feed)

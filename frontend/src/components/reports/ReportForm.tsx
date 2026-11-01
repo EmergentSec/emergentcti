@@ -3,7 +3,15 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
+import { TagEditor } from '@/components/common/TagEditor'
+import { TlpDowngradeReasonDialog } from '@/components/common/TlpDowngradeReasonDialog'
 import type { ContentFormat, ReportCreate, ReportDetail, ReportOrigin } from '@/types/report'
+import {
+  TLP_SELECT_OPTIONS,
+  formatTlpSelectValue,
+  needsTlpChangeReason,
+  parseTlpSelectValue,
+} from '@/lib/tlp'
 import { cn } from '@/lib/utils'
 
 interface ReportFormProps {
@@ -11,6 +19,7 @@ interface ReportFormProps {
   onSubmit: (data: ReportCreate) => void
   onCancel: () => void
   isLoading?: boolean
+  isAdmin?: boolean
 }
 
 const originOptions = [
@@ -38,7 +47,7 @@ function fromDatetimeLocal(value: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
 
-export function ReportForm({ initial, onSubmit, onCancel, isLoading }: ReportFormProps) {
+export function ReportForm({ initial, onSubmit, onCancel, isLoading, isAdmin }: ReportFormProps) {
   const [title, setTitle] = useState('')
   const [origin, setOrigin] = useState<ReportOrigin>('provider')
   const [sourceName, setSourceName] = useState('')
@@ -52,6 +61,10 @@ export function ReportForm({ initial, onSubmit, onCancel, isLoading }: ReportFor
   const [aiModel, setAiModel] = useState('')
   const [aiGeneratedAt, setAiGeneratedAt] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [tlpValue, setTlpValue] = useState('')
+  const [tags, setTags] = useState<string[]>([])
+  const [showDowngradeDialog, setShowDowngradeDialog] = useState(false)
+  const [pendingPayload, setPendingPayload] = useState<ReportCreate | null>(null)
 
   useEffect(() => {
     if (!initial) return
@@ -67,6 +80,8 @@ export function ReportForm({ initial, onSubmit, onCancel, isLoading }: ReportFor
     setAiProvider(initial.ai_provider ?? '')
     setAiModel(initial.ai_model ?? '')
     setAiGeneratedAt(toDatetimeLocal(initial.ai_generated_at))
+    setTlpValue(formatTlpSelectValue(initial.tlp))
+    setTags(initial.tags ?? [])
   }, [initial])
 
   const validate = (): boolean => {
@@ -77,10 +92,7 @@ export function ReportForm({ initial, onSubmit, onCancel, isLoading }: ReportFor
     return Object.keys(next).length === 0
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!validate()) return
-
+  const buildPayload = (): ReportCreate => {
     const payload: ReportCreate = {
       title: title.trim(),
       origin,
@@ -91,6 +103,7 @@ export function ReportForm({ initial, onSubmit, onCancel, isLoading }: ReportFor
       content: content.trim() || null,
       content_format: contentFormat,
       is_ai_generated: isAiGenerated,
+      tlp: parseTlpSelectValue(tlpValue),
     }
 
     if (isAiGenerated) {
@@ -99,10 +112,39 @@ export function ReportForm({ initial, onSubmit, onCancel, isLoading }: ReportFor
       payload.ai_generated_at = fromDatetimeLocal(aiGeneratedAt)
     }
 
+    if (isAdmin) {
+      payload.tags = tags
+    }
+
+    return payload
+  }
+
+  const submitPayload = (payload: ReportCreate, reason?: string) => {
+    if (reason) payload.tlp_change_reason = reason
     onSubmit(payload)
   }
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!validate()) return
+
+    const payload = buildPayload()
+    if (initial && needsTlpChangeReason(initial.tlp, payload.tlp ?? null)) {
+      setPendingPayload(payload)
+      setShowDowngradeDialog(true)
+      return
+    }
+    submitPayload(payload)
+  }
+
+  const handleDowngradeConfirm = (reason: string) => {
+    if (pendingPayload) submitPayload(pendingPayload, reason)
+    setPendingPayload(null)
+    setShowDowngradeDialog(false)
+  }
+
   return (
+    <>
     <form onSubmit={handleSubmit} className="space-y-4">
       <Input
         label="Title"
@@ -147,6 +189,28 @@ export function ReportForm({ initial, onSubmit, onCancel, isLoading }: ReportFor
         onChange={(e) => setSourceUrl(e.target.value)}
         placeholder="https://…"
       />
+
+      <Select
+        label="TLP marking"
+        options={TLP_SELECT_OPTIONS}
+        value={tlpValue}
+        onChange={(e) => setTlpValue(e.target.value)}
+      />
+
+      {isAdmin && (
+        <div className="space-y-2">
+          <span className="text-sm font-medium text-foreground">Tags</span>
+          <TagEditor
+            tags={tags}
+            onChange={setTags}
+            onSave={() => {}}
+            showSaveButton={false}
+          />
+          <p className="text-xs text-muted-foreground">
+            Tags are saved with the report when you submit this form.
+          </p>
+        </div>
+      )}
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -210,5 +274,15 @@ export function ReportForm({ initial, onSubmit, onCancel, isLoading }: ReportFor
         </Button>
       </div>
     </form>
+      <TlpDowngradeReasonDialog
+        open={showDowngradeDialog}
+        onClose={() => {
+          setShowDowngradeDialog(false)
+          setPendingPayload(null)
+        }}
+        isLoading={isLoading}
+        onConfirm={handleDowngradeConfirm}
+      />
+    </>
   )
 }

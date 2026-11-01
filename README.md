@@ -44,6 +44,7 @@ docker compose logs api | grep -A1 "INITIAL API KEY"
 - **Blocklist Export** — Plain-text exports for direct firewall integration (pfSense, PAN EDLs, etc.) and full JSON export
 - **Reversible Allowlist** — Typed exact values, IPv4/IPv6 CIDRs, and domain suffixes stay visible as allowlisted but are excluded from every export
 - **Saved Export Profiles** — Shared text/JSON exports with type, confidence, freshness, and feed filters; preview and stable authenticated download URLs
+- **Tags and TLP markings** — Flat tags on observables and reports; FIRST TLP 2.0 markings on feeds, reports and observables, enforced in every export (see [Tags and TLP](#tags-and-tlp))
 - **Retention Enforcement** — Daily, bounded deletion of stale observables and their sources (180 days by default; `0` disables deletion)
 - **Confidence Scoring** — Dual-mode scoring with native feed scores and linear time decay; native-vs-decayed surfaced per observable
 - **Observable Types** — IP addresses, domains, URLs, file hashes, emails, command lines
@@ -62,8 +63,11 @@ Endpoints authenticate with an `X-API-Key` header (programmatic access) **or** a
 | `GET /api/v1/export/json` · `GET /api/v1/export/text` | JSON / plain-text export |
 | `GET /api/v1/allowlist` | List allowlist policies; POST and DELETE /{id} require admin |
 | `GET /api/v1/export/profiles` | Saved export profiles; POST, PUT and DELETE require admin |
-| `GET /api/v1/export/profiles/{id}/preview` | Eligible count, allowlisted exclusion count, and up to 20 sample values |
-| `GET /api/v1/export/profiles/{id}/download` | Download with saved filters and current allowlist |
+| `GET /api/v1/export/profiles/{id}/preview` | Eligible count, allowlisted and TLP exclusion counts, and up to 20 sample values |
+| `GET /api/v1/export/profiles/{id}/download` | Download with saved filters, current allowlist and TLP policy |
+| `PUT /api/v1/observables/{id}/tlp-override` · `DELETE` | Reclassify an observable's TLP marking, reason required (admin) |
+| `PUT /api/v1/observables/{id}/tags` · `PUT /api/v1/reports/{id}/tags` | Replace an item's tags (admin) |
+| `GET /api/v1/tags` | Tags with usage counts; POST and DELETE /{id} require admin |
 | `GET /api/v1/stats` | Dashboard stats |
 | `GET /api/v1/settings/api-keys` · `/users` · `/config` | API keys, users, read-only config (admin) |
 
@@ -88,7 +92,63 @@ Existing installations must apply the new schema before running the updated API:
 uv run alembic upgrade head
 ```
 
-Tags, TLP markings, research exports including allowlisted indicators, STIX/TAXII/MISP, audit logging, and runtime policy configuration are not included in this slice.
+Research exports including allowlisted indicators, STIX/TAXII/MISP, audit logging, and runtime policy configuration are not included in this slice.
+
+## Tags and TLP
+
+**Tags** are flat labels on observables and reports (no hierarchy, no
+collections). Names are normalized: trimmed, whitespace runs become `-`, and
+lowercased; 1–50 characters from `a-z 0-9 . _ : / -`. Admins assign tags; anyone
+signed in can filter by them (`?tag=a&tag=b` matches any listed tag), including
+on ad-hoc exports and in export profiles. A tag used by an export profile cannot
+be deleted until the profile stops using it.
+
+**TLP markings** follow FIRST TLP 2.0 and are a *sharing policy*. They are not
+access control: everyone who can sign in can still see every observable,
+report and marking in the app. Markings are set on feeds (admin; applies to
+everything the feed contributes), on reports (the attachment inherits it), and
+on manually created observables. An observable's effective marking is the
+**most restrictive** of its inputs, computed on every read and export. An
+Unspecified input lowers CLEAR/GREEN to Unspecified, because nobody said it was
+shareable, but AMBER and above still win. Imports, feed runs and new report
+links cannot loosen a marking. Only an admin can: by reclassifying the
+observable (an override that needs a reason), or by loosening a feed's or
+report's marking, which also needs a reason (`tlp_change_reason`) and is logged.
+
+What each export destination allows:
+
+| Effective marking | `internal` (ad-hoc exports, internal profiles) | `community` profiles | `public` profiles |
+|---|---|---|---|
+| Unspecified | yes | no | no |
+| TLP:CLEAR | yes | yes | yes |
+| TLP:GREEN | yes | yes | no |
+| TLP:AMBER | yes | no | no |
+| TLP:AMBER+STRICT | yes | no | no |
+| TLP:RED | **never** | **never** | **never** |
+
+- **Unspecified is internal-only.** It is exported to your own controls, never
+  to community or public destinations.
+- **TLP:RED never leaves the application** through any export, profile download
+  or API key, including when a blocklist comes from the cache. For API-key
+  callers RED observables and reports do not exist: lists leave them out,
+  detail, attachment and edit endpoints return `404`, and reports drop linked
+  RED observables. Report extraction previews RED matches as new values, and
+  import skips them (`skipped`, reason `not_importable`) without changing them.
+  An API key cannot change a RED feed's marking. Signed-in users still see and can open everything in the
+  app; declassifying a RED item needs an interactive admin session. Every
+  attachment response carries `X-TLP-Marking`.
+- TLP and the allowlist are independent: a value is exported only if it passes
+  both. Ad-hoc exports report withheld rows in `X-TLP-Excluded`, and a profile
+  preview lists them per marking (`excluded_by_tlp`) before you change its
+  destination.
+- No feature sends instance data to an external AI provider today. Any future
+  one must use the code-only `external_ai` gate, which allows CLEAR and GREEN.
+
+**Rollout:** the migration leaves every marking Unspecified and every existing
+export profile `internal`. Because `internal` allows Unspecified, **all existing
+exports return exactly what they returned before** until an admin marks
+something RED or switches a profile to `community` or `public`. Downgrading the
+schema (`alembic downgrade 008`) removes markings and tags.
 
 ## Reports & attachments storage/backup
 

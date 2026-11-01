@@ -1,4 +1,5 @@
 import api from './client'
+import { buildListParams } from './listParams'
 import type {
   ReportAttachment,
   ReportCreate,
@@ -11,14 +12,8 @@ import type {
 } from '@/types/report'
 import type { ExtractionPreview, ImportRequest, ImportResult } from '@/types/reportIocExtraction'
 
-function cleanParams(params: ReportFilters): Record<string, unknown> {
-  const clean: Record<string, unknown> = {}
-  for (const [key, val] of Object.entries(params)) {
-    if (val !== undefined && val !== '' && val !== null) {
-      clean[key] = val
-    }
-  }
-  return clean
+function cleanParams(params: ReportFilters): Record<string, unknown> | URLSearchParams {
+  return buildListParams(params as Record<string, unknown>)
 }
 
 export async function getReports(params: ReportFilters = {}): Promise<ReportListResponse> {
@@ -36,13 +31,22 @@ export async function getReport(id: string): Promise<ReportDetail> {
   return data
 }
 
+/**
+ * The backend's report create/patch schemas have no `tags` field (unknown keys
+ * are ignored), so tags are saved with the dedicated admin-only
+ * `PUT /reports/{id}/tags` call after the report itself is written.
+ */
 export async function createReport(payload: ReportCreate): Promise<ReportDetail> {
-  const { data } = await api.post<ReportDetail>('/reports', payload)
+  const { tags, ...body } = payload
+  const { data } = await api.post<ReportDetail>('/reports', body)
+  if (tags && tags.length > 0) return setReportTags(data.id, tags)
   return data
 }
 
 export async function updateReport(id: string, payload: ReportUpdate): Promise<ReportDetail> {
-  const { data } = await api.patch<ReportDetail>(`/reports/${id}`, payload)
+  const { tags, ...body } = payload
+  const { data } = await api.patch<ReportDetail>(`/reports/${id}`, body)
+  if (tags !== undefined) return setReportTags(id, tags)
   return data
 }
 
@@ -97,5 +101,10 @@ export async function importReportIndicators(
   payload: ImportRequest,
 ): Promise<ImportResult> {
   const { data } = await api.post<ImportResult>(`/reports/${reportId}/import`, payload)
+  return data
+}
+
+export async function setReportTags(reportId: string, tags: string[]): Promise<ReportDetail> {
+  const { data } = await api.put<ReportDetail>(`/reports/${reportId}/tags`, { tags })
   return data
 }

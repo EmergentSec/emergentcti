@@ -1,7 +1,9 @@
 """Blocklist, JSON/text export, and saved export profile endpoints.
 
-Every export applies the *current* allowlist: matching observables stay in
-the database but are never emitted.
+Every export applies the *current* allowlist and the *current* TLP policy:
+matching observables stay in the database but are never emitted. Ad-hoc
+exports use the ``internal`` destination; profiles use their own. TLP:RED
+never leaves through any export.
 """
 
 from __future__ import annotations
@@ -10,17 +12,19 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cti.api.v1.filters import parse_tag_names
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
 from cti.core.redis import cache_get, cache_set
-from cti.models.export_profile import ExportFormat, ExportProfile
+from cti.models.export_profile import ExportDestination, ExportFormat, ExportProfile
 from cti.models.observable import Observable, ObservableType
 from cti.schemas.export import (
     MAX_AGE_DAYS_LIMIT,
+    ExcludedByTlp,
     ExportObservable,
     ExportProfileCreate,
     ExportProfilePreview,
@@ -28,12 +32,25 @@ from cti.schemas.export import (
     ExportProfileUpdate,
     JsonExportResponse,
 )
-from cti.services import allowlist_service, export_profile_service, observable_service
+from cti.services import (
+    allowlist_service,
+    export_profile_service,
+    observable_service,
+    tag_service,
+)
+from cti.services.tlp import effective_tlp_map
 
 router = APIRouter()
 
+# Ad-hoc exports go to this organization's own controls (firewalls, SIEM).
+_AD_HOC_DESTINATION = "internal"
+_TAG_QUERY = Query(default=None, description="Match ANY listed tag (repeatable)")
 
-def _json_export_response(observables: list[Observable], filters: dict) -> JsonExportResponse:
+
+async def _json_export_response(
+    db: AsyncSession, observables: list[Observable], filters: dict
+) -> JsonExportResponse:
+    markings = await effective_tlp_map(db, (obs.id for obs in observables))
     return JsonExportResponse(
         exported_at=datetime.now(UTC),
         count=len(observables),
@@ -45,6 +62,8 @@ def _json_export_response(observables: list[Observable], filters: dict) -> JsonE
                 confidence_score=obs.confidence_score,
                 last_seen=obs.last_seen,
                 sources=[s.feed.name for s in obs.sources if s.feed],
+                tlp=markings.get(obs.id),
+                tags=sorted(tag.name for tag in obs.tags),
             )
             for obs in observables
         ],
@@ -59,15 +78,20 @@ async def get_blocklist(
     confidence_min: int = Query(default=70, ge=0, le=100),
     max_age_days: int | None = Query(default=None, ge=1, le=MAX_AGE_DAYS_LIMIT),
     feed_id: uuid.UUID | None = None,
+    tag: list[str] | None = _TAG_QUERY,
 ) -> PlainTextResponse:
     """Plain text blocklist — one IOC per line. For FW/EDL integration."""
+    tags = parse_tag_names(tag)
     cache_key = f"blocklist:{obs_type.value}:{confidence_min}:{max_age_days}:{feed_id}"
+    if tags:
+        cache_key += ":tags=" + ",".join(sorted(tags))
 
-    # The cache only ever holds the pre-policy list. The current allowlist is
-    # applied on every request, hit or miss, so a policy change is never
-    # masked by a cached blocklist (including entries cached before the
-    # allowlist existed). Only line-safe values are cached or served; lines
-    # from an older cache entry are re-checked in case it predates that rule.
+    # The cache only ever holds the pre-policy list. The current allowlist and
+    # TLP markings are applied on every request, hit or miss, so a policy or
+    # marking change is never masked by a cached blocklist (including entries
+    # cached before the allowlist or TLP existed). Only line-safe values are
+    # cached or served; lines from an older cache entry are re-checked in case
+    # it predates that rule.
     cached = await cache_get(cache_key)
     if cached is not None:
         candidates = [
@@ -81,23 +105,33 @@ async def get_blocklist(
             confidence_min=confidence_min,
             max_age_days=max_age_days,
             feed_id=feed_id,
+            tags=tags,
             apply_allowlist=False,
         )
         await cache_set(cache_key, "\n".join(candidates), ttl_seconds=300)
         cache_status = "MISS"
 
-    allowlist = await allowlist_service.load_matcher(db)
-    values = allowlist_service.filter_values(allowlist, obs_type, candidates)
+    values, tlp_excluded = await observable_service.apply_blocklist_policy(
+        db,
+        candidates,
+        obs_type=obs_type,
+        destination=_AD_HOC_DESTINATION,
+    )
 
     return PlainTextResponse(
         content="\n".join(values),
         media_type="text/plain",
-        headers={"X-Observable-Count": str(len(values)), "X-Cache": cache_status},
+        headers={
+            "X-Observable-Count": str(len(values)),
+            "X-Cache": cache_status,
+            "X-TLP-Excluded": str(tlp_excluded),
+        },
     )
 
 
 @router.get("/json")
 async def export_json(
+    response: Response,
     db: AsyncSession = Depends(get_db),
     _auth: AuthSubject = Depends(get_current_auth),
     type: ObservableType | None = None,
@@ -105,8 +139,11 @@ async def export_json(
     max_age_days: int | None = Query(default=None, ge=1, le=MAX_AGE_DAYS_LIMIT),
     feed_id: uuid.UUID | None = None,
     limit: int = Query(default=10000, ge=1, le=100000),
+    tag: list[str] | None = _TAG_QUERY,
 ) -> JsonExportResponse:
     """JSON export with filters."""
+    tags = parse_tag_names(tag)
+    allowlist = await allowlist_service.load_matcher(db)
     observables = await observable_service.get_export_json(
         db,
         obs_type=type,
@@ -114,7 +151,21 @@ async def export_json(
         max_age_days=max_age_days,
         feed_id=feed_id,
         limit=limit,
+        tags=tags,
+        destination=_AD_HOC_DESTINATION,
+        allowlist=allowlist,
     )
+    excluded = await observable_service.count_tlp_excluded(
+        db,
+        obs_type=type,
+        confidence_min=confidence_min,
+        max_age_days=max_age_days,
+        feed_id=feed_id,
+        tags=tags,
+        destination=_AD_HOC_DESTINATION,
+        allowlist=allowlist,
+    )
+    response.headers["X-TLP-Excluded"] = str(sum(excluded.values()))
 
     filters: dict = {}
     if type:
@@ -123,8 +174,10 @@ async def export_json(
         filters["confidence_min"] = confidence_min
     if max_age_days:
         filters["max_age_days"] = max_age_days
+    if tags:
+        filters["tags"] = tags
 
-    return _json_export_response(observables, filters)
+    return await _json_export_response(db, observables, filters)
 
 
 @router.get("/text", response_class=PlainTextResponse)
@@ -133,18 +186,24 @@ async def export_text(
     _auth: AuthSubject = Depends(get_current_auth),
     confidence_min: int = Query(default=0, ge=0, le=100),
     max_age_days: int | None = Query(default=None, ge=1, le=MAX_AGE_DAYS_LIMIT),
+    tag: list[str] | None = _TAG_QUERY,
 ) -> PlainTextResponse:
     """Plain text export — all types mixed, one per line. Never truncated."""
-    values, _excluded = await observable_service.get_export_values(
+    values, _excluded, tlp_excluded = await observable_service.get_export_values(
         db,
         confidence_min=confidence_min,
         max_age_days=max_age_days,
+        tags=parse_tag_names(tag),
+        destination=_AD_HOC_DESTINATION,
         line_safe=True,
     )
     return PlainTextResponse(
         content="\n".join(values),
         media_type="text/plain",
-        headers={"X-Observable-Count": str(len(values))},
+        headers={
+            "X-Observable-Count": str(len(values)),
+            "X-TLP-Excluded": str(sum(tlp_excluded.values())),
+        },
     )
 
 
@@ -173,6 +232,10 @@ def _unknown_feed() -> HTTPException:
     return HTTPException(status_code=422, detail="Feed not found")
 
 
+def _bad_tags(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=422, detail=str(exc))
+
+
 @router.get("/profiles", response_model=list[ExportProfileResponse])
 async def list_export_profiles(
     db: AsyncSession = Depends(get_db),
@@ -194,6 +257,8 @@ async def create_export_profile(
         raise _duplicate_name() from None
     except export_profile_service.ProfileFeedNotFoundError:
         raise _unknown_feed() from None
+    except (tag_service.TagValidationError, tag_service.TagNotFoundError) as exc:
+        raise _bad_tags(exc) from None
     await db.commit()
     return ExportProfileResponse.model_validate(profile)
 
@@ -223,6 +288,8 @@ async def update_export_profile(
         raise _duplicate_name() from None
     except export_profile_service.ProfileFeedNotFoundError:
         raise _unknown_feed() from None
+    except (tag_service.TagValidationError, tag_service.TagNotFoundError) as exc:
+        raise _bad_tags(exc) from None
     await db.commit()
     return ExportProfileResponse.model_validate(profile)
 
@@ -246,10 +313,11 @@ async def preview_export_profile(
 ) -> ExportProfilePreview:
     """Count what the profile would export right now, with a small sample."""
     profile = await _get_profile_or_404(db, profile_id)
-    values, excluded = await export_profile_service.get_profile_values(db, profile)
+    values, excluded, by_tlp = await export_profile_service.get_profile_values(db, profile)
     return ExportProfilePreview(
         count=len(values),
         excluded_allowlisted=excluded,
+        excluded_by_tlp=ExcludedByTlp.model_validate(by_tlp),
         sample=values[: export_profile_service.PREVIEW_SAMPLE_SIZE],
     )
 
@@ -267,17 +335,20 @@ async def download_export_profile(
     """
     profile = await _get_profile_or_404(db, profile_id)
 
+    tags = export_profile_service.profile_tag_names(profile)
     if profile.format is ExportFormat.TEXT:
-        values, _excluded = await export_profile_service.get_profile_values(db, profile)
+        values, _excluded, by_tlp = await export_profile_service.get_profile_values(db, profile)
         return PlainTextResponse(
             content="\n".join(values),
             media_type="text/plain",
             headers={
                 "X-Observable-Count": str(len(values)),
+                "X-TLP-Excluded": str(sum(by_tlp.values())),
                 "Content-Disposition": f'attachment; filename="{_profile_filename(profile)}"',
             },
         )
 
+    allowlist = await allowlist_service.load_matcher(db)
     observables = await observable_service.get_export_json(
         db,
         obs_type=profile.type,
@@ -285,12 +356,20 @@ async def download_export_profile(
         max_age_days=profile.max_age_days,
         feed_id=profile.feed_id,
         limit=None,
+        tags=tags,
+        destination=profile.destination.value,
+        allowlist=allowlist,
     )
     filters: dict = {"profile": profile.name, "confidence_min": profile.confidence_min}
+    # Only non-default additions, so pre-#15 profiles produce identical output.
+    if profile.destination is not ExportDestination.INTERNAL:
+        filters["destination"] = profile.destination.value
     if profile.type:
         filters["type"] = profile.type.value
     if profile.max_age_days:
         filters["max_age_days"] = profile.max_age_days
     if profile.feed_id:
         filters["feed_id"] = str(profile.feed_id)
-    return _json_export_response(observables, filters)
+    if tags:
+        filters["tags"] = tags
+    return await _json_export_response(db, observables, filters)

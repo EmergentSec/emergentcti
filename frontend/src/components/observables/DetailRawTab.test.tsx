@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { DetailRawTab } from './DetailRawTab'
 import type { Observable } from '@/types/observable'
+import { EMPTY_TLP_OBSERVABLE_FIELDS } from '@/test/fixtures/tlp'
 
 afterEach(cleanup)
 
@@ -18,6 +19,7 @@ const OBS: Observable = {
   sources: [],
   allowlisted: false,
   allowlist_entry_ids: [],
+  ...EMPTY_TLP_OBSERVABLE_FIELDS,
   created_at: '2026-06-27T00:00:00Z',
   updated_at: '2026-06-29T00:00:00Z',
 }

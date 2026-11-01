@@ -30,9 +30,11 @@ from cti.schemas.report import (
     ExtractionSource,
     ImportedObservable,
     ImportResult,
+    SkippedImportItem,
 )
 from cti.services import allowlist_service, ioc_extraction
 from cti.services.confidence import recompute_effective_confidence
+from cti.services.tlp import red_observable_ids
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -47,6 +49,8 @@ PDF_CONTENT_TYPE = "application/pdf"
 REASON_PDF_UNAVAILABLE = "pdf_text_extraction_unavailable"
 REASON_UNSUPPORTED_TYPE = "unsupported_content_type"
 NOT_A_CANDIDATE = "not_a_candidate"
+# Generic on purpose: it must not say why (TLP) an item was not imported.
+NOT_IMPORTABLE = "not_importable"
 _QUERY_CHUNK = 500
 _MAX_DETAIL_ITEMS = 20
 
@@ -189,13 +193,22 @@ async def _find_links(
     return links
 
 
-async def build_preview(db: AsyncSession, report: Report) -> ExtractionPreview:
-    """Extract candidates and flag them against current data. Never writes."""
+async def build_preview(
+    db: AsyncSession, report: Report, *, hide_red: bool = False
+) -> ExtractionPreview:
+    """Extract candidates and flag them against current data. Never writes.
+
+    With *hide_red* (API-key callers), effective-RED observables are treated
+    as if they did not exist, so the preview is the same as for a new value.
+    """
     extraction = await _extract_report(db, report)
     candidates = extraction.result.candidates
 
     valid_keys = [(c.type, c.value) for c in candidates if c.valid]
     existing = await _find_observables(db, valid_keys)
+    if hide_red and existing:
+        red = await red_observable_ids(db, (oid for oid, _ in existing.values()))
+        existing = {key: match for key, match in existing.items() if match[0] not in red}
     existing_ids = [observable_id for observable_id, _ in existing.values()]
     links = await _find_links(db, report.id, existing_ids)
 
@@ -251,8 +264,14 @@ async def import_candidates(
     confidence: int,
     items: Sequence[ImportItem],
     imported_by_id: uuid.UUID | None,
+    hide_red: bool = False,
 ) -> ImportResult:
     """Import reviewed candidates. Validates everything before writing.
+
+    With *hide_red* (API-key callers), items whose existing observable is
+    effective-RED are skipped untouched (no link, no confidence change) and
+    reported in ``skipped`` with the generic reason ``not_importable``. Every
+    counter covers only the imported items.
 
     Raises:
         NotACandidateError: an item is not a valid candidate of the report as
@@ -296,6 +315,17 @@ async def import_candidates(
             insert(Observable).values(rows).on_conflict_do_nothing(index_elements=["type", "value"])
         )
         observables.update(await _find_observables(db, missing))
+
+    skipped: list[SkippedImportItem] = []
+    if hide_red:
+        # Checked after the upsert so a RED row created concurrently is caught too.
+        red = await red_observable_ids(db, (observables[key][0] for key in keys))
+        skipped = [
+            SkippedImportItem(type=key[0].value, value=key[1], reason=NOT_IMPORTABLE)
+            for key in keys
+            if observables[key][0] in red
+        ]
+        keys = [key for key in keys if observables[key][0] not in red]
 
     links = await _find_links(db, report.id, [observables[key][0] for key in keys])
     attribution = {
@@ -381,4 +411,5 @@ async def import_candidates(
         attributed_existing=attributed_existing,
         already_attributed=already_attributed,
         observables=result_observables,
+        skipped=skipped,
     )

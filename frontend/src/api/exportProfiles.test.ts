@@ -19,6 +19,8 @@ const PROFILE_INPUT = {
   confidence_min: 70,
   max_age_days: null,
   feed_id: null,
+  destination: 'internal' as const,
+  tags: [] as string[],
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -65,7 +67,19 @@ describe('export profile API', () => {
   })
 
   it('returns the preview payload', async () => {
-    const preview = { count: 3, excluded_allowlisted: 1, sample: ['1.1.1.1'] }
+    const preview = {
+      count: 3,
+      excluded_allowlisted: 1,
+      excluded_by_tlp: {
+        unspecified: 0,
+        clear: 0,
+        green: 0,
+        amber: 0,
+        'amber+strict': 0,
+        red: 0,
+      },
+      sample: ['1.1.1.1'],
+    }
     const get = vi.spyOn(api, 'get').mockResolvedValue({ data: preview })
     await expect(getExportProfilePreview('p-1')).resolves.toEqual(preview)
     expect(get).toHaveBeenCalledWith('/export/profiles/p-1/preview')

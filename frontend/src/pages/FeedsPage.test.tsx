@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import FeedsPage from './FeedsPage'
 import type { Feed } from '@/types/feed'
+import { FEED_TLP_FIELD } from '@/test/fixtures/feed'
 
 // ── Stub heavy sub-components ────────────────────────────────────────────────
 
@@ -72,6 +73,7 @@ const mockFeeds: Feed[] = [
     auth_supported: true,
     auth_needs_repair: false,
     default_confidence: 80,
+    ...FEED_TLP_FIELD,
     last_run_at: null,
     observable_count: 1000,
     latest_run: null,
@@ -92,6 +94,7 @@ const mockFeeds: Feed[] = [
     auth_supported: false,
     auth_needs_repair: false,
     default_confidence: 90,
+    ...FEED_TLP_FIELD,
     last_run_at: null,
     observable_count: 500,
     latest_run: null,
@@ -112,6 +115,7 @@ const mockFeeds: Feed[] = [
     auth_supported: false,
     auth_needs_repair: false,
     default_confidence: 70,
+    ...FEED_TLP_FIELD,
     last_run_at: null,
     observable_count: 200,
     latest_run: null,

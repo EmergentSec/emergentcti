@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.models.export_profile import ExportFormat, ExportProfile
 from cti.models.feed import Feed
-from cti.services import observable_service
+from cti.services import observable_service, tag_service
 
 PREVIEW_SAMPLE_SIZE = 20
 
@@ -79,9 +79,16 @@ async def _flush(db: AsyncSession) -> None:
 
 
 async def create_profile(db: AsyncSession, data: dict) -> ExportProfile:
+    """Create a profile.
+
+    Raises:
+        tag_service.TagValidationError / TagNotFoundError: invalid or unknown tag.
+    """
+    data = dict(data)
+    tags = await tag_service.resolve_profile_tags(db, data.pop("tags", None) or [])
     await _ensure_name_available(db, data["name"])
     await _ensure_feed_exists(db, data.get("feed_id"))
-    profile = ExportProfile(**data)
+    profile = ExportProfile(**data, tags=tags)
     db.add(profile)
     await _flush(db)
     await db.refresh(profile)
@@ -90,6 +97,9 @@ async def create_profile(db: AsyncSession, data: dict) -> ExportProfile:
 
 async def update_profile(db: AsyncSession, profile: ExportProfile, data: dict) -> ExportProfile:
     """Apply the provided fields; explicit ``None`` clears a nullable filter."""
+    data = dict(data)
+    if "tags" in data:
+        profile.tags = await tag_service.resolve_profile_tags(db, data.pop("tags") or [])
     if "name" in data and data["name"] != profile.name:
         await _ensure_name_available(db, data["name"], exclude_id=profile.id)
     if data.get("feed_id") is not None and data["feed_id"] != profile.feed_id:
@@ -106,10 +116,16 @@ async def delete_profile(db: AsyncSession, profile: ExportProfile) -> None:
     await db.flush()
 
 
-async def get_profile_values(db: AsyncSession, profile: ExportProfile) -> tuple[list[str], int]:
-    """Evaluate a profile against current data and the current allowlist.
+def profile_tag_names(profile: ExportProfile) -> list[str]:
+    return sorted(tag.name for tag in profile.tags)
 
-    Returns ``(values, excluded_allowlisted)``. Text profiles yield the
+
+async def get_profile_values(
+    db: AsyncSession, profile: ExportProfile
+) -> tuple[list[str], int, dict[str, int]]:
+    """Evaluate a profile against current data, allowlist and TLP policy.
+
+    Returns ``(values, excluded_allowlisted, excluded_by_tlp)``. Text profiles yield the
     complete blocklist (alphabetical, deduplicated, never truncated); JSON
     profiles yield values in export order (newest first). Text values are
     line-safe; JSON values are literal.
@@ -121,6 +137,8 @@ async def get_profile_values(db: AsyncSession, profile: ExportProfile) -> tuple[
         confidence_min=profile.confidence_min,
         max_age_days=profile.max_age_days,
         feed_id=profile.feed_id,
+        tags=profile_tag_names(profile),
+        destination=profile.destination.value,
         order="value" if is_text else "recent",
         line_safe=is_text,
     )
