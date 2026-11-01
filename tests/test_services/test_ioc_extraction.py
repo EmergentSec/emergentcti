@@ -1,0 +1,291 @@
+"""Deterministic IOC extraction rules (issue #14 contract)."""
+
+from __future__ import annotations
+
+import time
+
+import pytest
+
+from cti.models.observable import ObservableType
+from cti.services import ioc_extraction
+from cti.services.ioc_extraction import Candidate, extract
+
+IP = ObservableType.IP_ADDR
+DOMAIN = ObservableType.DOMAIN_NAME
+URL = ObservableType.URL
+HASH = ObservableType.FILE_HASH
+EMAIL = ObservableType.EMAIL_ADDR
+
+MD5 = "d41d8cd98f00b204e9800998ecf8427e"
+SHA1 = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+def by_key(text: str) -> dict[tuple[ObservableType, str], Candidate]:
+    return {(c.type, c.value): c for c in extract([text]).candidates}
+
+
+def keys(text: str) -> set[tuple[ObservableType, str]]:
+    return set(by_key(text))
+
+
+def test_each_supported_type_is_extracted_and_normalized() -> None:
+    text = (
+        f"IP 185.220.101.42 and 2001:4860:4860::8888, domain Evil-Domain.Example., "
+        f"url HTTPS://C2.Example/Path?Q=A#Frag, mail Ops.Team@Corp.Example, "
+        f"hashes {MD5.upper()} {SHA1} {SHA256}"
+    )
+    found = by_key(text)
+    assert set(found) == {
+        (IP, "185.220.101.42"),
+        (IP, "2001:4860:4860::8888"),
+        (DOMAIN, "evil-domain.example"),
+        (URL, "https://c2.example/Path?Q=A#Frag"),
+        (EMAIL, "Ops.Team@corp.example"),
+        (HASH, MD5),
+        (HASH, SHA1),
+        (HASH, SHA256),
+    }
+    assert all(candidate.valid for candidate in found.values())
+    assert found[(HASH, MD5)].warnings == ["hash_md5"]
+    assert found[(HASH, SHA1)].warnings == ["hash_sha1"]
+    assert found[(HASH, SHA256)].warnings == []
+    assert found[(HASH, MD5)].original == MD5.upper()
+    assert found[(IP, "185.220.101.42")].warnings == []
+
+
+def test_command_line_is_never_extracted() -> None:
+    candidates = extract(["powershell.exe -enc AAAA && cmd /c whoami"]).candidates
+    assert all(c.type is not ObservableType.COMMAND_LINE for c in candidates)
+
+
+@pytest.mark.parametrize(
+    ("written", "expected"),
+    [
+        ("evil[.]example", (DOMAIN, "evil.example")),
+        ("evil(.)example", (DOMAIN, "evil.example")),
+        ("evil{.}example", (DOMAIN, "evil.example")),
+        ("evil[dot]example", (DOMAIN, "evil.example")),
+        ("evil(dot)example", (DOMAIN, "evil.example")),
+        ("evil{dot}example", (DOMAIN, "evil.example")),
+        ("evil[DOT]example", (DOMAIN, "evil.example")),
+        ("evil dot example", (DOMAIN, "evil.example")),
+        ("185[.]220[.]101[.]42", (IP, "185.220.101.42")),
+        ("hxxp://evil.example/a", (URL, "http://evil.example/a")),
+        ("hXXp://evil.example/a", (URL, "http://evil.example/a")),
+        ("hxxps://evil.example/a", (URL, "https://evil.example/a")),
+        ("hXXps://evil.example/a", (URL, "https://evil.example/a")),
+        ("http[:]//evil.example/a", (URL, "http://evil.example/a")),
+        ("http[://]evil.example/a", (URL, "http://evil.example/a")),
+        ("hxxps[://]evil[.]example/a", (URL, "https://evil.example/a")),
+        ("hxxp[:]//evil[.]example:8080/a", (URL, "http://evil.example:8080/a")),
+        ("user[@]evil.example", (EMAIL, "user@evil.example")),
+        ("user[at]evil[.]example", (EMAIL, "user@evil.example")),
+        ("user(at)evil.example", (EMAIL, "user@evil.example")),
+    ],
+)
+def test_every_defang_form_is_refanged(
+    written: str,
+    expected: tuple[ObservableType, str],
+) -> None:
+    found = by_key(f"Indicator: {written} seen.")
+    assert expected in found, found
+    candidate = found[expected]
+    assert candidate.defanged is True
+    assert candidate.original == written
+    assert candidate.valid is True
+
+
+def test_plain_tokens_are_not_marked_defanged() -> None:
+    found = by_key("Seen evil.example and http://evil.example/x")
+    assert found[(DOMAIN, "evil.example")].defanged is False
+    assert found[(URL, "http://evil.example/x")].defanged is False
+
+
+@pytest.mark.parametrize("token", ["999.1.1.1", "256.10.10.10", "10.010.1.1"])
+def test_invalid_ipv4_is_reported_invalid(token: str) -> None:
+    candidate = by_key(f"Bad address {token} here")[(IP, token)]
+    assert candidate.valid is False
+    assert candidate.warnings == ["invalid_ip"]
+
+
+def test_repeated_character_hash_is_invalid() -> None:
+    zeros = "0" * 64
+    found = by_key(f"sha256 {zeros} and md5 {'a' * 32}")
+    assert found[(HASH, zeros)].valid is False
+    assert found[(HASH, zeros)].warnings == ["invalid_hash"]
+    assert found[(HASH, "a" * 32)].valid is False
+
+
+def test_hash_lengths_other_than_32_40_64_are_ignored() -> None:
+    assert keys(f"{'ab' * 17} {'cd' * 24} {MD5}x{MD5}") == {(HASH, MD5)}
+    # Bounded by hex on one side: not a hash.
+    assert keys(f"{MD5}abc") == set()
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["10.0.0.1", "192.168.1.1", "127.0.0.1", "169.254.1.1", "224.0.0.1", "0.0.0.0", "::1"],
+)
+def test_non_public_ips_are_valid_with_warning(address: str) -> None:
+    candidate = by_key(f"addr {address} end")[(IP, address)]
+    assert candidate.valid is True
+    assert candidate.warnings == ["non_public_ip"]
+
+
+def test_ipv6_canonical_form_and_noise_rejected() -> None:
+    found = keys("v6 2001:DB8:0:0:0:0:0:1 at 12:30:45 using std::vector and a::b")
+    assert found == {(IP, "2001:db8::1")}
+
+
+def test_filename_like_tokens_suppressed_unless_defanged() -> None:
+    found = by_key("Open invoice.pdf, run payload.exe, see Node.js; dropper loader[.]exe")
+    assert (DOMAIN, "invoice.pdf") not in found
+    assert (DOMAIN, "payload.exe") not in found
+    assert (DOMAIN, "node.js") not in found
+    defanged = found[(DOMAIN, "loader.exe")]
+    assert defanged.valid is True
+    assert defanged.defanged is True
+    assert defanged.warnings == ["looks_like_filename"]
+
+
+def test_non_domain_shapes_are_ignored() -> None:
+    assert keys("e.g. i.e. v1.2 Fig.3 1.2.3 and_under.score.example") == set()
+
+
+def test_invalid_domain_label_is_reported_invalid() -> None:
+    long_label = "x" * 64  # non-hex, so the hash phase does not claim it
+    found = by_key(f"host {long_label}.example and -bad.example")
+    assert found[(DOMAIN, f"{long_label}.example")].warnings == ["invalid_domain"]
+    assert found[(DOMAIN, f"{long_label}.example")].valid is False
+    assert found[(DOMAIN, "-bad.example")].valid is False
+
+
+def test_url_host_is_not_double_emitted() -> None:
+    found = keys("Beacon http://c2.example/gate.php and https://198.51.100.7:443/x")
+    assert found == {
+        (URL, "http://c2.example/gate.php"),
+        (URL, "https://198.51.100.7:443/x"),
+    }
+
+
+def test_url_trailing_punctuation_is_stripped_and_path_kept() -> None:
+    found = keys('See (https://evil.example/A/B?x=1). Also "http://other.example/Q",')
+    assert found == {
+        (URL, "https://evil.example/A/B?x=1"),
+        (URL, "http://other.example/Q"),
+    }
+
+
+def test_markdown_link_yields_both_urls() -> None:
+    found = keys("[http://a.example](http://a.example/x) <https://b.example>")
+    assert found == {
+        (URL, "http://a.example"),
+        (URL, "http://a.example/x"),
+        (URL, "https://b.example"),
+    }
+
+
+def test_url_with_invalid_host_is_not_emitted() -> None:
+    found = by_key("Local http://localhost/admin and http://999.2.2.2/x ftp://bad_host.example/")
+    assert not any(key[0] is URL for key in found)
+    # The dotted quad is still reported on its own, as invalid.
+    assert found[(IP, "999.2.2.2")].valid is False
+
+
+def test_unsupported_scheme_is_not_a_url() -> None:
+    found = keys("javascript://evil.example/x and sftp://files.example/drop")
+    assert (URL, "sftp://files.example/drop") in found
+    assert not any(key[0] is URL and key[1].startswith("javascript") for key in found)
+
+
+def test_url_values_never_carry_invisible_characters() -> None:
+    found = keys("http://evil.example/a‮gnp.exe")
+    assert (URL, "http://evil.example/a") in found
+
+
+def test_email_domain_is_not_double_emitted() -> None:
+    assert keys("Phish from billing@pay-portal.example today") == {
+        (EMAIL, "billing@pay-portal.example")
+    }
+
+
+def test_dedup_counts_occurrences_and_keeps_first_original() -> None:
+    text = "First evil[.]example then EVIL.example then evil.example."
+    candidate = by_key(text)[(DOMAIN, "evil.example")]
+    assert candidate.occurrences == 3
+    assert candidate.original == "evil[.]example"
+    assert candidate.defanged is True
+
+
+def test_first_occurrence_across_sources_supplies_context() -> None:
+    result = extract(["content mentions 185.220.101.42 first", "attachment 185.220.101.42"])
+    (candidate,) = result.candidates
+    assert candidate.occurrences == 2
+    assert candidate.context == "content mentions 185.220.101.42 first"
+
+
+def test_context_is_plain_collapsed_and_capped() -> None:
+    padding = "word " * 40
+    text = f"{padding}\n\n\tsee​  evil.example\r\n now {padding}"
+    candidate = by_key(text)[(DOMAIN, "evil.example")]
+    assert "\n" not in candidate.context
+    assert "​" not in candidate.context
+    assert "  " not in candidate.context
+    assert "see evil.example now" in candidate.context
+    assert len(candidate.context) <= ioc_extraction.CONTEXT_MAX_LENGTH
+
+
+def test_candidates_sorted_by_type_then_value() -> None:
+    result = extract([f"z.example a.example 8.8.8.8 1.1.1.1 {MD5} http://b.example/"])
+    order = [(c.type.value, c.value) for c in result.candidates]
+    assert order == sorted(order)
+
+
+def test_character_limit_sets_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ioc_extraction, "MAX_SCAN_CHARS", 30)
+    result = extract(["early.example " + "x" * 20 + " late.example", "other.example"])
+    assert result.truncated is True
+    assert {c.value for c in result.candidates} == {"early.example"}
+
+
+def test_candidate_limit_keeps_earliest_and_sets_truncated() -> None:
+    text = " ".join(f"host{i}.example" for i in range(ioc_extraction.MAX_CANDIDATES + 5))
+    result = extract([text])
+    assert result.truncated is True
+    assert len(result.candidates) == ioc_extraction.MAX_CANDIDATES
+    values = {c.value for c in result.candidates}
+    assert "host0.example" in values
+    assert f"host{ioc_extraction.MAX_CANDIDATES + 4}.example" not in values
+
+
+def test_not_truncated_for_small_input() -> None:
+    assert extract(["evil.example"]).truncated is False
+    assert extract([]).candidates == []
+
+
+def test_overlong_url_is_invalid_and_clipped() -> None:
+    url = "http://evil.example/" + "a" * 3000
+    candidate = by_key(url)[(URL, url[: ioc_extraction.MAX_VALUE_LENGTH])]
+    assert candidate.valid is False
+    assert candidate.warnings == ["value_too_long"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "a" * 2_000_000,
+        "a." * 1_000_000,
+        "1:" * 1_000_000,
+        "a@" * 1_000_000,
+        "http://" + "a" * 1_999_000,
+        "0" * 2_000_000,
+        "[.]" * 600_000,
+        "1.1." * 500_000,
+    ],
+)
+def test_pathological_input_runs_in_linear_time(text: str) -> None:
+    started = time.perf_counter()
+    extract([text])
+    # Quadratic behaviour on 2M chars would take minutes; generous bound for CI.
+    assert time.perf_counter() - started < 10
