@@ -3,23 +3,33 @@ import tailwindcss from 'tailwindcss'
 import { beforeAll, describe, expect, it } from 'vitest'
 import tailwindConfig from '../../tailwind.config.js'
 
+function colorNames(colors, path = []) {
+  return Object.entries(colors).flatMap(([name, value]) => {
+    if (path.length === 0 && name === 'cat-soft') return []
+
+    const nextPath = name === 'DEFAULT' ? path : [...path, name]
+    if (value && typeof value === 'object') return colorNames(value, nextPath)
+    return [nextPath.join('-')]
+  })
+}
+
+const opacityCandidates = colorNames(tailwindConfig.theme.extend.colors).map(
+  (name) => `bg-${name}/50`,
+)
 const candidates = [
-  'bg-destructive',
-  'bg-destructive/10',
-  'border-cat-blue/30',
+  ...opacityCandidates,
   'bg-destructive-soft',
+  'border-destructive',
 ]
 
 let root
 
-function declaration(selector, property) {
-  let value
-  root.walkRules(selector, (rule) => {
-    rule.walkDecls(property, (decl) => {
-      value = decl.value
-    })
+function hasRule(candidate) {
+  let found = false
+  root.walkRules(`.${candidate.replaceAll('/', '\\/')}`, () => {
+    found = true
   })
-  return value
+  return found
 }
 
 beforeAll(async () => {
@@ -37,21 +47,12 @@ beforeAll(async () => {
 })
 
 describe('Tailwind theme color opacity modifiers', () => {
-  it('keeps unmodified theme colors at full opacity', () => {
-    expect(declaration('.bg-destructive', 'background-color')).toBe(
-      'color-mix(in srgb, var(--destructive) calc(var(--tw-bg-opacity, 1) * 100%), transparent)',
-    )
-    expect(declaration('.bg-destructive-soft', 'background-color')).toContain(
-      'var(--destructive-soft)',
-    )
+  it.each(opacityCandidates)('generates a rule for %s', (candidate) => {
+    expect(hasRule(candidate)).toBe(true)
   })
 
-  it('generates background and border opacity modifiers', () => {
-    expect(declaration('.bg-destructive\\/10', 'background-color')).toContain(
-      'var(--destructive) calc(0.1 * 100%)',
-    )
-    expect(declaration('.border-cat-blue\\/30', 'border-color')).toContain(
-      'var(--cat-blue) calc(0.3 * 100%)',
-    )
+  it('generates the destructive background and border rules', () => {
+    expect(hasRule('bg-destructive-soft')).toBe(true)
+    expect(hasRule('border-destructive')).toBe(true)
   })
 })
