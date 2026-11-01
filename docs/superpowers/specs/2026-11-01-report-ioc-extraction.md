@@ -91,6 +91,10 @@ Unicode handling (pinned after backend review):
   shows the text with them removed; `context` already strips them.
 - Then compose the text to NFC (so combining marks join their base letter) and
   map the IDNA dot homoglyphs U+FF0E, U+3002, U+FF61 to `.`.
+- Combining marks (Mn/Mc/Me) that remain after NFC count as host characters,
+  so a host is never split at a mark.
+- The 2,000,000-char scan budget applies to the normalized text, because NFC
+  can expand it.
 - A host run (domain, URL host, or email domain) must never start or end next
   to a non-ASCII letter or digit. When it would, extend the run over the
   adjacent non-ASCII label characters and IDNA-encode the whole host with
