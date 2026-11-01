@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, fireEvent } from '@testing-library/react'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -11,6 +11,12 @@ const mockUseConfig = vi.fn()
 
 vi.mock('@/hooks/useObservables', () => ({
   useObservable: (id: string | null) => mockUseObservable(id),
+  useObservables: () => ({ data: { items: [] } }),
+}))
+
+const mockUseObservableReports = vi.fn()
+vi.mock('@/hooks/useReports', () => ({
+  useObservableReports: (id: string | null) => mockUseObservableReports(id),
 }))
 
 vi.mock('@/hooks/useConfig', () => ({
@@ -91,6 +97,36 @@ const MOCK_CONFIG = {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('ObservableDetailPage', () => {
+  beforeEach(() => {
+    mockUseObservableReports.mockReturnValue({ data: [], isLoading: false })
+  })
+
+  it('lists linked reports', () => {
+    mockUseObservable.mockReturnValue({ data: MOCK_OBS, isLoading: false, error: null })
+    mockUseConfig.mockReturnValue({ data: MOCK_CONFIG })
+    mockUseObservableReports.mockReturnValue({
+      data: [
+        {
+          id: 'rep-1',
+          title: 'Campaign write-up',
+          origin: 'internal',
+          source_name: null,
+          published_at: null,
+          summary: 'Related activity',
+          is_ai_generated: false,
+          ai_provider: null,
+          ai_model: null,
+          has_attachment: false,
+          created_at: '',
+          updated_at: '',
+        },
+      ],
+      isLoading: false,
+    })
+    renderWithRoute()
+    expect(screen.getByRole('link', { name: 'Campaign write-up' })).toBeTruthy()
+  })
+
   it('renders the observable value in mono text', () => {
     mockUseObservable.mockReturnValue({ data: MOCK_OBS, isLoading: false, error: null })
     mockUseConfig.mockReturnValue({ data: MOCK_CONFIG })

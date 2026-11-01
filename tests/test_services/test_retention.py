@@ -11,6 +11,7 @@ from cti.core.config import Settings
 from cti.models.feed import Feed, FeedType
 from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
+from cti.models.report import Report, ReportAttachment, report_observables
 from cti.services import retention, scheduler
 
 NOW = datetime(2026, 10, 10, 12)
@@ -81,6 +82,34 @@ async def test_retention_does_not_delete_allowlist_or_profile_configuration(db_s
     assert await count(db_session, AllowlistEntry) == 1
     assert await count(db_session, ExportProfile) == 1
     assert await count(db_session, Observable) == 0
+
+
+async def test_retention_deletes_report_links_only(db_session):
+    observable = indicator("10.0.0.10", 181)
+    report = Report(title="Keep this report", origin="internal")
+    db_session.add_all([observable, report])
+    await db_session.flush()
+    attachment = ReportAttachment(
+        report_id=report.id,
+        original_filename="keep.txt",
+        content_type="text/plain",
+        size_bytes=4,
+        sha256="0" * 64,
+        content=b"keep",
+    )
+    db_session.add(attachment)
+    await db_session.execute(
+        report_observables.insert().values(
+            report_id=report.id,
+            observable_id=observable.id,
+        )
+    )
+    await db_session.commit()
+
+    assert await retention.enforce_retention(db_session, 180, now=NOW) == 1
+    assert await count(db_session, Report) == 1
+    assert await count(db_session, ReportAttachment) == 1
+    assert await db_session.scalar(select(func.count()).select_from(report_observables)) == 0
 
 
 async def test_zero_disables_retention_without_db_or_cache_access():

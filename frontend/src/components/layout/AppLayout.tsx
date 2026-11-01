@@ -100,6 +100,7 @@ export function AppLayout(_props: AppLayoutProps) {
   const showSidebar = isDesktop && !collapsed;
   // Add Observable belongs to the Observables list only (not detail pages).
   const onObservablesList = location.pathname.replace(/\/+$/, '') === '/observables';
+  const onReportsList = location.pathname.replace(/\/+$/, '') === '/reports';
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -144,6 +145,16 @@ export function AppLayout(_props: AppLayoutProps) {
                   >
                     <Plus size={14} weight="bold" aria-hidden="true" />
                     <span className="sr-only sm:not-sr-only">Add Observable</span>
+                  </Button>
+                ) : isAdmin && onReportsList ? (
+                  <Button
+                    variant="masthead"
+                    title="New report"
+                    className="w-9 px-0 sm:w-auto sm:px-3.5"
+                    onClick={() => navigate('/reports?create=1')}
+                  >
+                    <Plus size={14} weight="bold" aria-hidden="true" />
+                    <span className="sr-only sm:not-sr-only">New report</span>
                   </Button>
                 ) : null
               }

@@ -2,10 +2,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getObservables, getObservable, createObservable, deleteObservable } from '@/api/observables'
 import type { ObservableFilters, ObservableCreate } from '@/types/observable'
 
-export function useObservables(params: ObservableFilters) {
+export function useObservables(params: ObservableFilters, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['observables', params],
     queryFn: () => getObservables(params),
+    enabled: options?.enabled ?? true,
   })
 }
 

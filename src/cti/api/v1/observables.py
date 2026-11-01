@@ -1,4 +1,5 @@
 """Observable search, create, and detail endpoints."""
+# ruff: noqa: B008, TC001, TC002, TC003
 
 from __future__ import annotations
 
@@ -8,11 +9,18 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cti.api.v1.reports import report_to_summary
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
 from cti.models.observable import ObservableType
-from cti.schemas.observable import ObservableCreate, ObservableListResponse, ObservableResponse, ObservableSourceResponse
-from cti.services import allowlist_service, observable_service
+from cti.schemas.observable import (
+    ObservableCreate,
+    ObservableListResponse,
+    ObservableResponse,
+    ObservableSourceResponse,
+)
+from cti.schemas.report import ReportSummary
+from cti.services import allowlist_service, observable_service, report_service
 from cti.services.allowlist_service import AllowlistMatcher
 
 router = APIRouter()
@@ -69,7 +77,10 @@ async def list_observables(
         try:
             feed_id = uuid.UUID(source)
         except ValueError:
-            raise HTTPException(status_code=400, detail="source must be a feed UUID or 'manual'")
+            raise HTTPException(
+                status_code=400,
+                detail="source must be a feed UUID or 'manual'",
+            ) from None
 
     items, total = await observable_service.get_observables(
         db,
@@ -123,6 +134,18 @@ async def get_observable(
     if not obs:
         raise HTTPException(status_code=404, detail="Observable not found")
     return _obs_to_response(obs, await allowlist_service.load_matcher(db))
+
+
+@router.get("/{observable_id}/reports", response_model=list[ReportSummary])
+async def get_observable_reports(
+    observable_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(get_current_auth),
+) -> list[ReportSummary]:
+    reports = await report_service.list_reports_for_observable(db, observable_id)
+    if reports is None:
+        raise HTTPException(status_code=404, detail="Observable not found")
+    return [report_to_summary(report) for report in reports]
 
 
 @router.delete("/{observable_id}", status_code=204)
