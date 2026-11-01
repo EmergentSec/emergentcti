@@ -69,8 +69,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint("id = 1", name="ck_ai_settings_singleton"),
         sa.CheckConstraint(
-            "(default_provider IS NULL AND default_model IS NULL) OR "
-            "(default_provider IS NOT NULL AND default_model IS NOT NULL)",
+            "default_provider IS NULL OR default_model IS NOT NULL",
             name="ck_ai_settings_default_pair",
         ),
     )

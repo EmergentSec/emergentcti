@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from cti.core.dependencies import get_current_auth
 from cti.models.ai import AiProvider, AiProviderConfig, AiSettingsRecord
@@ -132,11 +132,43 @@ async def test_key_length_is_validated_after_strip_and_short_keys_have_no_hint(
     assert response.status_code == 200
     assert response.json()["key_hint"] is None
 
+    rejected_key = "k" * 513
     response = await client.put(
         f"{BASE}/providers/openai",
-        json={"api_key": "k" * 513},
+        json={"api_key": rejected_key},
     )
     assert response.status_code == 422
+    assert rejected_key not in response.text
+    assert set(response.json()["detail"][0]) == {"loc", "msg", "type"}
+
+    for rejected_key in ("", "   "):
+        response = await client.put(
+            f"{BASE}/providers/openai",
+            json={"api_key": rejected_key},
+        )
+        assert response.status_code == 422
+        assert "input" not in response.json()["detail"][0]
+        assert "ctx" not in response.json()["detail"][0]
+
+
+@pytest.mark.parametrize(
+    "rejected_key",
+    ["sk-test-\N{LATIN SMALL LETTER E WITH ACUTE}-secret", "sk-test-line\nbreak"],
+)
+async def test_non_ascii_and_control_keys_are_rejected_without_echo(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    rejected_key: str,
+) -> None:
+    response = await client.put(
+        f"{BASE}/providers/openai",
+        json={"api_key": rejected_key},
+    )
+
+    assert response.status_code == 422
+    assert rejected_key not in response.text
+    assert set(response.json()["detail"][0]) == {"loc", "msg", "type"}
+    assert await db_session.get(AiProviderConfig, AiProvider.OPENAI) is None
 
 
 async def test_raw_key_absent_from_every_endpoint_response(
@@ -166,6 +198,12 @@ async def test_raw_key_absent_from_every_endpoint_response(
             json={"provider": "openai", "model": "gpt-test", "is_custom": False},
         )
     )
+    responses.append(
+        await client.put(
+            f"{BASE}/providers/openai",
+            json={"api_key": FAKE_KEY * 32},
+        )
+    )
 
     httpx_mock.add_response(
         url="https://api.openai.com/v1/chat/completions",
@@ -179,8 +217,10 @@ async def test_raw_key_absent_from_every_endpoint_response(
     )
     responses.append(await client.delete(f"{BASE}/default"))
     responses.append(await client.delete(f"{BASE}/providers/openai"))
+    responses.append(await client.post(f"{BASE}/providers/openai/check"))
 
-    assert all(response.status_code < 400 for response in responses)
+    assert all(response.status_code < 500 for response in responses)
+    assert any(400 <= response.status_code < 500 for response in responses)
     assert all(FAKE_KEY not in response.text for response in responses)
 
 
@@ -231,6 +271,41 @@ async def test_delete_provider_clears_default_without_fallback(client: AsyncClie
     assert not any(
         item["configured"] for item in settings["providers"] if item["provider"] == "openai"
     )
+
+
+async def test_database_provider_delete_leaves_no_visible_default_and_repairs_on_write(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    await db_session.execute(text("PRAGMA foreign_keys = ON"))
+    assert await db_session.scalar(text("PRAGMA foreign_keys")) == 1
+    try:
+        await _configure(client, "openai")
+        response = await client.put(
+            f"{BASE}/default",
+            json={"provider": "openai", "model": "orphaned-model", "is_custom": True},
+        )
+        assert response.status_code == 200
+
+        await db_session.execute(
+            text("DELETE FROM ai_providers WHERE provider = :provider"),
+            {"provider": "openai"},
+        )
+        db_session.expire_all()
+
+        assert (await client.get(BASE)).json()["default"] is None
+        settings = await db_session.get(AiSettingsRecord, 1)
+        assert settings is not None
+        assert settings.default_provider is None
+        assert settings.default_model == "orphaned-model"
+
+        await _configure(client, "xai")
+        assert settings.default_model is None
+        assert settings.default_model_is_custom is False
+    finally:
+        await db_session.rollback()
+        await db_session.execute(text("PRAGMA foreign_keys = OFF"))
+        await db_session.commit()
 
 
 async def test_delete_missing_provider_is_404(client: AsyncClient) -> None:
@@ -318,7 +393,8 @@ async def test_discovery_failure_without_cache_returns_fallback(
 
     assert response.status_code == 200
     assert response.json()["source"] == "fallback"
-    assert response.json()["models"]
+    names = [model["name"] for model in response.json()["models"]]
+    assert names == sorted(names, key=str.casefold)
     assert response.json()["error"]["category"] == "rate_limited"
 
 
@@ -340,7 +416,10 @@ async def test_not_configured_operations_return_409(client: AsyncClient) -> None
     assert all(response.json()["category"] == "not_configured" for response in responses)
 
 
-async def test_default_validation_and_exact_custom_preservation(client: AsyncClient) -> None:
+async def test_default_validation_and_exact_custom_preservation(
+    client: AsyncClient,
+    httpx_mock: HTTPXMock,
+) -> None:
     await _configure(client, "xai")
 
     fallback = await client.put(
@@ -365,6 +444,7 @@ async def test_default_validation_and_exact_custom_preservation(client: AsyncCli
     assert custom.status_code == 200
     assert custom.json()["model"] == exact
     assert (await client.get(BASE)).json()["default"]["model"] == exact
+    assert httpx_mock.get_requests() == []
 
 
 @pytest.mark.parametrize("model", ["", "   ", "line\nbreak", "x" * 256])
