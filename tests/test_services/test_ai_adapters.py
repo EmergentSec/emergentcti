@@ -193,6 +193,27 @@ async def test_transport_error_mapping(
     assert caught.value.error.category == category
 
 
+@pytest.mark.parametrize("operation", ["check", "models", "inference"])
+async def test_header_encoding_errors_are_sanitized_for_every_operation(
+    httpx_mock: HTTPXMock,
+    operation: str,
+) -> None:
+    raw_key = "sk-test-\N{LATIN SMALL LETTER E WITH ACUTE}-secret"
+    adapter = OpenAiAdapter()
+
+    with pytest.raises(AiAdapterError) as caught:
+        if operation == "check":
+            await adapter.check(raw_key)
+        elif operation == "models":
+            await adapter.list_models(raw_key)
+        else:
+            await adapter.inference_test(raw_key, "gpt-test")
+
+    assert caught.value.error.category == AiErrorCategory.NETWORK_ERROR
+    assert raw_key not in caught.value.error.message
+    assert httpx_mock.get_requests() == []
+
+
 async def test_unparseable_success_is_provider_error(httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(url="https://api.openai.com/v1/models", text="not-json")
 

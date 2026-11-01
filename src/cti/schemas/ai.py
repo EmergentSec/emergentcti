@@ -91,6 +91,10 @@ class AiProviderKeyUpdate(BaseModel):
     def strip_and_validate_key(cls, value: object) -> object:
         if not isinstance(value, str):
             return value
+        if not value.isascii():
+            raise ValueError("API key must contain only ASCII characters")
+        if any(unicodedata.category(character) == "Cc" for character in value):
+            raise ValueError("API key must not contain control characters")
         value = value.strip()
         if not value:
             raise ValueError("API key must not be empty")

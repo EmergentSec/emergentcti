@@ -21,7 +21,7 @@ from cti.schemas.ai import (
     AiSettings,
     ModelSource,
 )
-from cti.services.ai.base import AiAdapterError, make_ai_error
+from cti.services.ai.base import AiAdapterError, make_ai_error, sorted_models
 from cti.services.ai.catalog import fallback_models
 from cti.services.ai.registry import get_adapter
 
@@ -115,6 +115,18 @@ def _cached_models(config: AiProviderConfig) -> list[AiModel] | None:
         return None
 
 
+async def _flush_with_orphan_cleanup(db: AsyncSession) -> None:
+    settings = await db.get(AiSettingsRecord, 1)
+    if (
+        settings is not None
+        and settings.default_provider is None
+        and settings.default_model is not None
+    ):
+        settings.default_model = None
+        settings.default_model_is_custom = False
+    await db.flush()
+
+
 async def get_settings(db: AsyncSession) -> AiSettings:
     configured = {
         AiProvider(item.provider): item
@@ -161,7 +173,7 @@ async def save_provider_key(
         config.last_check_status = None
         config.last_check_category = None
         config.last_checked_at = None
-    await db.flush()
+    await _flush_with_orphan_cleanup(db)
     return _provider_status(provider, config)
 
 
@@ -173,7 +185,7 @@ async def delete_provider(db: AsyncSession, provider: AiProvider) -> None:
         settings.default_model = None
         settings.default_model_is_custom = False
     await db.delete(config)
-    await db.flush()
+    await _flush_with_orphan_cleanup(db)
 
 
 async def check_provider(db: AsyncSession, provider: AiProvider) -> AiCheckResult:
@@ -186,13 +198,13 @@ async def check_provider(db: AsyncSession, provider: AiProvider) -> AiCheckResul
         config.last_check_status = "error"
         config.last_check_category = exc.error.category.value
         config.last_checked_at = checked_at
-        await db.flush()
+        await _flush_with_orphan_cleanup(db)
         return AiCheckResult(ok=False, error=exc.error, checked_at=checked_at)
 
     config.last_check_status = "ok"
     config.last_check_category = None
     config.last_checked_at = checked_at
-    await db.flush()
+    await _flush_with_orphan_cleanup(db)
     return AiCheckResult(ok=True, error=None, checked_at=checked_at)
 
 
@@ -235,14 +247,14 @@ async def list_models(
             provider=provider,
             source=ModelSource.FALLBACK,
             fetched_at=None,
-            models=fallback_models(provider),
+            models=sorted_models(fallback_models(provider)),
             error=exc.error,
         )
 
     fetched_at = _now()
     config.model_cache = [model.model_dump(mode="json") for model in models]
     config.models_fetched_at = fetched_at
-    await db.flush()
+    await _flush_with_orphan_cleanup(db)
     return AiModelList(
         provider=provider,
         source=ModelSource.LIVE,
@@ -280,7 +292,7 @@ async def set_default(
     settings.default_provider = update.provider
     settings.default_model = update.model
     settings.default_model_is_custom = update.is_custom
-    await db.flush()
+    await _flush_with_orphan_cleanup(db)
     return AiDefault(
         provider=update.provider,
         model=update.model,
@@ -295,7 +307,7 @@ async def clear_default(db: AsyncSession) -> None:
     settings.default_provider = None
     settings.default_model = None
     settings.default_model_is_custom = False
-    await db.flush()
+    await _flush_with_orphan_cleanup(db)
 
 
 async def inference_test(

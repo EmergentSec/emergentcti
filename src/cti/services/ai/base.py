@@ -109,7 +109,7 @@ class AiProviderAdapter(ABC):
                 )
         except httpx.TimeoutException:
             raise AiAdapterError(make_ai_error(AiErrorCategory.TIMEOUT)) from None
-        except httpx.RequestError:
+        except Exception:
             raise AiAdapterError(make_ai_error(AiErrorCategory.NETWORK_ERROR)) from None
         _raise_for_provider_status(response)
         return response
