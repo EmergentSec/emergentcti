@@ -82,6 +82,8 @@ export default function ObservableDetailPage() {
   const createAllowlistEntry = useCreateAllowlistEntry()
   const setConfidenceOverride = useSetConfidenceOverride()
   const clearConfidenceOverride = useClearConfidenceOverride()
+  const overrideBusy =
+    setConfidenceOverride.isPending || clearConfidenceOverride.isPending
   const [showAllowlist, setShowAllowlist] = useState(false)
   const [allowlistReason, setAllowlistReason] = useState('')
   const [allowlistError, setAllowlistError] = useState<string | null>(null)
@@ -270,7 +272,7 @@ export default function ObservableDetailPage() {
               )}
               {obs.confidence_override && (
                 <Badge variant="warning" title="Confidence is pinned by an admin override">
-                  Pinned by {obs.confidence_override.set_by ?? 'deleted user'},{' '}
+                  Pinned by {obs.confidence_override.set_by ?? 'an API key or removed user'},{' '}
                   {formatRelativeTime(obs.confidence_override.set_at)}
                 </Badge>
               )}
@@ -375,7 +377,7 @@ export default function ObservableDetailPage() {
               <h3 className="text-sm font-semibold">Analyst confidence</h3>
               {obs.manual_confidence != null && (
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Analyst floor:{' '}
+                  Manual floor:{' '}
                   <span className="font-mono font-medium text-foreground">{obs.manual_confidence}</span>
                 </p>
               )}
@@ -385,22 +387,24 @@ export default function ObservableDetailPage() {
                 <p className="text-sm font-medium">Override confidence</p>
                 <p className="text-sm text-muted-foreground">{CONFIDENCE_OVERRIDE_HELP}</p>
                 <div className="flex max-w-xs flex-col gap-2 sm:flex-row sm:items-end">
-                  <Input
-                    id="confidence-override"
-                    label="Confidence (0–100)"
-                    type="text"
-                    inputMode="numeric"
-                    value={overrideInput}
-                    onChange={(e) => setOverrideInput(e.target.value)}
-                    aria-invalid={overrideError ? true : undefined}
-                    className="sm:flex-1"
-                  />
+                  <div className="sm:flex-1">
+                    <Input
+                      id="confidence-override"
+                      label="Confidence (0–100)"
+                      type="text"
+                      inputMode="numeric"
+                      value={overrideInput}
+                      onChange={(e) => setOverrideInput(e.target.value)}
+                      error={overrideError ?? undefined}
+                      disabled={overrideBusy}
+                    />
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     <Button
                       type="submit"
                       variant="outline"
                       size="sm"
-                      disabled={setConfidenceOverride.isPending}
+                      disabled={overrideBusy}
                     >
                       {setConfidenceOverride.isPending ? 'Setting…' : 'Set override'}
                     </Button>
@@ -409,7 +413,7 @@ export default function ObservableDetailPage() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={clearConfidenceOverride.isPending}
+                        disabled={overrideBusy}
                         onClick={handleClearOverride}
                       >
                         {clearConfidenceOverride.isPending ? 'Clearing…' : 'Clear override'}
@@ -417,11 +421,6 @@ export default function ObservableDetailPage() {
                     )}
                   </div>
                 </div>
-                {overrideError && (
-                  <p role="alert" className="text-sm text-destructive">
-                    {overrideError}
-                  </p>
-                )}
               </form>
             )}
           </CardContent>

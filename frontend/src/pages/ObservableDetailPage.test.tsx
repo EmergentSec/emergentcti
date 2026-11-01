@@ -11,17 +11,18 @@ const mockUseConfig = vi.fn()
 
 const mockSetOverride = vi.fn()
 const mockClearOverride = vi.fn()
+const mockOverridePending = vi.hoisted(() => ({ set: false, clear: false }))
 
 vi.mock('@/hooks/useObservables', () => ({
   useObservable: (id: string | null) => mockUseObservable(id),
   useObservables: () => ({ data: { items: [] } }),
   useSetConfidenceOverride: () => ({
     mutate: mockSetOverride,
-    isPending: false,
+    isPending: mockOverridePending.set,
   }),
   useClearConfidenceOverride: () => ({
     mutate: mockClearOverride,
-    isPending: false,
+    isPending: mockOverridePending.clear,
   }),
 }))
 
@@ -98,11 +99,14 @@ function renderWithEntry(entry: string) {
 afterEach(() => {
   cleanup()
   mockAuth.isAdmin = true
+  mockOverridePending.set = false
+  mockOverridePending.clear = false
   mockCreateEntry.mockReset()
   mockToast.mockReset()
   mockSetOverride.mockReset()
   mockClearOverride.mockReset()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 // Default config mock — overridden in individual tests as needed
@@ -355,6 +359,17 @@ describe('ObservableDetailPage', () => {
     expect(screen.getByText(/Pinned by alice/i)).toBeTruthy()
   })
 
+  it('shows neutral pinned-by text when set_by is null', () => {
+    renderLoaded({
+      confidence_override: {
+        value: 90,
+        set_at: '2026-06-01T12:00:00Z',
+        set_by: null,
+      },
+    })
+    expect(screen.getByText(/Pinned by an API key or removed user,/i)).toBeTruthy()
+  })
+
   it('hides override controls from non-admin users', () => {
     mockAuth.isAdmin = false
     renderLoaded({
@@ -369,10 +384,16 @@ describe('ObservableDetailPage', () => {
     expect(screen.queryByRole('button', { name: 'Clear override' })).toBeNull()
   })
 
-  it('shows analyst floor when manual_confidence is set', () => {
+  it('shows manual floor when manual_confidence is set', () => {
     renderLoaded({ manual_confidence: 85 })
-    expect(screen.getByText(/Analyst floor:/)).toBeTruthy()
+    expect(screen.getByText(/Manual floor:/)).toBeTruthy()
     expect(screen.getByText('85')).toBeTruthy()
+  })
+
+  it('prefills override input with effective confidence_score', () => {
+    renderLoaded({ confidence_score: 42 })
+    const input = screen.getByLabelText('Confidence (0–100)') as HTMLInputElement
+    expect(input.value).toBe('42')
   })
 
   it.each([
@@ -384,7 +405,7 @@ describe('ObservableDetailPage', () => {
     renderLoaded()
     fireEvent.change(screen.getByLabelText('Confidence (0–100)'), { target: { value } })
     fireEvent.click(screen.getByRole('button', { name: 'Set override' }))
-    expect(screen.getByRole('alert').textContent).toBe('Enter a whole number from 0 to 100')
+    expect(screen.getByText('Enter a whole number from 0 to 100')).toBeTruthy()
     expect(mockSetOverride).not.toHaveBeenCalled()
   })
 
@@ -410,7 +431,9 @@ describe('ObservableDetailPage', () => {
       },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Clear override' }))
-    expect(confirmSpy).toHaveBeenCalled()
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Clear the pinned override? Confidence will be recomputed from feeds and analyst decisions.',
+    )
     expect(mockClearOverride).toHaveBeenCalledWith('obs-abc-123', expect.any(Object))
   })
 
@@ -439,8 +462,51 @@ describe('ObservableDetailPage', () => {
         } as AxiosResponse),
       ),
     )
-    expect(screen.getByRole('alert').textContent).toBe('Confidence must be between 0 and 100')
+    expect(screen.getByText('Confidence must be between 0 and 100')).toBeTruthy()
     expect(mockToast).toHaveBeenCalledWith('Confidence must be between 0 and 100', 'error')
+  })
+
+  it('shows server detail on 422 when setting override (list-shaped detail)', () => {
+    renderLoaded()
+    fireEvent.change(screen.getByLabelText('Confidence (0–100)'), { target: { value: '50' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set override' }))
+    act(() =>
+      mockSetOverride.mock.calls[0][1].onError(
+        new AxiosError('Unprocessable', '422', undefined, undefined, {
+          status: 422,
+          data: {
+            detail: [
+              {
+                type: 'greater_than_equal',
+                loc: ['body', 'confidence'],
+                msg: 'Input should be greater than or equal to 0',
+                input: 50,
+              },
+            ],
+          },
+        } as AxiosResponse),
+      ),
+    )
+    expect(screen.getByText('Input should be greater than or equal to 0')).toBeTruthy()
+    expect(mockToast).toHaveBeenCalledWith('Input should be greater than or equal to 0', 'error')
+  })
+
+  it('disables override controls while a mutation is pending', () => {
+    mockOverridePending.set = true
+    renderLoaded({
+      confidence_override: {
+        value: 90,
+        set_at: '2026-06-01T12:00:00Z',
+        set_by: 'alice',
+      },
+    })
+    expect((screen.getByRole('button', { name: 'Setting…' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+    expect(
+      (screen.getByRole('button', { name: 'Clear override' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect((screen.getByLabelText('Confidence (0–100)') as HTMLInputElement).disabled).toBe(true)
   })
 
   it('renders override help text verbatim', () => {
