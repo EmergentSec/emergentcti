@@ -280,3 +280,9 @@ the coordinator; the rest only fix details the contract leaves open.
     request, hit or miss, the TLP check queries current markings, the same way
     the allowlist is applied. Marking, override and tag changes also invalidate
     observable caches (best effort).
+14. **API-key RED visibility (coordinator decision).** Effective-RED
+    observables and RED reports do not exist for API-key callers on item read
+    paths: lists filter them before pagination, direct and mutation paths use
+    404, and nested item lists omit or redact them. A mutation that newly makes
+    an item RED succeeds but returns 204 instead of echoing it. Aggregate
+    counts may still include RED items. Interactive sessions are unchanged.

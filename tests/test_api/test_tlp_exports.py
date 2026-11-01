@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from sqlalchemy import delete
 
 from cti.models.observable import ObservableType
 from cti.models.user import UserRole
@@ -118,6 +119,32 @@ async def test_red_excluded_even_after_cached_blocklist(
     assert again.headers["X-Cache"] == "HIT"
     assert again.text == "203.0.113.50\n203.0.113.51"
     assert again.headers["X-TLP-Excluded"] == "0"
+
+
+async def test_cached_deleted_red_value_fails_closed(
+    client: AsyncClient, db_session: AsyncSession, fake_cache: dict[str, str]
+) -> None:
+    """A stale cache entry cannot resurrect a deleted value without policy context."""
+    red_feed = await add_feed(db_session, "Deleted red", tlp="red")
+    obs = await add_observable(db_session, "203.0.113.52", feed=red_feed)
+    url = f"{EXPORT}/blocklist/ip-addr"
+
+    first = await client.get(url)
+    assert first.headers["X-Cache"] == "MISS"
+    assert first.text == ""
+    assert first.headers["X-TLP-Excluded"] == "1"
+    assert list(fake_cache.values()) == ["203.0.113.52"]
+
+    # Simulate deletion while invalidation is unavailable: the pre-policy
+    # cache still names the formerly RED value, but no current row can prove
+    # that it is shareable.
+    await db_session.execute(delete(type(obs)).where(type(obs).id == obs.id))
+    await db_session.commit()
+
+    cached = await client.get(url)
+    assert cached.headers["X-Cache"] == "HIT"
+    assert cached.text == ""
+    assert cached.headers["X-TLP-Excluded"] == "0"
 
 
 async def test_red_excluded_from_json_and_text_after_prior_responses(

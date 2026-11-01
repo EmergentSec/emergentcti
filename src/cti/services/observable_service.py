@@ -23,6 +23,7 @@ from cti.services.confidence import compute_source_confidence, recompute_effecti
 from cti.services.tlp import (
     MARKING_KEYS,
     effective_tlp_expr,
+    is_shareable,
     marking_key,
     not_red_clause,
     shareable_clause,
@@ -623,19 +624,31 @@ async def apply_blocklist_policy(
     that pass the allowlist but are withheld by TLP.
     """
     matcher = allowlist if allowlist is not None else await allowlist_service.load_matcher(db)
-    # (type, value) is unique, so within one type a value is one observable.
-    blocked = {
-        value
-        async for _type, value, _marking in _stream_withheld(
-            db, [Observable.type == obs_type], destination
+    # A cached value is eligible only when a current row with that type and
+    # value still exists and its current marking is shareable. This is
+    # intentionally fail-closed: a deleted (or retyped) cached row has no
+    # current policy context and must never be resurrected by the cache.
+    current_markings: dict[str, str | None] = {}
+    unique_candidates = list(dict.fromkeys(candidates))
+    effective = effective_tlp_expr()
+    for start in range(0, len(unique_candidates), _BATCH_SIZE):
+        chunk = unique_candidates[start : start + _BATCH_SIZE]
+        rows = await db.execute(
+            select(Observable.value, effective).where(
+                Observable.type == obs_type,
+                Observable.value.in_(chunk),
+            )
         )
-    }
+        current_markings.update(rows.all())
+
     values: list[str] = []
     withheld = 0
     for value in candidates:
         if matcher.is_allowlisted(obs_type, value):
             continue
-        if value in blocked:
+        if value not in current_markings:
+            continue
+        if not is_shareable(current_markings[value], destination):
             withheld += 1
             continue
         values.append(value)

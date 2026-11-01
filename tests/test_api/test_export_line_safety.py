@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.models.observable import ObservableType
 from cti.services.observable_service import is_line_safe
 from tests.policy_helpers import NO_TLP_EXCLUSIONS, add_observable, allow
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 DOMAIN = ObservableType.DOMAIN_NAME
 PROFILES = "/api/v1/export/profiles"
@@ -170,10 +174,12 @@ async def test_cache_miss_never_stores_unsafe_values(
 
 
 async def test_cache_hit_from_older_release_is_resanitized(
-    client: AsyncClient, fake_cache: dict[str, str]
+    client: AsyncClient, db_session: AsyncSession, fake_cache: dict[str, str]
 ) -> None:
     # Written before line-safety existed: an embedded newline already split the
     # value, and a carriage return / separator still rides inside a "line".
+    for value in ("203.0.113.1", "203.0.113.9", "10.0.0.5"):
+        await add_observable(db_session, value)
     fake_cache[CACHE_KEY] = (
         "203.0.113.1\n203.0.113.9\n10.0.0.5\n203.0.113.7\r10.0.0.5\n\n203.0.113.8\u202810.0.0.5"
     )

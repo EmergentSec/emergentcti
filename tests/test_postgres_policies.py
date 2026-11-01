@@ -21,7 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from cti.models.allowlist import AllowlistEntry, AllowlistKind
-from cti.models.export_profile import ExportFormat, ExportProfile
+from cti.models.export_profile import ExportDestination, ExportFormat, ExportProfile
 from cti.models.feed import Feed, FeedType
 from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
@@ -394,15 +394,22 @@ async def test_postgres_migration_009_tlp_and_tags(pg_sessions):
                 ]
             )
         )
+        profile_id = profile.id
+        red_feed_id = red_feed.id
+        green_report_id = green_report.id
+        red_obs_id = red_obs.id
+        poisoned_id = poisoned.id
+        amber_obs_id = amber_obs.id
+        manual_id = manual.id
         await db.commit()
-        assert (await db.get(ExportProfile, profile.id)).destination.value == "internal"
+        assert (await db.get(ExportProfile, profile_id)).destination.value == "internal"
 
-        markings = await effective_tlp_map(db, [red_obs.id, poisoned.id, amber_obs.id, manual.id])
+        markings = await effective_tlp_map(db, [red_obs_id, poisoned_id, amber_obs_id, manual_id])
         assert {k: (v.value if v else None) for k, v in markings.items()} == {
-            red_obs.id: "red",
-            poisoned.id: None,
-            amber_obs.id: "amber",
-            manual.id: "clear",
+            red_obs_id: "red",
+            poisoned_id: None,
+            amber_obs_id: "amber",
+            manual_id: "clear",
         }
         values, _allowlisted, by_tlp = await observable_service.get_export_values(
             db, order="value", line_safe=True
@@ -413,11 +420,11 @@ async def test_postgres_migration_009_tlp_and_tags(pg_sessions):
         assert public == ["192.0.2.93"]
 
         for statement in (
-            update(Feed).where(Feed.id == red_feed.id).values(tlp="TLP:RED"),
-            update(Report).where(Report.id == green_report.id).values(tlp="white"),
-            update(Observable).where(Observable.id == manual.id).values(tlp_override="red"),
+            update(Feed).where(Feed.id == red_feed_id).values(tlp="TLP:RED"),
+            update(Report).where(Report.id == green_report_id).values(tlp="white"),
+            update(Observable).where(Observable.id == manual_id).values(tlp_override="red"),
             update(ExportProfile)
-            .where(ExportProfile.id == profile.id)
+            .where(ExportProfile.id == profile_id)
             .values(destination="external_ai"),
         ):
             with pytest.raises(IntegrityError):
@@ -428,9 +435,9 @@ async def test_postgres_migration_009_tlp_and_tags(pg_sessions):
         tag = Tag(name="pg-tag")
         db.add(tag)
         await db.flush()
-        await db.execute(observable_tags.insert().values(observable_id=red_obs.id, tag_id=tag.id))
+        await db.execute(observable_tags.insert().values(observable_id=red_obs_id, tag_id=tag.id))
         await db.execute(
-            export_profile_tags.insert().values(export_profile_id=profile.id, tag_id=tag.id)
+            export_profile_tags.insert().values(export_profile_id=profile_id, tag_id=tag.id)
         )
         await db.commit()
         tag_id = tag.id
@@ -439,7 +446,7 @@ async def test_postgres_migration_009_tlp_and_tags(pg_sessions):
             await db.commit()
         await db.rollback()
         # Deleting the observable cascades its tag assignments.
-        await db.execute(delete(Observable).where(Observable.id == red_obs.id))
+        await db.execute(delete(Observable).where(Observable.id == red_obs_id))
         await db.commit()
         remaining = await db.scalar(
             select(func.count())
@@ -465,3 +472,125 @@ async def test_postgres_migration_009_tlp_and_tags(pg_sessions):
         tables = await connection.run_sync(lambda c: set(inspect(c).get_table_names()))
         assert not {"tags", "observable_tags", "report_tags", "export_profile_tags"} & tables
         await connection.run_sync(run, "upgrade")
+
+
+async def test_postgres_effective_tlp_rule_and_profile_exports(pg_sessions):
+    """PostgreSQL agrees with the contract for poisoning, dominance, manual, and override."""
+    from cti.models.report import Report, report_observables
+    from cti.services import export_profile_service, observable_service
+    from cti.services.tlp import effective_tlp_map
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    async with pg_sessions() as db:
+        clear_feed = Feed(name="PG clear rule", feed_type=FeedType.FILE, tlp="clear")
+        unspecified_feed = Feed(name="PG unspecified rule", feed_type=FeedType.FILE)
+        red_feed = Feed(name="PG red rule", feed_type=FeedType.FILE, tlp="red")
+        unspecified_report = Report(title="PG unspecified rule", origin="internal")
+        amber_report = Report(title="PG amber rule", origin="internal", tlp="amber")
+        rows = {
+            "feed_only_clear": Observable(type=ObservableType.URL, value="https://pg.test/1"),
+            "poisoned_clear": Observable(type=ObservableType.URL, value="https://pg.test/2"),
+            "amber_dominates": Observable(type=ObservableType.URL, value="https://pg.test/3"),
+            "manual_counts": Observable(
+                type=ObservableType.URL, value="https://pg.test/4", manual_tlp="green"
+            ),
+            "override_loosen": Observable(
+                type=ObservableType.URL,
+                value="https://pg.test/5",
+                tlp_override="green",
+                tlp_override_reason="authorized",
+                tlp_override_set_at=now,
+            ),
+            "manual_only_unspecified": Observable(
+                type=ObservableType.URL, value="https://pg.test/6"
+            ),
+            "red": Observable(type=ObservableType.URL, value="https://pg.test/7"),
+        }
+        profile = ExportProfile(
+            name="PG community rule",
+            format=ExportFormat.TEXT,
+            type=ObservableType.URL,
+            confidence_min=0,
+            destination=ExportDestination.COMMUNITY,
+            tags=[],
+        )
+        db.add_all(
+            [
+                clear_feed,
+                unspecified_feed,
+                red_feed,
+                unspecified_report,
+                amber_report,
+                profile,
+                *rows.values(),
+            ]
+        )
+        await db.flush()
+        db.add_all(
+            [
+                ObservableSource(observable_id=rows["feed_only_clear"].id, feed_id=clear_feed.id),
+                ObservableSource(observable_id=rows["poisoned_clear"].id, feed_id=clear_feed.id),
+                ObservableSource(
+                    observable_id=rows["amber_dominates"].id,
+                    feed_id=unspecified_feed.id,
+                ),
+                ObservableSource(observable_id=rows["manual_counts"].id, feed_id=clear_feed.id),
+                ObservableSource(observable_id=rows["override_loosen"].id, feed_id=red_feed.id),
+                ObservableSource(observable_id=rows["red"].id, feed_id=red_feed.id),
+            ]
+        )
+        await db.execute(
+            report_observables.insert().values(
+                [
+                    {
+                        "report_id": unspecified_report.id,
+                        "observable_id": rows["poisoned_clear"].id,
+                    },
+                    {
+                        "report_id": amber_report.id,
+                        "observable_id": rows["amber_dominates"].id,
+                    },
+                ]
+            )
+        )
+        await db.flush()
+
+        ids = {name: row.id for name, row in rows.items()}
+        markings = await effective_tlp_map(db, ids.values())
+        assert {
+            name: markings[row_id].value if markings[row_id] else None
+            for name, row_id in ids.items()
+        } == {
+            "feed_only_clear": "clear",
+            "poisoned_clear": None,
+            "amber_dominates": "amber",
+            "manual_counts": "green",
+            "override_loosen": "green",
+            "manual_only_unspecified": None,
+            "red": "red",
+        }
+
+        (
+            values,
+            excluded_allowlisted,
+            excluded_by_tlp,
+        ) = await export_profile_service.get_profile_values(db, profile)
+        assert values == ["https://pg.test/1", "https://pg.test/4", "https://pg.test/5"]
+        assert excluded_allowlisted == 0
+        assert excluded_by_tlp == {
+            "unspecified": 2,
+            "clear": 0,
+            "green": 0,
+            "amber": 1,
+            "amber+strict": 0,
+            "red": 1,
+        }
+        downloaded = await observable_service.get_export_json(
+            db,
+            obs_type=ObservableType.URL,
+            confidence_min=0,
+            limit=None,
+            destination="community",
+        )
+        assert len(downloaded) == len(values)
+        assert {row.value for row in downloaded} == set(values)

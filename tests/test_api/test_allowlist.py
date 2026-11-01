@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import pytest
-from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
 from tests.policy_helpers import add_feed, add_observable, allow, non_admin_client
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 DOMAIN = ObservableType.DOMAIN_NAME
 URL = ObservableType.URL
@@ -438,9 +441,11 @@ async def test_cached_blocklist_applies_current_allowlist(
 
 
 async def test_blocklist_cached_before_feature_is_filtered(
-    client: AsyncClient, fake_cache: dict[str, str]
+    client: AsyncClient, db_session: AsyncSession, fake_cache: dict[str, str]
 ) -> None:
     # An entry written by a pre-allowlist release, still within its TTL.
+    await add_observable(db_session, "10.1.2.3")
+    await add_observable(db_session, "203.0.113.5")
     fake_cache["blocklist:ip-addr:70:None:None"] = "10.1.2.3\n203.0.113.5"
     await allow(client, "cidr", "10.0.0.0/8")
 
