@@ -26,3 +26,15 @@ export async function createObservable(data: ObservableCreate): Promise<Observab
 export async function deleteObservable(id: string): Promise<void> {
   await api.delete(`/observables/${id}`)
 }
+
+export async function setConfidenceOverride(id: string, confidence: number): Promise<Observable> {
+  const { data } = await api.put<Observable>(`/observables/${id}/confidence-override`, {
+    confidence,
+  })
+  return data
+}
+
+export async function clearConfidenceOverride(id: string): Promise<Observable> {
+  const { data } = await api.delete<Observable>(`/observables/${id}/confidence-override`)
+  return data
+}

@@ -28,6 +28,8 @@ const OBSERVABLES: Observable[] = [
     type: 'ip-addr',
     value: '5.188.206.18',
     confidence_score: 38,
+    manual_confidence: null,
+    confidence_override: null,
     first_seen: '2026-06-27T00:00:00Z',
     last_seen: '2026-06-28T00:00:00Z',
     source_count: 1,
@@ -51,6 +53,12 @@ const OBSERVABLES: Observable[] = [
     type: 'url',
     value: 'http://194.5.250.100/payload',
     confidence_score: 78,
+    manual_confidence: null,
+    confidence_override: {
+      value: 78,
+      set_at: '2026-06-29T00:00:00Z',
+      set_by: 'admin',
+    },
     first_seen: '2026-06-29T00:00:00Z',
     last_seen: '2026-06-29T20:00:00Z',
     source_count: 3,
@@ -124,6 +132,15 @@ describe('ObservableTable', () => {
     expect(screen.getByText('Low')).toBeTruthy()
     // obs-2: score 78 → High
     expect(screen.getByText('High')).toBeTruthy()
+  })
+
+  it('shows a pinned marker when confidence_override is set', () => {
+    render(
+      <MemoryRouter>
+        <ObservableTable observables={OBSERVABLES} />
+      </MemoryRouter>,
+    )
+    expect(screen.getByLabelText('Pinned confidence override')).toBeTruthy()
   })
 
   it('navigates to /observables/:id when a row is clicked', () => {

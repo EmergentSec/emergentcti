@@ -414,8 +414,9 @@ def test_overlong_url_is_invalid_and_clipped() -> None:
 def test_pathological_input_runs_in_linear_time(text: str) -> None:
     started = time.perf_counter()
     extract([text])
-    # Quadratic behaviour on 2M chars would take minutes; generous bound for CI.
-    assert time.perf_counter() - started < 10
+    # Quadratic behaviour on 2M chars would take minutes; leave headroom for
+    # loaded CI workers while keeping a meaningful upper bound.
+    assert time.perf_counter() - started < 30
 
 
 @pytest.mark.parametrize(

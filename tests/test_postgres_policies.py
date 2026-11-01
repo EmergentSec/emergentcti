@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -216,8 +216,13 @@ async def test_postgres_report_import_upserts_and_attribution_constraints(pg_ses
 
     async with pg_sessions() as db:
         user = User(username="pg-importer", password_hash="unused", role=UserRole.admin)
+        # An analyst-created observable: since #28 its confidence is recorded
+        # as manual_confidence (the floor that report imports cannot lower).
         existing = Observable(
-            type=ObservableType.IP_ADDR, value="185.220.101.42", confidence_score=90
+            type=ObservableType.IP_ADDR,
+            value="185.220.101.42",
+            confidence_score=90,
+            manual_confidence=90,
         )
         report = Report(
             title="PG import",
@@ -269,3 +274,73 @@ async def test_postgres_report_import_upserts_and_attribution_constraints(pg_ses
             )
         ).all()
         assert imported_by == [None, None]
+
+
+async def test_postgres_confidence_recompute_and_constraints(pg_sessions):
+    """Migration 008 CHECKs and the shared floor/override UPDATE on PostgreSQL."""
+    from cti.models.report import Report, report_observables
+    from cti.models.user import User, UserRole
+    from cti.services.confidence import recompute_effective_confidence
+
+    async with pg_sessions() as db:
+        feed = Feed(name="PG confidence", feed_type=FeedType.FILE)
+        report = Report(title="PG confidence report", origin="internal")
+        setter = User(username="pg-confidence-setter", password_hash="unused", role=UserRole.admin)
+        observable = Observable(
+            type=ObservableType.DOMAIN_NAME,
+            value="confidence-pg.example",
+            confidence_score=10,
+            manual_confidence=40,
+        )
+        db.add_all([feed, report, setter, observable])
+        await db.flush()
+        db.add(
+            ObservableSource(
+                observable_id=observable.id,
+                feed_id=feed.id,
+                source_confidence=60,
+                native_confidence=60,
+            )
+        )
+        await db.execute(
+            report_observables.insert().values(
+                report_id=report.id,
+                observable_id=observable.id,
+                analyst_confidence=80,
+            )
+        )
+        await recompute_effective_confidence(db, [observable.id])
+        await db.commit()
+        observable_id = observable.id
+        stored = await db.get(Observable, observable_id, populate_existing=True)
+        assert stored is not None and stored.confidence_score == 80
+
+        stored.confidence_override = 5
+        stored.override_set_at = datetime.now(UTC)
+        stored.override_set_by_id = setter.id
+        await recompute_effective_confidence(db, [observable_id])
+        await db.commit()
+        setter_id = setter.id
+        stored = await db.get(Observable, observable_id, populate_existing=True)
+        assert stored is not None and stored.confidence_score == 5
+
+        await db.execute(delete(User).where(User.id == setter_id))
+        await db.commit()
+        stored = await db.get(Observable, observable_id, populate_existing=True)
+        assert stored is not None and stored.override_set_by_id is None
+
+        invalid_updates = [
+            {"manual_confidence": 101},
+            {"confidence_override": -1},
+            {
+                "confidence_override": None,
+                "override_set_at": datetime.now(UTC),
+            },
+        ]
+        for values in invalid_updates:
+            with pytest.raises(IntegrityError):
+                await db.execute(
+                    update(Observable).where(Observable.id == observable_id).values(**values)
+                )
+                await db.commit()
+            await db.rollback()

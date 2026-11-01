@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock
 
 import pytest
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from cti.api.v1 import feeds as feeds_api
 from cti.core.security import decrypt_config, encrypt_config
 from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.models.feed import Feed, FeedType
+from cti.services import scheduler
 from cti.services.feed_auth import REPAIR_MESSAGE, URL_TEMPLATE_URL_CHANGE_MESSAGE
 from tests.policy_helpers import non_admin_client
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _corrupted_auth_blob(valid_config: dict) -> bytes:
@@ -20,6 +26,29 @@ def _corrupted_auth_blob(valid_config: dict) -> bytes:
     tampered = bytearray(encrypted)
     tampered[len(tampered) // 2] ^= 0xFF
     return bytes(tampered)
+
+
+@pytest.mark.asyncio
+async def test_delete_feed_invalidates_observable_caches_after_commit(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    feed = Feed(
+        name="Delete cache feed",
+        feed_type=FeedType.FILE,
+        is_preconfigured=False,
+    )
+    db_session.add(feed)
+    await db_session.commit()
+    invalidate = AsyncMock()
+    monkeypatch.setattr(feeds_api, "invalidate_observable_caches", invalidate)
+    monkeypatch.setattr(scheduler, "sync_feed_jobs", AsyncMock())
+
+    response = await client.delete(f"/api/v1/feeds/{feed.id}")
+
+    assert response.status_code == 204
+    invalidate.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
@@ -70,9 +99,7 @@ async def test_feed_with_encrypted_auth_has_auth_true(
 
 
 @pytest.mark.asyncio
-async def test_plain_custom_feed_both_false(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_plain_custom_feed_both_false(client: AsyncClient, db_session: AsyncSession) -> None:
     """A plain custom FILE feed with no auth → both has_auth and auth_supported are False."""
     feed = Feed(
         name="MyCustomFileFeed",
@@ -117,9 +144,7 @@ async def test_custom_feed_with_reserved_name_not_auth_supported(
 
 
 @pytest.mark.asyncio
-async def test_rotate_api_key_on_custom_feed(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_rotate_api_key_on_custom_feed(client: AsyncClient, db_session: AsyncSession) -> None:
     """Partial auth_config on a custom feed with existing encrypted config rotates the key."""
     old_config = {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "old"}
     feed = Feed(
@@ -175,9 +200,7 @@ async def test_set_key_on_preconfigured_feed_with_no_auth(
 
 
 @pytest.mark.asyncio
-async def test_bearer_routing_sets_token(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_bearer_routing_sets_token(client: AsyncClient, db_session: AsyncSession) -> None:
     """For a bearer-auth feed (urlscan.io), api_key_value is also mirrored into 'token'."""
     feed = Feed(
         name="urlscan.io",
@@ -308,7 +331,11 @@ async def test_empty_api_key_value_leaves_stored_key_unchanged(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     """PUT with api_key_value='' must return 200 and leave the stored key intact (no-op)."""
-    original_config = {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "original-secret"}
+    original_config = {
+        "auth_type": "api_key",
+        "api_key_header": "Key",
+        "api_key_value": "original-secret",
+    }
     feed = Feed(
         name="MyFeed",
         feed_type=FeedType.API,
@@ -334,8 +361,12 @@ async def test_empty_api_key_value_leaves_stored_key_unchanged(
 async def test_absent_secret_in_partial_auth_config_is_noop(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """PUT with auth_config containing no secret key must return 200 and leave credentials intact."""
-    original_config = {"auth_type": "api_key", "api_key_header": "Key", "api_key_value": "original-secret"}
+    """A PUT without a secret key leaves the existing credentials intact."""
+    original_config = {
+        "auth_type": "api_key",
+        "api_key_header": "Key",
+        "api_key_value": "original-secret",
+    }
     feed = Feed(
         name="MyFeed2",
         feed_type=FeedType.API,
@@ -378,9 +409,7 @@ async def test_set_key_via_template_does_not_mutate_default_global(
     )
     assert resp.status_code == 200
 
-    template = next(
-        d["auth_config_template"] for d in DEFAULT_FEEDS if d["name"] == "AbuseIPDB"
-    )
+    template = next(d["auth_config_template"] for d in DEFAULT_FEEDS if d["name"] == "AbuseIPDB")
     assert "api_key_value" not in template
     assert "token" not in template
 

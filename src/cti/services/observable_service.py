@@ -6,23 +6,28 @@ import asyncio
 import logging
 import re
 import uuid
-from collections.abc import AsyncIterator
 from contextlib import aclosing
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from cti.feeds.base import RawObservable
-from cti.models.feed import Feed
 from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
 from cti.services import allowlist_service
-from cti.services.allowlist_service import AllowlistMatcher
-from cti.services.confidence import compute_source_confidence
+from cti.services.confidence import compute_source_confidence, recompute_effective_confidence
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from cti.feeds.base import RawObservable
+    from cti.models.feed import Feed
+    from cti.services.allowlist_service import AllowlistMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -121,22 +126,27 @@ async def get_observables(
     offset = (max(1, page) - 1) * size
     base = base.offset(offset).limit(size)
 
-    # -- eager-load sources -------------------------------------------------
-    base = base.options(selectinload(Observable.sources))
+    # -- eager-load response relationships ---------------------------------
+    base = base.options(
+        selectinload(Observable.sources),
+        selectinload(Observable.override_set_by),
+    )
 
     result = await db.execute(base)
     items = list(result.scalars().unique().all())
     return items, total_count
 
 
-async def get_observable(
-    db: AsyncSession, observable_id: uuid.UUID
-) -> Observable | None:
+async def get_observable(db: AsyncSession, observable_id: uuid.UUID) -> Observable | None:
     """Get a single observable by ID with sources eagerly loaded."""
     result = await db.execute(
         select(Observable)
         .where(Observable.id == observable_id)
-        .options(selectinload(Observable.sources))
+        .options(
+            selectinload(Observable.sources),
+            selectinload(Observable.override_set_by),
+        )
+        .execution_options(populate_existing=True)
     )
     return result.scalar_one_or_none()
 
@@ -161,18 +171,18 @@ async def create_observable(
         type=obs_type,
         value=value,
         confidence_score=confidence_score,
+        manual_confidence=confidence_score,
         first_seen=now,
         last_seen=now,
     )
     stmt = stmt.on_conflict_do_update(
         constraint="uq_observable_type_value",
         set_={
-            "confidence_score": func.greatest(
-                Observable.__table__.c.confidence_score, stmt.excluded.confidence_score
+            "manual_confidence": func.greatest(
+                Observable.__table__.c.manual_confidence,
+                stmt.excluded.manual_confidence,
             ),
-            "last_seen": func.greatest(
-                Observable.__table__.c.last_seen, stmt.excluded.last_seen
-            ),
+            "last_seen": func.greatest(Observable.__table__.c.last_seen, stmt.excluded.last_seen),
             "updated_at": func.now(),
         },
     )
@@ -182,19 +192,29 @@ async def create_observable(
     result = await db.execute(
         select(Observable)
         .where(Observable.type == obs_type, Observable.value == value)
-        .options(selectinload(Observable.sources))
+        .options(
+            selectinload(Observable.sources),
+            selectinload(Observable.override_set_by),
+        )
+        .execution_options(populate_existing=True)
     )
     obs = result.scalar_one()
+    await recompute_effective_confidence(db, [obs.id])
+    await db.flush()
+    obs = await get_observable(db, obs.id)
+    assert obs is not None
 
     # Detect new insert: first_seen will be close to now for new rows.
-    first_seen = obs.first_seen.replace(tzinfo=UTC) if obs.first_seen and obs.first_seen.tzinfo is None else obs.first_seen
+    first_seen = (
+        obs.first_seen.replace(tzinfo=UTC)
+        if obs.first_seen and obs.first_seen.tzinfo is None
+        else obs.first_seen
+    )
     created = abs((first_seen - now).total_seconds()) < 2 if first_seen else True
     return obs, created
 
 
-async def delete_observable(
-    db: AsyncSession, observable_id: uuid.UUID
-) -> bool:
+async def delete_observable(db: AsyncSession, observable_id: uuid.UUID) -> bool:
     """Delete an observable by ID. Returns True if deleted."""
     obs = await db.get(Observable, observable_id)
     if not obs:
@@ -202,6 +222,41 @@ async def delete_observable(
     await db.delete(obs)
     await db.flush()
     return True
+
+
+async def set_confidence_override(
+    db: AsyncSession,
+    observable_id: uuid.UUID,
+    confidence: int,
+    *,
+    set_by_id: uuid.UUID | None,
+) -> Observable | None:
+    """Pin an observable's effective confidence to an exact value."""
+    obs = await get_observable(db, observable_id)
+    if obs is None:
+        return None
+    obs.confidence_override = confidence
+    obs.override_set_at = datetime.now(UTC)
+    obs.override_set_by_id = set_by_id
+    await recompute_effective_confidence(db, [observable_id])
+    await db.flush()
+    return await get_observable(db, observable_id)
+
+
+async def clear_confidence_override(
+    db: AsyncSession,
+    observable_id: uuid.UUID,
+) -> Observable | None:
+    """Clear a pinned confidence and restore the feed/analyst floor rule."""
+    obs = await get_observable(db, observable_id)
+    if obs is None:
+        return None
+    obs.confidence_override = None
+    obs.override_set_at = None
+    obs.override_set_by_id = None
+    await recompute_effective_confidence(db, [observable_id])
+    await db.flush()
+    return await get_observable(db, observable_id)
 
 
 async def bulk_upsert_from_feed(
@@ -261,7 +316,10 @@ async def bulk_upsert_from_feed(
                 stmt = stmt.on_conflict_do_update(
                     constraint="uq_observable_type_value",
                     set_={
-                        "last_seen": func.greatest(Observable.__table__.c.last_seen, stmt.excluded.last_seen),
+                        "last_seen": func.greatest(
+                            Observable.__table__.c.last_seen,
+                            stmt.excluded.last_seen,
+                        ),
                         "updated_at": func.now(),
                     },
                 )
@@ -276,9 +334,7 @@ async def bulk_upsert_from_feed(
                 type_value_pairs = [(r.type, r.value) for r in batch]
                 id_lookup: dict[tuple[ObservableType, str], uuid.UUID] = {}
 
-                lookup_stmt = select(
-                    Observable.id, Observable.type, Observable.value
-                ).where(
+                lookup_stmt = select(Observable.id, Observable.type, Observable.value).where(
                     tuple_(Observable.type, Observable.value).in_(type_value_pairs)
                 )
                 lookup_result = await db.execute(lookup_stmt)
@@ -344,17 +400,7 @@ async def bulk_upsert_from_feed(
                 # ── Step 3: recompute effective confidence for affected observables
                 affected_ids = list(id_lookup.values())
                 if affected_ids:
-                    max_conf_sub = (
-                        select(func.max(ObservableSource.source_confidence))
-                        .where(ObservableSource.observable_id == Observable.id)
-                        .correlate(Observable)
-                        .scalar_subquery()
-                    )
-                    await db.execute(
-                        Observable.__table__.update()
-                        .where(Observable.__table__.c.id.in_(affected_ids))
-                        .values(confidence_score=func.coalesce(max_conf_sub, 50))
-                    )
+                    await recompute_effective_confidence(db, affected_ids)
 
                 # Commit per-batch to release row locks so concurrent feeds
                 # don't accumulate competing lock sets across batches.
@@ -366,18 +412,19 @@ async def bulk_upsert_from_feed(
             except OperationalError as e:
                 await db.rollback()
                 if "deadlock" in str(e).lower() and attempt < _MAX_RETRIES:
-                    delay = _BASE_DELAY * (2 ** attempt)
+                    delay = _BASE_DELAY * (2**attempt)
                     logger.warning(
                         "Deadlock on batch %d, attempt %d/%d — retrying in %.1fs",
-                        batch_start, attempt + 1, _MAX_RETRIES, delay,
+                        batch_start,
+                        attempt + 1,
+                        _MAX_RETRIES,
+                        delay,
                     )
                     await asyncio.sleep(delay)
                 else:
                     raise
 
-    logger.info(
-        "Bulk upsert complete: %d ingested, %d new", total_ingested, new_count
-    )
+    logger.info("Bulk upsert complete: %d ingested, %d new", total_ingested, new_count)
     return total_ingested, new_count
 
 

@@ -164,6 +164,7 @@ async def delete_report(
     if not await report_service.delete_report(db, report_id):
         raise HTTPException(status_code=404, detail="Report not found")
     await db.commit()
+    await invalidate_observable_caches()
     return Response(status_code=204)
 
 
@@ -264,6 +265,7 @@ async def unlink_report_observable(
     if not await report_service.unlink_observable(db, report_id, observable_id):
         raise HTTPException(status_code=404, detail="Report-observable link not found")
     await db.commit()
+    await invalidate_observable_caches()
     return Response(status_code=204)
 
 
@@ -302,8 +304,5 @@ async def import_report_indicators(
     except report_import_service.NotACandidateError as exc:
         raise HTTPException(status_code=422, detail=exc.detail) from None
     await db.commit()
-    if result.created:
-        # New observables change dashboard counts and blocklist eligibility;
-        # drop both caches like feed runs and retention do.
-        await invalidate_observable_caches()
+    await invalidate_observable_caches()
     return result

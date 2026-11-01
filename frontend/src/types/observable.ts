@@ -15,11 +15,19 @@ export interface ObservableSource {
   last_seen_by_feed: string
 }
 
+export interface ConfidenceOverride {
+  value: number
+  set_at: string
+  set_by: string | null
+}
+
 export interface Observable {
   id: string
   type: ObservableType
   value: string
   confidence_score: number
+  manual_confidence: number | null
+  confidence_override: ConfidenceOverride | null
   first_seen: string | null
   last_seen: string | null
   source_count: number

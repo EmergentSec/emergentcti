@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import logging
 import os
-import uuid
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.security import encrypt_config
 from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.models.export_profile import ExportProfile
-from cti.models.feed import Feed, FeedRun, FeedRunStatus, FeedType
+from cti.models.feed import Feed, FeedRun, FeedRunStatus
 from cti.models.observable_source import ObservableSource
+from cti.services.confidence import recompute_effective_confidence
 from cti.services.feed_auth import (
     REPAIR_MESSAGE,
     URL_TEMPLATE_URL_CHANGE_MESSAGE,
@@ -24,6 +24,11 @@ from cti.services.feed_auth import (
     try_decrypt_stored_auth,
     validate_auth_config,
 )
+
+if TYPE_CHECKING:
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -202,9 +207,7 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
 
     if auth_config_provided and auth_config is not None:
         partial_only = "auth_type" not in auth_config
-        _apply_auth_config_update(
-            feed, auth_config, partial_only=partial_only
-        )
+        _apply_auth_config_update(feed, auth_config, partial_only=partial_only)
 
     if url_change_without_auth and feed.auth_config_encrypted is not None:
         decrypted = try_decrypt_stored_auth(feed.auth_config_encrypted)
@@ -217,9 +220,7 @@ async def update_feed(db: AsyncSession, feed: Feed, data: dict) -> Feed:
                 try:
                     validate_auth_config(decrypted, feed_url=feed.url)
                 except AuthConfigValidationError as exc:
-                    raise AuthConfigValidationError(
-                        URL_TEMPLATE_URL_CHANGE_MESSAGE
-                    ) from exc
+                    raise AuthConfigValidationError(URL_TEMPLATE_URL_CHANGE_MESSAGE) from exc
 
     await db.flush()
     # SQL-expression onupdate expires this field; load it while IO is awaited.
@@ -242,6 +243,14 @@ async def delete_feed(db: AsyncSession, feed: Feed) -> bool:
     if profile_names:
         raise FeedInUseError(profile_names)
     feed_id = feed.id
+    affected_ids = set(
+        await db.scalars(
+            select(ObservableSource.observable_id).where(ObservableSource.feed_id == feed_id)
+        )
+    )
+    # Delete explicitly as well as relying on ON DELETE CASCADE so the
+    # recompute sees the same state on SQLite and PostgreSQL.
+    await db.execute(delete(ObservableSource).where(ObservableSource.feed_id == feed_id))
     await db.delete(feed)
     try:
         await db.flush()
@@ -250,6 +259,7 @@ async def delete_feed(db: AsyncSession, feed: Feed) -> bool:
         # database's ON DELETE RESTRICT refused the delete. Nothing was removed.
         await db.rollback()
         raise FeedInUseError(await _referencing_profile_names(db, feed_id)) from None
+    await recompute_effective_confidence(db, affected_ids)
     return True
 
 
@@ -279,9 +289,7 @@ async def complete_feed_run(
     return run
 
 
-async def get_feed_runs(
-    db: AsyncSession, feed_id: uuid.UUID, limit: int = 20
-) -> list[FeedRun]:
+async def get_feed_runs(db: AsyncSession, feed_id: uuid.UUID, limit: int = 20) -> list[FeedRun]:
     """Return recent feed runs for a given feed, newest first."""
     result = await db.execute(
         select(FeedRun)
@@ -292,14 +300,10 @@ async def get_feed_runs(
     return list(result.scalars().all())
 
 
-async def get_observable_count_for_feed(
-    db: AsyncSession, feed_id: uuid.UUID
-) -> int:
+async def get_observable_count_for_feed(db: AsyncSession, feed_id: uuid.UUID) -> int:
     """Count distinct observables contributed by this feed."""
     result = await db.execute(
-        select(func.count(ObservableSource.id)).where(
-            ObservableSource.feed_id == feed_id
-        )
+        select(func.count(ObservableSource.id)).where(ObservableSource.feed_id == feed_id)
     )
     return result.scalar_one()
 
@@ -309,9 +313,7 @@ async def seed_default_feeds(db: AsyncSession) -> int:
 
     Returns the number of newly created feeds.
     """
-    existing = await db.execute(
-        select(Feed.name).where(Feed.is_preconfigured.is_(True))
-    )
+    existing = await db.execute(select(Feed.name).where(Feed.is_preconfigured.is_(True)))
     existing_names: set[str] = {row[0] for row in existing.all()}
 
     count = 0
@@ -341,9 +343,7 @@ async def seed_default_feeds(db: AsyncSession) -> int:
                 if template.get("auth_type") == "bearer":
                     auth_config["token"] = api_key_value
                 feed.auth_config_encrypted = encrypt_config(auth_config)
-                logger.info(
-                    "Feed %s: API key populated from %s", feed_def["name"], env_var
-                )
+                logger.info("Feed %s: API key populated from %s", feed_def["name"], env_var)
 
         db.add(feed)
         count += 1
@@ -361,13 +361,11 @@ async def update_preconfigured_feeds(db: AsyncSession) -> int:
     Does NOT overwrite user-set fields: enabled, schedule_cron,
     default_confidence, auth_config_encrypted.
 
-    Returns the number of feeds updated.
+    Returns the number of feeds changed, removed, or converted to custom feeds.
     """
     defaults_by_name = {d["name"]: d for d in DEFAULT_FEEDS}
 
-    result = await db.execute(
-        select(Feed).where(Feed.is_preconfigured.is_(True))
-    )
+    result = await db.execute(select(Feed).where(Feed.is_preconfigured.is_(True)))
     feeds = list(result.scalars().all())
 
     updated = 0
@@ -408,22 +406,33 @@ async def update_preconfigured_feeds(db: AsyncSession) -> int:
                     auth_config["token"] = api_key_value
                 feed.auth_config_encrypted = encrypt_config(auth_config)
                 changed = True
-                logger.info(
-                    "Feed %s: API key populated from %s", feed.name, env_var
-                )
+                logger.info("Feed %s: API key populated from %s", feed.name, env_var)
 
         if changed:
             updated += 1
 
     # Remove deprecated preconfigured feeds no longer in DEFAULT_FEEDS
     default_names = set(defaults_by_name.keys())
+    affected_observable_ids: set[uuid.UUID] = set()
     for feed in feeds:
         if feed.name not in default_names:
             if not feed.enabled and not await _referencing_profile_names(db, feed.id):
+                affected_observable_ids.update(
+                    await db.scalars(
+                        select(ObservableSource.observable_id).where(
+                            ObservableSource.feed_id == feed.id
+                        )
+                    )
+                )
+                await db.execute(
+                    delete(ObservableSource).where(ObservableSource.feed_id == feed.id)
+                )
                 await db.delete(feed)
+                updated += 1
                 logger.info("Removed deprecated preconfigured feed: %s", feed.name)
             else:
                 feed.is_preconfigured = False
+                updated += 1
                 logger.info(
                     "Deprecated feed %s is enabled or referenced by an export profile; "
                     "converting to custom feed",
@@ -432,6 +441,7 @@ async def update_preconfigured_feeds(db: AsyncSession) -> int:
 
     if updated:
         await db.flush()
+        await recompute_effective_confidence(db, affected_observable_ids)
         logger.info("Updated %d preconfigured feeds from defaults", updated)
 
     return updated

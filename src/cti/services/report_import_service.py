@@ -32,6 +32,7 @@ from cti.schemas.report import (
     ImportResult,
 )
 from cti.services import allowlist_service, ioc_extraction
+from cti.services.confidence import recompute_effective_confidence
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -345,6 +346,10 @@ async def import_candidates(
         )
         if filled.first() is not None:  # Zero rows: a concurrent import filled it.
             attributed.add(observable_id)
+
+    imported_ids = [observables[key][0] for key in keys]
+    await recompute_effective_confidence(db, imported_ids)
+    observables = await _find_observables(db, keys)
 
     created = attributed_existing = already_attributed = 0
     result_observables: list[ImportedObservable] = []

@@ -1,6 +1,8 @@
 import uuid
 from datetime import datetime
+
 from pydantic import BaseModel, Field
+
 from cti.models.observable import ObservableType
 
 
@@ -21,11 +23,23 @@ class ObservableSourceResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ConfidenceOverrideRequest(BaseModel):
+    confidence: int = Field(strict=True, ge=0, le=100)
+
+
+class ConfidenceOverrideResponse(BaseModel):
+    value: int
+    set_at: datetime
+    set_by: str | None
+
+
 class ObservableResponse(BaseModel):
     id: uuid.UUID
     type: ObservableType
     value: str
     confidence_score: int
+    manual_confidence: int | None
+    confidence_override: ConfidenceOverrideResponse | None
     first_seen: datetime | None
     last_seen: datetime | None
     source_count: int = 0
