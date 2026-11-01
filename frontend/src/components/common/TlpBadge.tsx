@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { TLP_LABELS, TLP_MEANINGS, TLP_UNSPECIFIED_MEANING } from '@/lib/tlp'
 import type { Tlp } from '@/types/tlp'
@@ -13,7 +13,7 @@ export interface TlpBadgeProps {
 function badgeClasses(tlp: Tlp | null): string {
   if (tlp === null) {
     return cn(
-      'border border-dashed border-borderStrong bg-transparent text-muted-foreground',
+      'border border-dashed border-muted-foreground/75 bg-transparent text-muted-foreground',
       'dark:border-muted-foreground/50',
     )
   }
@@ -50,20 +50,25 @@ function labelText(tlp: Tlp | null, showStrictLabel: boolean): ReactNode {
 }
 
 export function TlpBadge({ tlp, showStrictLabel = true, className }: TlpBadgeProps) {
+  const meaningId = useId()
   const meaning = tlp === null ? TLP_UNSPECIFIED_MEANING : TLP_MEANINGS[tlp]
   const textLabel = tlp === null ? 'Unspecified' : TLP_LABELS[tlp]
 
   return (
-    <span
+    <button
+      type="button"
       className={cn(
-        'inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium',
+        'inline-flex cursor-default items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium',
         badgeClasses(tlp),
         className,
       )}
-      title={meaning}
-      aria-label={`${textLabel}. ${meaning}`}
+      aria-label={textLabel}
+      aria-describedby={meaningId}
     >
       {labelText(tlp, showStrictLabel)}
-    </span>
+      <span id={meaningId} className="sr-only">
+        {meaning}
+      </span>
+    </button>
   )
 }

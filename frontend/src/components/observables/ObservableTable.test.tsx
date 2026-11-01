@@ -138,7 +138,7 @@ describe('ObservableTable', () => {
         <ObservableTable observables={observables} />
       </MemoryRouter>,
     )
-    expect(screen.getByLabelText(/TLP:RED\./)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'TLP:RED' })).toBeTruthy()
     expect(screen.getByText('c2')).toBeTruthy()
   })
 
