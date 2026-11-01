@@ -7,6 +7,7 @@ import {
   GlobeHemisphereWest,
   Icon,
   LinkSimple,
+  PushPin,
   TerminalWindow,
   Trash,
 } from '@phosphor-icons/react'
@@ -142,7 +143,19 @@ export function ObservableTable({ observables }: ObservableTableProps) {
 
             {/* CONFIDENCE */}
             <TableCell>
-              <ConfidenceMeter score={obs.confidence_score} />
+              <span className="inline-flex items-center gap-1.5">
+                <ConfidenceMeter score={obs.confidence_score} />
+                {obs.confidence_override && (
+                  <span title="Pinned confidence override">
+                    <PushPin
+                      size={14}
+                      weight="fill"
+                      className="shrink-0 text-warning-ink"
+                      aria-label="Pinned confidence override"
+                    />
+                  </span>
+                )}
+              </span>
             </TableCell>
 
             {/* SOURCES */}

@@ -10,6 +10,8 @@ const OBS: Observable = {
   type: 'ip-addr',
   value: '5.188.206.18',
   confidence_score: 72,
+  manual_confidence: null,
+  confidence_override: null,
   first_seen: '2026-06-27T00:00:00Z',
   last_seen: '2026-06-29T00:00:00Z',
   source_count: 1,
