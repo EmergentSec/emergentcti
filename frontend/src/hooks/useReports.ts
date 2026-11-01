@@ -13,6 +13,7 @@ import {
   getObservableReports,
   extractReportIndicators,
   importReportIndicators,
+  setReportTags,
 } from '@/api/reports'
 import type { ImportRequest } from '@/types/reportIocExtraction'
 import type { ReportCreate, ReportFilters, ReportUpdate } from '@/types/report'
@@ -138,6 +139,18 @@ export function useImportReportIndicators() {
       queryClient.invalidateQueries({ queryKey: ['observables'] })
       queryClient.invalidateQueries({ queryKey: ['observableReports'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
+export function useSetReportTags() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ reportId, tags }: { reportId: string; tags: string[] }) =>
+      setReportTags(reportId, tags),
+    onSuccess: (_data, { reportId }) => {
+      queryClient.invalidateQueries({ queryKey: ['report', reportId] })
+      queryClient.invalidateQueries({ queryKey: ['reports'] })
     },
   })
 }

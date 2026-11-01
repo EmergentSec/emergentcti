@@ -29,8 +29,11 @@ import {
 } from '@/lib/policyValidation'
 import { cn, typeLabels } from '@/lib/utils'
 import type { ExportProfile, ExportProfileFormat } from '@/types/exportProfile'
+import type { ExportDestination } from '@/types/exportProfile'
 import type { Feed } from '@/types/feed'
 import type { ObservableType } from '@/types/observable'
+import { DESTINATION_HELP, DESTINATION_OPTIONS, formatExcludedByTlp } from '@/lib/tlp'
+import { TagMultiFilter } from '@/components/common/TagMultiFilter'
 
 const DEFAULT_CONFIDENCE_MIN = '70'
 
@@ -88,6 +91,11 @@ function ProfilePreview({ profile }: { profile: ExportProfile }) {
               </dd>
             </div>
           </dl>
+          {formatExcludedByTlp(data.excluded_by_tlp).map((line) => (
+            <p key={line} className="text-sm text-muted-foreground">
+              {line}
+            </p>
+          ))}
           {data.sample.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No indicators currently match this profile.
@@ -141,6 +149,8 @@ export function ExportProfileManager() {
   const [confidenceMin, setConfidenceMin] = useState(DEFAULT_CONFIDENCE_MIN)
   const [maxAgeDays, setMaxAgeDays] = useState('')
   const [feedId, setFeedId] = useState('')
+  const [destination, setDestination] = useState<ExportDestination>('internal')
+  const [profileTags, setProfileTags] = useState<string[]>([])
   const [formErrors, setFormErrors] = useState<ProfileFormErrors>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
 
@@ -168,6 +178,8 @@ export function ExportProfileManager() {
     setConfidenceMin(DEFAULT_CONFIDENCE_MIN)
     setMaxAgeDays('')
     setFeedId('')
+    setDestination('internal')
+    setProfileTags([])
     setFormErrors({})
     setSubmitError(null)
     setShowForm(true)
@@ -182,6 +194,8 @@ export function ExportProfileManager() {
     setConfidenceMin(String(profile.confidence_min))
     setMaxAgeDays(profile.max_age_days == null ? '' : String(profile.max_age_days))
     setFeedId(profile.feed_id ?? '')
+    setDestination(profile.destination ?? 'internal')
+    setProfileTags(profile.tags ?? [])
     setFormErrors({})
     setSubmitError(null)
     setShowForm(true)
@@ -209,6 +223,8 @@ export function ExportProfileManager() {
       confidence_min: Number(confidenceMin),
       max_age_days: maxAgeDays.trim() ? Number(maxAgeDays) : null,
       feed_id: feedId || null,
+      destination,
+      tags: profileTags,
     }
     const callbacks = {
       onSuccess: () => {
@@ -398,6 +414,14 @@ export function ExportProfileManager() {
                         : `Seen in last ${profile.max_age_days}d`}
                     </Badge>
                     <Badge variant="outline">{feedLabel(profile.feed_id, feeds)}</Badge>
+                    <Badge variant="outline" className="capitalize">
+                      {profile.destination ?? 'internal'}
+                    </Badge>
+                    {(profile.tags ?? []).map((tag) => (
+                      <Badge key={tag} variant="secondary">
+                        {tag}
+                      </Badge>
+                    ))}
                   </div>
 
                   <code className="mt-3 block break-all rounded bg-surface2 px-2 py-1.5 font-mono text-xs text-muted-foreground">
@@ -488,6 +512,19 @@ export function ExportProfileManager() {
             value={feedId}
             onChange={(e) => setFeedId(e.target.value)}
             options={feedOptions}
+          />
+          <Select
+            id="profile-destination"
+            label="Export destination"
+            value={destination}
+            onChange={(e) => setDestination(e.target.value as ExportDestination)}
+            options={DESTINATION_OPTIONS}
+          />
+          <p className="text-xs text-muted-foreground">{DESTINATION_HELP[destination]}</p>
+          <TagMultiFilter
+            label="Tag filter (any)"
+            selected={profileTags}
+            onChange={setProfileTags}
           />
           {submitError && (
             <p role="alert" className="text-sm text-destructive">

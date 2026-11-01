@@ -14,6 +14,21 @@ export interface ExportFilters {
   confidence_min?: number
   /** Feed UUID, 'manual', or undefined/empty (all sources). */
   source?: string
+  tag?: string[]
+}
+
+function appendExportParams(params: URLSearchParams, filters: ExportFilters) {
+  if (filters.confidence_min != null && filters.confidence_min > 0) {
+    params.set('confidence_min', String(filters.confidence_min))
+  }
+  if (filters.source && filters.source !== 'manual') {
+    params.set('feed_id', filters.source)
+  }
+  if (filters.tag) {
+    for (const tag of filters.tag) {
+      if (tag) params.append('tag', tag)
+    }
+  }
 }
 
 /**
@@ -24,12 +39,7 @@ export interface ExportFilters {
  */
 export function blocklistUrl(obsType: BlocklistObsType, filters: ExportFilters): string {
   const params = new URLSearchParams()
-  if (filters.confidence_min != null && filters.confidence_min > 0) {
-    params.set('confidence_min', String(filters.confidence_min))
-  }
-  if (filters.source && filters.source !== 'manual') {
-    params.set('feed_id', filters.source)
-  }
+  appendExportParams(params, filters)
   const qs = params.toString()
   return `/api/v1/export/blocklist/${obsType}${qs ? `?${qs}` : ''}`
 }
@@ -45,12 +55,7 @@ export function jsonExportUrl(filters: ExportFilters): string {
   if (filters.type) {
     params.set('type', filters.type)
   }
-  if (filters.confidence_min != null && filters.confidence_min > 0) {
-    params.set('confidence_min', String(filters.confidence_min))
-  }
-  if (filters.source && filters.source !== 'manual') {
-    params.set('feed_id', filters.source)
-  }
+  appendExportParams(params, filters)
   const qs = params.toString()
   return `/api/v1/export/json${qs ? `?${qs}` : ''}`
 }

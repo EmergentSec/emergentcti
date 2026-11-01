@@ -1,3 +1,7 @@
+import type { Tlp } from './tlp'
+
+export type { Tlp } from './tlp'
+
 export type FeedType = 'api' | 'file' | 'scraper'
 export type FeedRunStatus = 'running' | 'success' | 'failure'
 
@@ -25,6 +29,7 @@ export interface Feed {
   auth_supported: boolean
   auth_needs_repair: boolean
   default_confidence: number
+  tlp: Tlp | null
   last_run_at: string | null
   observable_count: number
   latest_run: FeedRun | null
@@ -42,6 +47,8 @@ export interface FeedCreate {
   enabled?: boolean
   auth_config?: Record<string, unknown>
   default_confidence?: number
+  tlp?: Tlp | null
+  tlp_change_reason?: string
 }
 
 export interface FeedUpdate {
@@ -54,4 +61,6 @@ export interface FeedUpdate {
   enabled?: boolean
   auth_config?: Record<string, unknown>
   default_confidence?: number
+  tlp?: Tlp | null
+  tlp_change_reason?: string
 }

@@ -29,6 +29,8 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Tabs } from '@/components/ui/Tabs'
 import { ConfidenceRing } from '@/components/observables/ConfidenceRing'
+import { ObservableTlpPanel } from '@/components/observables/ObservableTlpPanel'
+import { TlpBadge } from '@/components/common/TlpBadge'
 import { DecayChart } from '@/components/observables/DecayChart'
 import { DetailSourcesTab } from '@/components/observables/DetailSourcesTab'
 import { DetailRawTab } from '@/components/observables/DetailRawTab'
@@ -276,6 +278,7 @@ export default function ObservableDetailPage() {
                   {formatRelativeTime(obs.confidence_override.set_at)}
                 </Badge>
               )}
+              <TlpBadge tlp={obs.effective_tlp} />
             </div>
 
             {/* Value + copy button */}
@@ -369,6 +372,8 @@ export default function ObservableDetailPage() {
         </div>
         </CardContent>
       </Card>
+
+      <ObservableTlpPanel observable={obs} observableId={id!} />
 
       {(obs.manual_confidence != null || (isAdmin && id)) && (
         <Card>

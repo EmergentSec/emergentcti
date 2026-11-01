@@ -1,3 +1,7 @@
+import type { Tlp, TlpFilterValue, TlpOverride, TlpSource } from './tlp'
+
+export type { Tlp, TlpFilterValue, TlpOverride, TlpSource } from './tlp'
+
 export type ObservableType =
   | 'ip-addr'
   | 'domain-name'
@@ -28,6 +32,11 @@ export interface Observable {
   confidence_score: number
   manual_confidence: number | null
   confidence_override: ConfidenceOverride | null
+  tags: string[]
+  manual_tlp: Tlp | null
+  effective_tlp: Tlp | null
+  tlp_sources: TlpSource[]
+  tlp_override: TlpOverride | null
   first_seen: string | null
   last_seen: string | null
   source_count: number
@@ -54,6 +63,8 @@ export interface ObservableFilters {
   source?: string
   feed_id?: string
   last_seen_after?: string
+  tag?: string[]
+  tlp?: TlpFilterValue[]
   page?: number
   size?: number
   sort?: string
@@ -64,4 +75,15 @@ export interface ObservableCreate {
   type: ObservableType
   value: string
   confidence_score: number
+  /** Manual marking; the API field is `tlp` (response exposes it as `manual_tlp`). */
+  tlp?: Tlp | null
+}
+
+export interface ObservableTagsUpdate {
+  tags: string[]
+}
+
+export interface TlpOverrideRequest {
+  tlp: Tlp
+  reason: string
 }

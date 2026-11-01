@@ -2,6 +2,7 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { FeedCard } from './FeedCard'
 import type { Feed } from '@/types/feed'
+import { FEED_TLP_FIELD } from '@/test/fixtures/feed'
 import { AxiosError, type AxiosResponse } from 'axios'
 
 // ── Mock mutable refs so we can inspect calls ──────────────────────────────
@@ -45,6 +46,7 @@ const mockFeed: Feed = {
   auth_supported: true,
   auth_needs_repair: false,
   default_confidence: 85,
+  ...FEED_TLP_FIELD,
   last_run_at: '2026-06-29T00:00:00Z',
   observable_count: 312480,
   latest_run: {

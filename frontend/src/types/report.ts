@@ -1,3 +1,7 @@
+import type { Tlp, TlpFilterValue } from './tlp'
+
+export type { Tlp, TlpFilterValue } from './tlp'
+
 export type ReportOrigin = 'provider' | 'internal'
 export type ContentFormat = 'markdown' | 'text'
 
@@ -21,6 +25,8 @@ export interface ReportSummary {
   ai_provider: string | null
   ai_model: string | null
   has_attachment: boolean
+  tlp: Tlp | null
+  tags: string[]
   created_at: string
   updated_at: string
 }
@@ -63,9 +69,16 @@ export interface ReportCreate {
   ai_provider?: string | null
   ai_model?: string | null
   ai_generated_at?: string | null
+  tlp?: Tlp | null
+  tags?: string[]
+  tlp_change_reason?: string
 }
 
 export type ReportUpdate = Partial<ReportCreate>
+
+export interface ReportTagsUpdate {
+  tags: string[]
+}
 
 export interface ReportFilters {
   q?: string
@@ -74,6 +87,8 @@ export interface ReportFilters {
   published_from?: string
   published_to?: string
   ai_generated?: boolean
+  tag?: string[]
+  tlp?: TlpFilterValue[]
   page?: number
   size?: number
 }

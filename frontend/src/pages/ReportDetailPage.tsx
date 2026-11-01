@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -21,6 +21,7 @@ import {
   useLinkReportObservable,
   useUnlinkReportObservable,
   useExtractReportIndicators,
+  useSetReportTags,
 } from '@/hooks/useReports'
 import { useObservables } from '@/hooks/useObservables'
 import { downloadReportAttachment } from '@/api/reports'
@@ -35,6 +36,9 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { ReportContent, formatProvenance, isSafeHttpUrl } from '@/components/reports/ReportContent'
 import { ReportForm } from '@/components/reports/ReportForm'
+import { TlpBadge } from '@/components/common/TlpBadge'
+import { TagChips } from '@/components/common/TagChips'
+import { TagEditor } from '@/components/common/TagEditor'
 import { IndicatorImportReview } from '@/components/reports/IndicatorImportReview'
 import { formatDate, typeLabels } from '@/lib/utils'
 import { apiErrorMessage } from '@/lib/apiError'
@@ -64,6 +68,9 @@ export default function ReportDetailPage() {
   const linkObservable = useLinkReportObservable()
   const unlinkObservable = useUnlinkReportObservable()
   const extractIndicators = useExtractReportIndicators()
+  const setReportTagsMutation = useSetReportTags()
+
+  const [tagDraft, setTagDraft] = useState<string[]>([])
 
   const [showEdit, setShowEdit] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
@@ -72,6 +79,10 @@ export default function ReportDetailPage() {
   const [showLinkSearch, setShowLinkSearch] = useState(false)
   const [importPreview, setImportPreview] = useState<ExtractionPreview | null>(null)
   const [showImportReview, setShowImportReview] = useState(false)
+
+  useEffect(() => {
+    if (report) setTagDraft(report.tags ?? [])
+  }, [report?.id, report?.tags])
 
   const linkSearchActive = showLinkSearch && linkQuery.trim().length > 0
   const { data: searchResults } = useObservables(
@@ -238,11 +249,15 @@ export default function ReportDetailPage() {
                     AI-generated
                   </Badge>
                 )}
+                <TlpBadge tlp={report.tlp} />
               </div>
               <h2 className="text-xl font-semibold leading-tight">{report.title}</h2>
               {report.summary && (
                 <p className="mt-2 text-sm text-muted-foreground">{report.summary}</p>
               )}
+              <div className="mt-3">
+                <TagChips tags={report.tags ?? []} emptyLabel="No tags" />
+              </div>
             </div>
             {isAdmin && (
               <div className="flex flex-wrap gap-2">
@@ -379,7 +394,14 @@ export default function ReportDetailPage() {
           )}
         </div>
         {report.attachment ? (
-          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface2 p-4">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <TlpBadge tlp={report.tlp} />
+              <p className="text-xs text-muted-foreground">
+                RED attachments can&apos;t be downloaded with API keys.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface2 p-4">
             <Paperclip size={18} className="text-muted-foreground" aria-hidden="true" />
             <div className="min-w-0 flex-1">
               <p className="truncate font-medium">{report.attachment.original_filename}</p>
@@ -392,10 +414,33 @@ export default function ReportDetailPage() {
               Download
             </Button>
           </div>
+          </div>
         ) : (
           <p className="text-sm text-muted-foreground">No attachment.</p>
         )}
       </Card>
+
+      {isAdmin && (
+        <Card className="p-5">
+          <h3 className="mb-3 text-sm font-semibold">Tags</h3>
+          <TagEditor
+            tags={tagDraft}
+            onChange={setTagDraft}
+            onSave={() => {
+              if (!report) return
+              setReportTagsMutation.mutate(
+                { reportId: report.id, tags: tagDraft },
+                {
+                  onSuccess: () => toast('Tags updated', 'success'),
+                  onError: (err) =>
+                    toast(apiErrorMessage(err, 'Failed to update tags'), 'error'),
+                },
+              )
+            }}
+            isSaving={setReportTagsMutation.isPending}
+          />
+        </Card>
+      )}
 
       <Card className="p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -476,6 +521,7 @@ export default function ReportDetailPage() {
           onSubmit={handleEdit}
           onCancel={() => setShowEdit(false)}
           isLoading={updateReport.isPending}
+          isAdmin={isAdmin}
         />
       </Dialog>
 

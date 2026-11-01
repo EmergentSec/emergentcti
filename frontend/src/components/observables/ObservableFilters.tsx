@@ -8,6 +8,8 @@ import { Popover } from '@/components/ui/Popover'
 import { useFeeds } from '@/hooks/useFeeds'
 import { blocklistUrl, jsonExportUrl } from '@/api/export'
 import { typeLabels } from '@/lib/utils'
+import { TagMultiFilter } from '@/components/common/TagMultiFilter'
+import { TlpMultiFilter } from '@/components/common/TlpMultiFilter'
 import type { ObservableFilters as Filters } from '@/types/observable'
 
 const typeOptions = [
@@ -33,7 +35,12 @@ export function ObservableFilters({ filters, onChange }: ObservableFiltersProps)
   ]
 
   const confValue = filters.confidence_min ?? 0
-  const exportFilters = { type: filters.type || undefined, confidence_min: confValue > 0 ? confValue : undefined, source: filters.source }
+  const exportFilters = {
+    type: filters.type || undefined,
+    confidence_min: confValue > 0 ? confValue : undefined,
+    source: filters.source,
+    tag: filters.tag,
+  }
 
   const exportTrigger = (
     <Button type="button" variant="outline">
@@ -82,6 +89,19 @@ export function ObservableFilters({ filters, onChange }: ObservableFiltersProps)
             onChange={(e) => update({ source: e.target.value || undefined })}
           />
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-4">
+        <TagMultiFilter
+          selected={filters.tag ?? []}
+          onChange={(tag) => update({ tag: tag.length ? tag : undefined })}
+          className="min-w-[12rem]"
+        />
+        <TlpMultiFilter
+          selected={filters.tlp ?? []}
+          onChange={(tlp) => update({ tlp: tlp.length ? tlp : undefined })}
+          className="min-w-[12rem]"
+        />
       </div>
 
       {/* Row 2: min confidence slider + export */}

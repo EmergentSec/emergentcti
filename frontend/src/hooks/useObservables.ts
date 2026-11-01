@@ -6,8 +6,11 @@ import {
   deleteObservable,
   setConfidenceOverride,
   clearConfidenceOverride,
+  setTlpOverride,
+  clearTlpOverride,
+  setObservableTags,
 } from '@/api/observables'
-import type { ObservableFilters, ObservableCreate } from '@/types/observable'
+import type { ObservableFilters, ObservableCreate, TlpOverrideRequest } from '@/types/observable'
 
 export function useObservables(params: ObservableFilters, options?: { enabled?: boolean }) {
   return useQuery({
@@ -69,5 +72,30 @@ export function useClearConfidenceOverride() {
   return useMutation({
     mutationFn: (id: string) => clearConfidenceOverride(id),
     onSuccess: (_data, id) => invalidateObservableViews(queryClient, id),
+  })
+}
+
+export function useSetTlpOverride() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: TlpOverrideRequest }) =>
+      setTlpOverride(id, body),
+    onSuccess: (_data, { id }) => invalidateObservableViews(queryClient, id),
+  })
+}
+
+export function useClearTlpOverride() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => clearTlpOverride(id),
+    onSuccess: (_data, id) => invalidateObservableViews(queryClient, id),
+  })
+}
+
+export function useSetObservableTags() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, tags }: { id: string; tags: string[] }) => setObservableTags(id, { tags }),
+    onSuccess: (_data, { id }) => invalidateObservableViews(queryClient, id),
   })
 }

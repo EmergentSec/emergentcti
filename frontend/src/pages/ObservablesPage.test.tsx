@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import ObservablesPage from './ObservablesPage'
 import type { ObservableFilters as Filters } from '@/types/observable'
+import { EMPTY_TLP_OBSERVABLE_FIELDS } from '@/test/fixtures/tlp'
 
 // Stub heavy sub-components to isolate the page shell
 vi.mock('@/components/observables/ObservableFilters', () => ({
@@ -60,6 +61,7 @@ const ITEMS = [
     sources: [],
     allowlisted: false,
     allowlist_entry_ids: [],
+    ...EMPTY_TLP_OBSERVABLE_FIELDS,
     created_at: '',
     updated_at: '',
   },
