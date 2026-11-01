@@ -32,6 +32,23 @@ function httpError(status: number, detail: unknown) {
   } as AxiosResponse)
 }
 
+/** Mirrors react-query: invoke onSettled after onSuccess/onError like production. */
+function invokeMutate(
+  impl: (
+    args: unknown,
+    options: {
+      onSuccess?: (result: unknown) => void
+      onError?: (err: unknown) => void
+      onSettled?: () => void
+    },
+  ) => void,
+) {
+  mockImport.mockImplementation((args, options) => {
+    impl(args, options ?? {})
+    options?.onSettled?.()
+  })
+}
+
 const PINNED_422_DETAIL = [
   {
     type: 'greater_than_equal',
@@ -246,7 +263,7 @@ describe('IndicatorImportReview', () => {
   it.each(['', '101', '-1', '50.5'])('rejects invalid confidence %j', (value) => {
     renderReview()
     fireEvent.change(confidenceInput(), { target: { value } })
-    expect(screen.getByText('Input error')).toBeTruthy()
+    expect(screen.getByText('Enter a whole number from 0 to 100')).toBeTruthy()
     expect(importButton().disabled).toBe(true)
     fireEvent.click(importButton())
     expect(mockImport).not.toHaveBeenCalled()
@@ -254,7 +271,7 @@ describe('IndicatorImportReview', () => {
 
   it('shows string 422 detail and keeps selection', () => {
     renderReview()
-    mockImport.mockImplementation((_args, options) => {
+    invokeMutate((_args, options) => {
       options?.onError?.(httpError(422, 'Item not_a_candidate: evil.example'))
     })
 
@@ -267,7 +284,7 @@ describe('IndicatorImportReview', () => {
 
   it('shows every pinned 422 msg and highlights not_a_candidate rows', () => {
     renderReview()
-    mockImport.mockImplementation((_args, options) => {
+    invokeMutate((_args, options) => {
       options?.onError?.(httpError(422, PINNED_422_DETAIL))
     })
 
@@ -279,28 +296,53 @@ describe('IndicatorImportReview', () => {
       '2 item(s) are not valid candidates extracted from this report: url http://x, domain-name bad',
     )
 
-    expect(screen.getByTestId('candidate-row-domain-name\0evil.example').className).toContain('ring-destructive')
+    expect(screen.getByTestId('candidate-row-domain-name\0evil.example').className).toContain(
+      'bg-destructive-soft',
+    )
     expect(screen.getByTestId('candidate-row-url\0https://evil.example/path').className).toContain(
-      'ring-destructive',
+      'bg-destructive-soft',
     )
   })
 
-  it('clears 422 alert when selection changes', () => {
+  it('shows server detail for non-422 import errors', () => {
     renderReview()
-    mockImport.mockImplementation((_args, options) => {
-      options?.onError?.(httpError(422, 'Item not_a_candidate: evil.example'))
+    invokeMutate((_args, options) => {
+      options?.onError?.(httpError(404, 'Report not found'))
+    })
+
+    fireEvent.click(importButton())
+
+    expect(screen.getByRole('alert').textContent).toBe('Report not found')
+  })
+
+  it('clears 422 alert only when no highlighted rows remain after toggling', () => {
+    renderReview()
+    invokeMutate((_args, options) => {
+      options?.onError?.(httpError(422, PINNED_422_DETAIL))
     })
     fireEvent.click(importButton())
     expect(screen.getByRole('alert')).toBeTruthy()
 
     fireEvent.click(checkboxFor('domain-name', 'evil.example'))
+    expect(screen.getByRole('alert')).toBeTruthy()
+    expect(screen.getByTestId('candidate-row-domain-name\0evil.example').className).not.toContain(
+      'bg-destructive-soft',
+    )
+    expect(screen.getByTestId('candidate-row-url\0https://evil.example/path').className).toContain(
+      'bg-destructive-soft',
+    )
+
+    fireEvent.click(checkboxFor('url', 'https://evil.example/path'))
     expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByTestId('candidate-row-url\0https://evil.example/path').className).not.toContain(
+      'bg-destructive-soft',
+    )
   })
 
   it('toasts all three counts and closes on success', () => {
     const onClose = vi.fn()
     renderReview(BASE_PREVIEW, onClose)
-    mockImport.mockImplementation((_args, options) => {
+    invokeMutate((_args, options) => {
       options?.onSuccess?.({ created: 2, attributed_existing: 0, already_attributed: 1, observables: [] })
     })
 
@@ -320,6 +362,26 @@ describe('IndicatorImportReview', () => {
     expect(pendingBtn).toBeTruthy()
     expect(pendingBtn.disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('ignores Escape while import is pending', () => {
+    const onClose = vi.fn()
+    mockIsPending = true
+    renderReview(BASE_PREVIEW, onClose)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('ignores a second confirm click before the mutation settles', () => {
+    renderReview()
+    mockImport.mockImplementation(() => {
+      /* hang until test ends */
+    })
+
+    fireEvent.click(importButton())
+    fireEvent.click(importButton())
+
+    expect(mockImport).toHaveBeenCalledTimes(1)
   })
 
   it('shows PDF notice once with unsupported status in source list', () => {

@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/Table'
 import { useImportReportIndicators } from '@/hooks/useReports'
 import { useToast } from '@/contexts/ToastContext'
-import { importValidationErrorDetail } from '@/lib/apiError'
+import { apiErrorMessage, importValidationErrorDetail } from '@/lib/apiError'
 import {
   CONFIDENCE_HELP_TEXT,
   EXPORT_ELIGIBILITY_NOTICE,
@@ -82,6 +82,7 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
   const { toast } = useToast()
   const importIndicators = useImportReportIndicators()
   const submittingRef = useRef(false)
+  const importHadRowHighlightsRef = useRef(false)
   const [selected, setSelected] = useState<Set<string>>(() => buildInitialSelection(preview.candidates))
   const [confidence, setConfidence] = useState('50')
   const [importDetail, setImportDetail] = useState<string | null>(null)
@@ -90,7 +91,15 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
   const clearImportFeedback = () => {
     setImportDetail(null)
     setHighlightedKeys(new Set())
+    importHadRowHighlightsRef.current = false
   }
+
+  useEffect(() => {
+    if (importHadRowHighlightsRef.current && highlightedKeys.size === 0 && importDetail !== null) {
+      setImportDetail(null)
+      importHadRowHighlightsRef.current = false
+    }
+  }, [highlightedKeys, importDetail])
 
   useEffect(() => {
     if (open) {
@@ -101,7 +110,7 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
   }, [open, preview])
 
   const confidenceParsed = useMemo(() => parseConfidenceInput(confidence), [confidence])
-  const confidenceError = confidenceParsed.valid ? undefined : 'Input error'
+  const confidenceError = confidenceParsed.valid ? undefined : 'Enter a whole number from 0 to 100'
 
   const selectableKeys = useMemo(
     () =>
@@ -119,8 +128,13 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
 
   const toggleRow = (candidate: ExtractionCandidate) => {
     if (!isSelectableCandidate(candidate)) return
-    clearImportFeedback()
     const key = candidateKey(candidate.type, candidate.value)
+    setHighlightedKeys((prev) => {
+      if (!prev.has(key)) return prev
+      const next = new Set(prev)
+      next.delete(key)
+      return next
+    })
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
@@ -162,11 +176,13 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
           const parsed = importValidationErrorDetail(err)
           if (parsed) {
             setImportDetail(parsed.messages.join('\n'))
-            setHighlightedKeys(
-              new Set(parsed.highlightedItems.map((item) => candidateKey(item.type, item.value))),
+            const keys = new Set(
+              parsed.highlightedItems.map((item) => candidateKey(item.type, item.value)),
             )
+            setHighlightedKeys(keys)
+            importHadRowHighlightsRef.current = keys.size > 0
           } else {
-            setImportDetail('Import failed')
+            setImportDetail(apiErrorMessage(err, 'Import failed'))
           }
         },
         onSettled: () => {
@@ -261,7 +277,9 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
                     <TableRow
                       key={key}
                       data-testid={`candidate-row-${key}`}
-                      className={cn(rowHighlighted && 'bg-destructive/10 ring-1 ring-inset ring-destructive/40')}
+                      className={cn(
+                        rowHighlighted && 'bg-destructive-soft ring-1 ring-inset ring-destructive',
+                      )}
                     >
                       <TableCell>
                         <input
