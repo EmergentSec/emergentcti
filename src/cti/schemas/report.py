@@ -5,7 +5,7 @@ from __future__ import annotations
 import unicodedata
 import uuid
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -16,6 +16,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from cti.models.observable import ObservableType
 from cti.models.report import ContentFormat, ReportOrigin
@@ -162,3 +163,96 @@ class ReportFilters(BaseModel):
     ai_generated: bool | None = None
     page: int = Field(default=1, ge=1)
     size: int = Field(default=25, ge=1, le=100)
+
+
+# ── IOC extraction and reviewed import (#14) ─────────────────────────────
+
+CandidateType = Literal["ip-addr", "domain-name", "url", "file-hash", "email-addr"]
+CandidateStatus = Literal["new", "existing", "invalid"]
+SourceStatus = Literal["extracted", "empty", "unsupported"]
+
+MAX_IMPORT_ITEMS = 1000
+
+
+class ExtractionSource(BaseModel):
+    kind: Literal["content", "attachment"]
+    filename: str | None
+    content_type: str | None
+    status: SourceStatus
+    reason: str | None
+
+
+class ExtractionCandidate(BaseModel):
+    type: CandidateType
+    value: str
+    original: str
+    context: str
+    occurrences: int
+    defanged: bool
+    status: CandidateStatus
+    existing_observable_id: uuid.UUID | None
+    existing_confidence: int | None
+    already_attributed: bool
+    allowlisted: bool
+    allowlist_matches: list[str]
+    warnings: list[str]
+
+
+class ExtractionCounts(BaseModel):
+    total: int
+    new: int
+    existing: int
+    invalid: int
+
+
+class ExtractionPreview(BaseModel):
+    report_id: uuid.UUID
+    sources: list[ExtractionSource]
+    candidates: list[ExtractionCandidate]
+    truncated: bool
+    counts: ExtractionCounts
+
+
+class ImportItem(BaseModel):
+    # Free-form on purpose: anything that is not a server-side candidate is
+    # rejected by the service with the not_a_candidate code.
+    type: str = Field(max_length=32)
+    value: str = Field(max_length=8192)
+
+
+class ImportRequest(BaseModel):
+    confidence: int = Field(strict=True, ge=0, le=100)
+    items: list[ImportItem] = Field(min_length=1, max_length=MAX_IMPORT_ITEMS)
+
+    @field_validator("items")
+    @classmethod
+    def items_are_unique(cls, items: list[ImportItem]) -> list[ImportItem]:
+        seen: set[tuple[str, str]] = set()
+        duplicates: list[str] = []
+        for item in items:
+            key = (item.type, item.value)
+            if key in seen:
+                duplicates.append(f"{item.type} {item.value}")
+            seen.add(key)
+        if duplicates:
+            raise PydanticCustomError(
+                "duplicate_items",
+                "Duplicate items: {duplicates}",
+                {"duplicates": ", ".join(duplicates[:20])},
+            )
+        return items
+
+
+class ImportedObservable(BaseModel):
+    id: uuid.UUID
+    type: CandidateType
+    value: str
+    confidence_score: int
+    created: bool
+
+
+class ImportResult(BaseModel):
+    created: int
+    attributed_existing: int
+    already_attributed: int
+    observables: list[ImportedObservable]

@@ -9,6 +9,7 @@ import type {
   ReportUpdate,
   LinkedObservable,
 } from '@/types/report'
+import type { ExtractionPreview, ImportRequest, ImportResult } from '@/types/reportIocExtraction'
 
 function cleanParams(params: ReportFilters): Record<string, unknown> {
   const clean: Record<string, unknown> = {}
@@ -83,5 +84,18 @@ export async function unlinkReportObservable(reportId: string, observableId: str
 
 export async function getObservableReports(observableId: string): Promise<ReportSummary[]> {
   const { data } = await api.get<ReportSummary[]>(`/observables/${observableId}/reports`)
+  return data
+}
+
+export async function extractReportIndicators(reportId: string): Promise<ExtractionPreview> {
+  const { data } = await api.post<ExtractionPreview>(`/reports/${reportId}/extract`)
+  return data
+}
+
+export async function importReportIndicators(
+  reportId: string,
+  payload: ImportRequest,
+): Promise<ImportResult> {
+  const { data } = await api.post<ImportResult>(`/reports/${reportId}/import`, payload)
   return data
 }
