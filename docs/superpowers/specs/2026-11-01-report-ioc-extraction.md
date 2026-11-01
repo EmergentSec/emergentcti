@@ -146,6 +146,11 @@ and never deletes the observable.
 
 ## Confidence semantics
 
+> **Superseded in part by #28** (`2026-11-01-analyst-confidence.md`). An
+> import now *raises* an existing observable's confidence when the analyst
+> confidence is higher, unless a pinned override is set. Feeds no longer
+> lower analyst-set confidence.
+
 - The analyst chooses one confidence per import request: `confidence`,
   integer 0–100, **required** in the request. The UI default is **50**,
   documented in the UI next to the input. It is never inferred from the text.
