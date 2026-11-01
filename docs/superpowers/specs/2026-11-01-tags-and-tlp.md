@@ -290,7 +290,9 @@ the coordinator; the rest only fix details the contract leaves open.
     - A RED feed is visible to API keys (feeds are configuration, not intel),
       but `PUT /feeds/{id}` with an API key returns 403 ("Declassifying a
       TLP:RED feed requires an interactive admin session") for any `tlp` other
-      than `red`, reason or not. Other feed edits by API key are allowed.
+      than `red`, reason or not. `DELETE /feeds/{id}` on a RED feed returns
+      403 ("Deleting a TLP:RED feed requires an interactive admin session").
+      Other feed edits by API key are allowed.
     - `POST /reports/{id}/extract` with an API key treats a candidate matching
       an effective-RED observable exactly as a value that does not exist:
       status `new`, no existing id/confidence, `already_attributed: false`,

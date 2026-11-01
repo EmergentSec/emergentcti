@@ -375,6 +375,22 @@ async def test_api_key_cannot_declassify_red_feed(
     assert await db_session.scalar(select(Feed.tlp).where(Feed.id == feed_id)) == "red"
 
 
+async def test_api_key_cannot_delete_red_feed(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    feed = await add_feed(db_session, "Red feed", tlp="red")
+    obs = await add_observable(db_session, "203.0.113.250", feed=feed)
+    response = await client.delete(f"{FEEDS}/{feed.id}")
+    assert response.status_code == 403
+    assert response.json()["detail"] == (
+        "Deleting a TLP:RED feed requires an interactive admin session"
+    )
+    feed_id = feed.id
+    db_session.expire_all()
+    assert await db_session.scalar(select(Feed.id).where(Feed.id == feed_id)) == feed_id
+    assert (await client.get(f"{OBS}/{obs.id}")).status_code == 404
+
+
 async def test_api_key_may_make_other_edits_to_red_feed(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:

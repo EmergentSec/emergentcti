@@ -179,11 +179,17 @@ async def update_feed(
 async def delete_feed(
     feed_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(require_admin),
 ) -> None:
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
+    if hide_red_for(auth) and feed.tlp == Tlp.RED.value:
+        # Removing the feed drops its RED marking from every contributed observable.
+        raise HTTPException(
+            status_code=403,
+            detail="Deleting a TLP:RED feed requires an interactive admin session",
+        )
 
     try:
         deleted = await feed_service.delete_feed(db, feed)
