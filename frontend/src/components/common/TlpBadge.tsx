@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { TLP_LABELS, TLP_MEANINGS, TLP_UNSPECIFIED_MEANING } from '@/lib/tlp'
 import type { Tlp } from '@/types/tlp'
@@ -14,7 +14,8 @@ function badgeClasses(tlp: Tlp | null): string {
   if (tlp === null) {
     return cn(
       'border border-dashed border-muted-foreground/75 bg-transparent text-muted-foreground',
-      'dark:border-muted-foreground/50',
+      // >=3:1 non-text contrast (WCAG 1.4.11) on background and card in both modes.
+      'dark:border-muted-foreground/60',
     )
   }
   switch (tlp) {
@@ -49,26 +50,28 @@ function labelText(tlp: Tlp | null, showStrictLabel: boolean): ReactNode {
   return TLP_LABELS[tlp]
 }
 
+/**
+ * Non-interactive on purpose: badges render once per row in long tables
+ * (observables, reports), and some of those rows are themselves
+ * `role="button"`. A focusable badge would add a tab stop per row and nest an
+ * interactive control inside another. The visible label carries the marking
+ * (not color alone); the meaning is exposed as inline screen-reader text and
+ * as a hover tooltip.
+ */
 export function TlpBadge({ tlp, showStrictLabel = true, className }: TlpBadgeProps) {
-  const meaningId = useId()
   const meaning = tlp === null ? TLP_UNSPECIFIED_MEANING : TLP_MEANINGS[tlp]
-  const textLabel = tlp === null ? 'Unspecified' : TLP_LABELS[tlp]
 
   return (
-    <button
-      type="button"
+    <span
       className={cn(
-        'inline-flex cursor-default items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium',
+        'inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium',
         badgeClasses(tlp),
         className,
       )}
-      aria-label={textLabel}
-      aria-describedby={meaningId}
+      title={meaning}
     >
       {labelText(tlp, showStrictLabel)}
-      <span id={meaningId} className="sr-only">
-        {meaning}
-      </span>
-    </button>
+      <span className="sr-only">: {meaning}</span>
+    </span>
   )
 }

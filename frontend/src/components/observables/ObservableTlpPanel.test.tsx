@@ -50,7 +50,7 @@ describe('ObservableTlpPanel', () => {
       </MemoryRouter>,
     )
     expect(screen.getByText('Why this marking')).toBeTruthy()
-    expect(screen.getAllByRole('button', { name: 'TLP:AMBER' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('TLP:AMBER').length).toBeGreaterThan(0)
   })
 
   it('links feed sources to the feeds page with a feed query param', () => {
