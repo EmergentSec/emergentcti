@@ -84,6 +84,19 @@ Normalization and validation:
   domain part is lowercased and the local part is kept as written. The domain
   of an email is not emitted separately.
 
+Unicode handling (pinned after backend review):
+- Before matching, remove Unicode format characters (category `Cf`, for
+  example U+200B–U+200D, U+202A–U+202E, U+2060–U+2064, U+FEFF) from the
+  scanned text. Authors often use them to obfuscate indicators. `original`
+  shows the text with them removed; `context` already strips them.
+- A host run (domain, URL host, or email domain) must never start or end next
+  to a non-ASCII letter or digit. When it would, extend the run over the
+  adjacent non-ASCII label characters and IDNA-encode the whole host with
+  Python's built-in `idna` codec (no new dependency), so
+  `münchen.example` → `xn--mnchen-3ya.example`. If encoding fails, emit
+  nothing for that run. Never emit a suffix of a longer host (no
+  `nchen.example`).
+
 Dedup: candidates are unique by `(type, value)` after normalization. The first
 occurrence supplies `original` and `context`; `occurrences` counts all of them.
 
