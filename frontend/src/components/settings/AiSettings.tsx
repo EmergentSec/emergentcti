@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowSquareOut, CheckCircle, Info, Warning, WarningCircle } from '@phosphor-icons/react'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Badge } from '@/components/ui/Badge'
@@ -104,11 +104,14 @@ function ProviderCard({ status }: { status: AiProviderStatus }) {
   const check = useCheckAiConnection()
   const refresh = useRefreshAiModels()
   const inputId = `ai-key-${provider}`
+  // Save and remove write the same resource; the server could apply them in either
+  // order, so only one may be in flight at a time.
+  const keyBusy = save.isPending || remove.isPending
 
   const handleSave = (e: FormEvent) => {
     e.preventDefault()
     const key = apiKey.trim()
-    if (!key) return
+    if (!key || keyBusy) return
     save.mutate(
       { provider, apiKey: key },
       {
@@ -127,6 +130,7 @@ function ProviderCard({ status }: { status: AiProviderStatus }) {
   }
 
   const handleRemove = () => {
+    if (keyBusy) return
     remove.mutate(provider, {
       onSuccess: () => {
         setConfirmRemove(false)
@@ -240,7 +244,7 @@ function ProviderCard({ status }: { status: AiProviderStatus }) {
               error={keyError ?? undefined}
             />
           </div>
-          <Button type="submit" className="sm:mt-7" disabled={!apiKey.trim() || save.isPending}>
+          <Button type="submit" className="sm:mt-7" disabled={!apiKey.trim() || keyBusy}>
             {save.isPending ? 'Saving…' : configured ? 'Replace key' : 'Save key'}
           </Button>
         </form>
@@ -265,6 +269,7 @@ function ProviderCard({ status }: { status: AiProviderStatus }) {
                 size="sm"
                 className="text-destructive hover:text-destructive sm:ml-auto"
                 onClick={() => setConfirmRemove(true)}
+                disabled={keyBusy}
               >
                 Remove key
               </Button>
@@ -288,7 +293,7 @@ function ProviderCard({ status }: { status: AiProviderStatus }) {
             <Button type="button" variant="outline" onClick={() => setConfirmRemove(false)}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleRemove} disabled={remove.isPending}>
+            <Button variant="destructive" onClick={handleRemove} disabled={keyBusy}>
               {remove.isPending ? 'Removing…' : 'Remove key'}
             </Button>
           </div>
@@ -316,14 +321,26 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
   const clearDefault = useClearAiDefault()
   const inference = useAiInferenceTest()
 
+  // Save and clear write the same setting; only one may be in flight at a time.
+  const defaultBusy = setDefault.isPending || clearDefault.isPending
+
   const configuredKey = configured.map((p) => p.provider).join(',')
 
   // Follow the saved default whenever it changes (saved, cleared, or provider removed).
+  // Refetches that leave it unchanged don't run this, so an unsaved draft survives them.
+  const prevDefault = useRef(current)
   useEffect(() => {
+    const previous = prevDefault.current
+    prevDefault.current = current
     if (current) {
       setDraftProvider(current.provider)
       setDraftModel(current.model)
       setDraftCustom(current.is_custom)
+    } else if (previous) {
+      // Cleared (possibly by another admin): drop the stale selection so it can't be
+      // re-saved by accident. The provider stays; the effect below handles it if unconfigured.
+      setDraftModel('')
+      setDraftCustom(false)
     }
   }, [current?.provider, current?.model, current?.is_custom])
 
@@ -358,7 +375,7 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
   const hasModel = draftModel.trim() !== ''
 
   const handleSave = () => {
-    if (!draftProvider || !hasModel) return
+    if (!draftProvider || !hasModel || defaultBusy) return
     setSaveError(null)
     setDefault.mutate(
       { provider: draftProvider, model: draftModel, is_custom: draftCustom },
@@ -370,6 +387,7 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
   }
 
   const handleClear = () => {
+    if (defaultBusy) return
     clearDefault.mutate(undefined, {
       onSuccess: () => {
         setDraftModel('')
@@ -464,11 +482,11 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
             )}
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={handleSave} disabled={!hasModel || unchanged || setDefault.isPending}>
+              <Button onClick={handleSave} disabled={!hasModel || unchanged || defaultBusy}>
                 {setDefault.isPending ? 'Saving…' : 'Save default'}
               </Button>
               {current && (
-                <Button variant="outline" onClick={handleClear} disabled={clearDefault.isPending}>
+                <Button variant="outline" onClick={handleClear} disabled={defaultBusy}>
                   Clear default
                 </Button>
               )}

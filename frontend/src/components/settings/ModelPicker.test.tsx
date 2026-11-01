@@ -151,3 +151,71 @@ describe('ModelPicker', () => {
     expect(screen.getByRole('option', { name: /Use custom model ID…/ })).toBeTruthy()
   })
 })
+
+describe('ModelPicker keyboard', () => {
+  function trigger() {
+    return screen.getByRole('button', { name: /Model/ }) as HTMLButtonElement
+  }
+  function activeOption() {
+    const id = screen.getByRole('combobox').getAttribute('aria-activedescendant')
+    return document.getElementById(id!)!.textContent
+  }
+
+  it('opens from the trigger with ArrowDown or ArrowUp and focuses the search', () => {
+    render(<ModelPicker list={makeList()} value="claude-beta-20260201" isCustom={false} onChange={vi.fn()} />)
+    trigger().focus()
+    fireEvent.keyDown(trigger(), { key: 'ArrowDown' })
+    const search = screen.getByRole('combobox', { name: /Search models/ })
+    expect(document.activeElement).toBe(search)
+    expect(trigger().getAttribute('aria-expanded')).toBe('true')
+    // Starts on the saved model.
+    expect(activeOption()).toContain('claude-beta-20260201')
+
+    fireEvent.keyDown(search, { key: 'Escape' })
+    fireEvent.keyDown(trigger(), { key: 'ArrowUp' })
+    expect(screen.getByRole('listbox')).toBeTruthy()
+  })
+
+  it('clamps ArrowUp/ArrowDown at the ends and jumps with Home/End', () => {
+    render(<ModelPicker list={makeList()} value="" isCustom={false} onChange={vi.fn()} />)
+    const search = openPicker()
+    expect(activeOption()).toContain('claude-alpha-20260101')
+
+    fireEvent.keyDown(search, { key: 'ArrowUp' })
+    expect(activeOption()).toContain('claude-alpha-20260101')
+
+    fireEvent.keyDown(search, { key: 'End' })
+    expect(activeOption()).toContain('Use custom model ID…')
+    fireEvent.keyDown(search, { key: 'ArrowDown' })
+    expect(activeOption()).toContain('Use custom model ID…')
+
+    fireEvent.keyDown(search, { key: 'ArrowUp' })
+    expect(activeOption()).toContain('plain-id-model')
+
+    fireEvent.keyDown(search, { key: 'Home' })
+    expect(activeOption()).toContain('claude-alpha-20260101')
+  })
+
+  it('closes on Escape without choosing and returns focus to the trigger', () => {
+    const onChange = vi.fn()
+    render(<ModelPicker list={makeList()} value="" isCustom={false} onChange={onChange} />)
+    const search = openPicker()
+    fireEvent.keyDown(search, { key: 'ArrowDown' })
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(document.activeElement).toBe(trigger())
+    expect(trigger().getAttribute('aria-expanded')).toBe('false')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('closes on Tab without trapping focus or choosing', () => {
+    const onChange = vi.fn()
+    render(<ModelPicker list={makeList()} value="" isCustom={false} onChange={onChange} />)
+    const search = openPicker()
+    // Default not prevented: the browser's own Tab focus move proceeds.
+    expect(fireEvent.keyDown(search, { key: 'Tab' })).toBe(true)
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(document.activeElement).not.toBe(trigger())
+    expect(onChange).not.toHaveBeenCalled()
+  })
+})

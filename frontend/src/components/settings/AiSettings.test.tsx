@@ -71,11 +71,25 @@ function httpError(status: number, data: unknown) {
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(
+  const result = render(
     <QueryClientProvider client={client}>
       <AiSettings />
     </QueryClientProvider>,
   )
+  return { ...result, client }
+}
+
+/** A promise the test settles by hand, to hold a request in flight. */
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
+function button(scope: HTMLElement, name: string | RegExp) {
+  return within(scope).getByRole('button', { name }) as HTMLButtonElement
 }
 
 function card(name: string) {
@@ -117,7 +131,7 @@ describe('AiSettings', () => {
 
   it('saves a key, clears the input, and never renders or stores the key', async () => {
     api.putAiProviderKey.mockResolvedValue(provider('openai', 'OpenAI', { configured: true, key_hint: '0000' }))
-    renderPage()
+    const { client } = renderPage()
     const openai = await screen.findByRole('region', { name: 'OpenAI' })
     const input = within(openai).getByLabelText('OpenAI API key') as HTMLInputElement
     expect(input.type).toBe('password')
@@ -136,6 +150,8 @@ describe('AiSettings', () => {
     expect(window.location.href).not.toContain(FAKE_KEY)
     // Settings are refetched so the card picks up the new configured state.
     await waitFor(() => expect(api.getAiSettings).toHaveBeenCalledTimes(2))
+    // The settled save (whose variables held the key) is gone from TanStack state.
+    await waitFor(() => expect(client.getMutationCache().getAll()).toHaveLength(0))
   })
 
   it('shows a mapped error and keeps the input when saving fails', async () => {
@@ -332,5 +348,147 @@ describe('AiSettings', () => {
     fireEvent.click(await within(section).findByRole('button', { name: 'Send test prompt…' }))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Send test prompt' }))
     expect(await within(section).findByText(AI_ERROR_MESSAGES.model_unavailable)).toBeTruthy()
+  })
+})
+
+describe('AiSettings conflicting writes', () => {
+  it('blocks removing a key while a key save is in flight, including from an open confirm dialog', async () => {
+    const put = deferred<AiProviderStatus>()
+    api.putAiProviderKey.mockReturnValue(put.promise)
+    api.deleteAiProvider.mockResolvedValue(undefined)
+    renderPage()
+    const anthropic = await screen.findByRole('region', { name: 'Anthropic' })
+
+    // Dialog already open when the save starts.
+    fireEvent.click(button(anthropic, 'Remove key'))
+    const dialog = screen.getByRole('dialog', { name: 'Remove Anthropic key?' })
+    fireEvent.change(within(anthropic).getByLabelText('Replace Anthropic API key'), { target: { value: FAKE_KEY } })
+    fireEvent.submit(within(anthropic).getByLabelText('Replace Anthropic API key').closest('form')!)
+    await waitFor(() => expect(api.putAiProviderKey).toHaveBeenCalledTimes(1))
+
+    const confirm = button(dialog, 'Remove key')
+    await waitFor(() => expect(confirm.disabled).toBe(true))
+    fireEvent.click(confirm)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(button(anthropic, 'Remove key').disabled).toBe(true)
+    fireEvent.click(button(anthropic, 'Remove key'))
+    expect(api.deleteAiProvider).not.toHaveBeenCalled()
+
+    put.resolve(provider('anthropic', 'Anthropic', { configured: true, key_hint: '0000' }))
+    await waitFor(() => expect(button(anthropic, 'Remove key').disabled).toBe(false))
+    fireEvent.click(button(anthropic, 'Remove key'))
+    fireEvent.click(button(screen.getByRole('dialog'), 'Remove key'))
+    await waitFor(() => expect(api.deleteAiProvider).toHaveBeenCalledTimes(1))
+  })
+
+  it('blocks saving a key while a key removal is in flight', async () => {
+    const del = deferred<void>()
+    api.deleteAiProvider.mockReturnValue(del.promise)
+    api.putAiProviderKey.mockResolvedValue(provider('anthropic', 'Anthropic', { configured: true, key_hint: '0000' }))
+    renderPage()
+    const anthropic = await screen.findByRole('region', { name: 'Anthropic' })
+    const input = within(anthropic).getByLabelText('Replace Anthropic API key')
+    fireEvent.change(input, { target: { value: FAKE_KEY } })
+
+    fireEvent.click(button(anthropic, 'Remove key'))
+    fireEvent.click(button(screen.getByRole('dialog'), 'Remove key'))
+    await waitFor(() => expect(api.deleteAiProvider).toHaveBeenCalledTimes(1))
+
+    await waitFor(() => expect(button(anthropic, 'Replace key').disabled).toBe(true))
+    fireEvent.click(button(anthropic, 'Replace key'))
+    fireEvent.submit(input.closest('form')!)
+    expect(api.putAiProviderKey).not.toHaveBeenCalled()
+
+    del.resolve()
+    await waitFor(() => expect(button(anthropic, 'Replace key').disabled).toBe(false))
+    fireEvent.click(button(anthropic, 'Replace key'))
+    await waitFor(() => expect(api.putAiProviderKey).toHaveBeenCalledTimes(1))
+  })
+
+  it('blocks clearing the default while a default save is in flight', async () => {
+    api.getAiSettings.mockResolvedValue(
+      settings({ default: { provider: 'anthropic', model: 'claude-alpha-20260101', is_custom: false } }),
+    )
+    const put = deferred<{ provider: 'anthropic'; model: string; is_custom: boolean }>()
+    api.putAiDefault.mockReturnValue(put.promise)
+    api.deleteAiDefault.mockResolvedValue(undefined)
+    renderPage()
+    const section = await screen.findByRole('region', { name: 'Default model' })
+    await within(section).findByText('Live')
+    fireEvent.click(within(section).getByRole('button', { name: /^Model/ }))
+    fireEvent.click(screen.getByRole('option', { name: /Claude Beta/ }))
+    fireEvent.click(button(section, 'Save default'))
+    await waitFor(() => expect(api.putAiDefault).toHaveBeenCalledTimes(1))
+
+    await waitFor(() => expect(button(section, 'Clear default').disabled).toBe(true))
+    fireEvent.click(button(section, 'Clear default'))
+    expect(api.deleteAiDefault).not.toHaveBeenCalled()
+
+    put.resolve({ provider: 'anthropic', model: 'claude-beta-20260201', is_custom: false })
+    await waitFor(() => expect(button(section, 'Clear default').disabled).toBe(false))
+    fireEvent.click(button(section, 'Clear default'))
+    await waitFor(() => expect(api.deleteAiDefault).toHaveBeenCalledTimes(1))
+  })
+
+  it('blocks saving the default while a clear is in flight', async () => {
+    api.getAiSettings.mockResolvedValue(
+      settings({ default: { provider: 'anthropic', model: 'claude-alpha-20260101', is_custom: false } }),
+    )
+    const del = deferred<void>()
+    api.deleteAiDefault.mockReturnValue(del.promise)
+    renderPage()
+    const section = await screen.findByRole('region', { name: 'Default model' })
+    await within(section).findByText('Live')
+    // An unsaved change, so Save would otherwise be enabled.
+    fireEvent.click(within(section).getByRole('button', { name: /^Model/ }))
+    fireEvent.click(screen.getByRole('option', { name: /Claude Beta/ }))
+    expect(button(section, 'Save default').disabled).toBe(false)
+
+    fireEvent.click(button(section, 'Clear default'))
+    await waitFor(() => expect(api.deleteAiDefault).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(button(section, /^Sav/).disabled).toBe(true))
+    fireEvent.click(button(section, /^Sav/))
+    expect(api.putAiDefault).not.toHaveBeenCalled()
+
+    del.resolve()
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('Default model cleared', 'success'))
+    await waitFor(() => expect(button(section, 'Clear default').disabled).toBe(false))
+    expect(api.putAiDefault).not.toHaveBeenCalled()
+  })
+})
+
+describe('AiSettings default draft sync', () => {
+  it('resets the draft model when the saved default is cleared elsewhere', async () => {
+    api.getAiSettings.mockResolvedValue(
+      settings({ default: { provider: 'anthropic', model: 'claude-alpha-20260101', is_custom: false } }),
+    )
+    const { client } = renderPage()
+    const section = await screen.findByRole('region', { name: 'Default model' })
+    await within(section).findByRole('button', { name: /claude-alpha-20260101/ })
+
+    // Another admin clears the default; providers are unchanged.
+    api.getAiSettings.mockResolvedValue(settings())
+    await client.refetchQueries({ queryKey: ['ai-settings'] })
+
+    expect(await within(section).findByText('No default model.')).toBeTruthy()
+    await waitFor(() => expect(within(section).queryByRole('button', { name: /claude-alpha-20260101/ })).toBeNull())
+    expect(within(section).getByRole('button', { name: /Select a model/ })).toBeTruthy()
+    expect(button(section, 'Save default').disabled).toBe(true)
+    expect((within(section).getByLabelText('Provider') as HTMLSelectElement).value).toBe('anthropic')
+    expect(api.putAiDefault).not.toHaveBeenCalled()
+  })
+
+  it('keeps an unsaved draft across refetches that leave the default unchanged', async () => {
+    const { client } = renderPage()
+    const section = await screen.findByRole('region', { name: 'Default model' })
+    await within(section).findByText('Live')
+    fireEvent.click(within(section).getByRole('button', { name: /^Model/ }))
+    fireEvent.click(screen.getByRole('option', { name: /Claude Beta/ }))
+
+    await client.refetchQueries({ queryKey: ['ai-settings'] })
+    await waitFor(() => expect(api.getAiSettings).toHaveBeenCalledTimes(2))
+
+    expect(within(section).getByRole('button', { name: /claude-beta-20260201/ })).toBeTruthy()
+    expect(button(section, 'Save default').disabled).toBe(false)
   })
 })
