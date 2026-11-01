@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import api from './client'
-import { createReport, extractReportIndicators, importReportIndicators, updateReport } from './reports'
+import { createReport, extractReportIndicators, importReportIndicators, updateReport, ReportTagsSaveError } from './reports'
 import type { ExtractionPreview, ImportResult } from '@/types/reportIocExtraction'
 
 afterEach(() => vi.restoreAllMocks())
@@ -59,6 +59,15 @@ describe('report create/update with tags', () => {
     const put = vi.spyOn(api, 'put')
     await createReport({ title: 'T', origin: 'internal', tags: [] })
     expect(put).not.toHaveBeenCalled()
+  })
+
+  it('throws ReportTagsSaveError when POST succeeds but tag PUT fails', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue({ data: DETAIL })
+    vi.spyOn(api, 'put').mockRejectedValue({ response: { data: { detail: 'Tag not found: missing' } } })
+
+    await expect(
+      createReport({ title: 'T', origin: 'internal', tags: ['missing'] }),
+    ).rejects.toBeInstanceOf(ReportTagsSaveError)
   })
 
   it('omits tags from PATCH and replaces them via PUT when provided', async () => {
