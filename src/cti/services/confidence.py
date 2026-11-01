@@ -3,19 +3,71 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
-from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import case, func, select, update
 
-from cti.feeds.base import RawObservable
-from cti.models.feed import Feed
+from cti.core.redis import invalidate_observable_caches
 from cti.models.observable import Observable
 from cti.models.observable_source import ObservableSource
+from cti.models.report import report_observables
+
+if TYPE_CHECKING:
+    import uuid
+    from collections.abc import Iterable
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from cti.feeds.base import RawObservable
+    from cti.models.feed import Feed
 
 logger = logging.getLogger(__name__)
+
+
+async def recompute_effective_confidence(
+    db: AsyncSession,
+    observable_ids: Iterable[uuid.UUID],
+) -> None:
+    """Recompute effective confidence for observables in one set-based update."""
+    ids = list(set(observable_ids))
+    if not ids:
+        return
+
+    max_feed_confidence = (
+        select(func.max(ObservableSource.source_confidence))
+        .where(ObservableSource.observable_id == Observable.id)
+        .correlate(Observable)
+        .scalar_subquery()
+    )
+    max_report_confidence = (
+        select(func.max(report_observables.c.analyst_confidence))
+        .where(report_observables.c.observable_id == Observable.id)
+        .correlate(Observable)
+        .scalar_subquery()
+    )
+    analyst_and_feed_floor = func.greatest(
+        max_feed_confidence,
+        Observable.manual_confidence,
+        max_report_confidence,
+    )
+    await db.execute(
+        update(Observable)
+        .where(Observable.id.in_(ids))
+        .values(
+            confidence_score=case(
+                (
+                    Observable.confidence_override.is_not(None),
+                    Observable.confidence_override,
+                ),
+                else_=func.coalesce(
+                    analyst_and_feed_floor,
+                    Observable.confidence_score,
+                ),
+            )
+        )
+    )
 
 
 def compute_source_confidence(raw: RawObservable, feed: Feed) -> int:
@@ -41,9 +93,7 @@ class DecaySettings:
     decay_floor: int = 10
 
 
-async def apply_confidence_decay(
-    db: AsyncSession, settings: DecaySettings
-) -> int:
+async def apply_confidence_decay(db: AsyncSession, settings: DecaySettings) -> int:
     """Apply time-based confidence decay to all stale observable sources.
 
     Sources whose ``last_seen_by_feed`` is older than ``decay_days`` have
@@ -87,22 +137,11 @@ async def apply_confidence_decay(
             source.source_confidence = new_conf
             affected_observable_ids.add(source.observable_id)
 
-    # Recompute effective confidence for every affected observable.
-    for obs_id in affected_observable_ids:
-        max_result = await db.execute(
-            select(func.max(ObservableSource.source_confidence)).where(
-                ObservableSource.observable_id == obs_id
-            )
-        )
-        new_effective = max_result.scalar_one() or settings.decay_floor
-        await db.execute(
-            update(Observable)
-            .where(Observable.id == obs_id)
-            .values(confidence_score=new_effective)
-        )
+    await recompute_effective_confidence(db, affected_observable_ids)
 
     if affected_observable_ids:
         await db.commit()
+        await invalidate_observable_caches()
         logger.info(
             "Confidence decay applied to %d observables",
             len(affected_observable_ids),

@@ -393,7 +393,7 @@ async def test_import_creates_new_with_chosen_confidence_and_no_sources(
     }
 
 
-async def test_import_existing_keeps_confidence_sources_and_timestamps(
+async def test_import_existing_with_lower_confidence_keeps_feed_score_and_timestamps(
     client: AsyncClient,
     db_session: AsyncSession,
     world: dict[str, Any],
@@ -468,7 +468,7 @@ async def test_import_retry_is_idempotent(
     assert await snapshot(db_session) == after_first
 
 
-async def test_import_fills_attribution_on_manual_link(
+async def test_import_fills_manual_link_and_raises_existing_confidence(
     client: AsyncClient,
     db_session: AsyncSession,
     world: dict[str, Any],
@@ -500,7 +500,7 @@ async def test_import_fills_attribution_on_manual_link(
     assert links == 1
     observable = await db_session.get(Observable, linked_id, populate_existing=True)
     assert observable is not None
-    assert observable.confidence_score == 33
+    assert observable.confidence_score == 42
 
 
 def stale_links(monkeypatch: pytest.MonkeyPatch, fake: Any) -> None:
@@ -803,7 +803,7 @@ async def test_unlink_after_import_keeps_observable_and_retention_cleans_links(
     assert await db_session.get(Report, uuid.UUID(report_id), populate_existing=True) is not None
 
 
-async def test_import_invalidates_observable_caches_only_when_creating(
+async def test_import_raise_invalidates_observable_caches_without_creating(
     admin_client: AsyncClient,
     world: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
@@ -813,15 +813,63 @@ async def test_import_invalidates_observable_caches_only_when_creating(
     invalidate = AsyncMock()
     monkeypatch.setattr(reports_api, "invalidate_observable_caches", invalidate)
     report_id = world["report"]["id"]
-    body = {"confidence": 80, "items": [{"type": "domain-name", "value": "fresh-drop.example"}]}
+    body = {"confidence": 80, "items": [{"type": "ip-addr", "value": "45.33.32.156"}]}
 
-    first = await admin_client.post(f"{REPORTS}/{report_id}/import", json=body)
-    assert first.status_code == 200, first.text
-    assert first.json()["created"] == 1
+    response = await admin_client.post(f"{REPORTS}/{report_id}/import", json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["created"] == 0
+    assert response.json()["observables"][0]["confidence_score"] == 80
     invalidate.assert_awaited_once()
 
-    invalidate.reset_mock()
-    again = await admin_client.post(f"{REPORTS}/{report_id}/import", json=body)
-    assert again.status_code == 200, again.text
-    assert again.json()["created"] == 0
-    invalidate.assert_not_awaited()  # nothing new: counts and blocklist unchanged
+
+async def test_import_override_is_pinned_until_clear(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    world: dict[str, Any],
+) -> None:
+    observable_id = world["linked"]
+    observable = await db_session.get(Observable, observable_id)
+    assert observable is not None
+    observable.confidence_override = 7
+    observable.override_set_at = datetime.now()
+    await db_session.commit()
+
+    response = await client.post(
+        f"{REPORTS}/{world['report']['id']}/import",
+        json={"confidence": 95, "items": [{"type": "ip-addr", "value": "45.33.32.156"}]},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["observables"][0]["confidence_score"] == 7
+
+    cleared = await client.delete(f"/api/v1/observables/{observable_id}/confidence-override")
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["confidence_score"] == 95
+
+
+async def test_unlink_and_report_delete_remove_analyst_floor(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    world: dict[str, Any],
+) -> None:
+    known_id = world["known"]
+    report_id = world["report"]["id"]
+    body = {
+        "confidence": 95,
+        "items": [{"type": "ip-addr", "value": "185.220.101.42"}],
+    }
+    imported = await client.post(f"{REPORTS}/{report_id}/import", json=body)
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["observables"][0]["confidence_score"] == 95
+
+    unlinked = await client.delete(f"{REPORTS}/{report_id}/observables/{known_id}")
+    assert unlinked.status_code == 204
+    observable = await db_session.get(Observable, known_id, populate_existing=True)
+    assert observable is not None and observable.confidence_score == 88
+
+    second = await create_report(client, title="Second attribution")
+    imported = await client.post(f"{REPORTS}/{second['id']}/import", json=body)
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["observables"][0]["confidence_score"] == 95
+    assert (await client.delete(f"{REPORTS}/{second['id']}")).status_code == 204
+    observable = await db_session.get(Observable, known_id, populate_existing=True)
+    assert observable is not None and observable.confidence_score == 88

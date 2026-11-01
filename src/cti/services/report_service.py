@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload, undefer
 
 from cti.models.observable import Observable
 from cti.models.report import Report, ReportAttachment, report_observables
+from cti.services.confidence import recompute_effective_confidence
 
 if TYPE_CHECKING:
     import uuid
@@ -74,9 +75,7 @@ async def list_reports(
     if filters.source_name is not None:
         clauses.append(Report.source_name == filters.source_name)
     if filters.published_from is not None:
-        clauses.append(
-            Report.published_at >= datetime.combine(filters.published_from, time.min)
-        )
+        clauses.append(Report.published_at >= datetime.combine(filters.published_from, time.min))
     if filters.published_to is not None:
         exclusive_end = datetime.combine(filters.published_to, time.min) + timedelta(days=1)
         clauses.append(Report.published_at < exclusive_end)
@@ -158,10 +157,18 @@ async def update_report(
 async def delete_report(db: AsyncSession, report_id: uuid.UUID) -> bool:
     if await db.get(Report, report_id) is None:
         return False
+    observable_ids = list(
+        await db.scalars(
+            select(report_observables.c.observable_id).where(
+                report_observables.c.report_id == report_id
+            )
+        )
+    )
     # Explicit child deletion keeps SQLite tests correct when FK enforcement is off.
     await db.execute(delete(report_observables).where(report_observables.c.report_id == report_id))
     await db.execute(delete(ReportAttachment).where(ReportAttachment.report_id == report_id))
     await db.execute(delete(Report).where(Report.id == report_id))
+    await recompute_effective_confidence(db, observable_ids)
     await db.flush()
     return True
 
@@ -313,6 +320,7 @@ async def unlink_observable(
             report_observables.c.observable_id == observable_id,
         )
     )
+    await recompute_effective_confidence(db, [observable_id])
     await db.flush()
     return True
 

@@ -14,7 +14,10 @@ from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
 from cti.core.redis import invalidate_observable_caches
 from cti.models.observable import ObservableType
+from cti.models.user import User
 from cti.schemas.observable import (
+    ConfidenceOverrideRequest,
+    ConfidenceOverrideResponse,
     ObservableCreate,
     ObservableListResponse,
     ObservableResponse,
@@ -34,6 +37,16 @@ def _obs_to_response(obs, allowlist: AllowlistMatcher) -> ObservableResponse:
         type=obs.type,
         value=obs.value,
         confidence_score=obs.confidence_score,
+        manual_confidence=obs.manual_confidence,
+        confidence_override=(
+            ConfidenceOverrideResponse(
+                value=obs.confidence_override,
+                set_at=obs.override_set_at,
+                set_by=(obs.override_set_by.username if obs.override_set_by is not None else None),
+            )
+            if obs.confidence_override is not None and obs.override_set_at is not None
+            else None
+        ),
         first_seen=obs.first_seen,
         last_seen=obs.last_seen,
         source_count=len(obs.sources),
@@ -150,6 +163,40 @@ async def get_observable_reports(
     if reports is None:
         raise HTTPException(status_code=404, detail="Observable not found")
     return [report_to_summary(report) for report in reports]
+
+
+@router.put("/{observable_id}/confidence-override", response_model=ObservableResponse)
+async def set_confidence_override(
+    observable_id: uuid.UUID,
+    data: ConfidenceOverrideRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthSubject = Depends(require_admin),
+) -> ObservableResponse:
+    obs = await observable_service.set_confidence_override(
+        db,
+        observable_id,
+        data.confidence,
+        set_by_id=auth.id if isinstance(auth, User) else None,
+    )
+    if obs is None:
+        raise HTTPException(status_code=404, detail="Observable not found")
+    await db.commit()
+    await invalidate_observable_caches()
+    return _obs_to_response(obs, await allowlist_service.load_matcher(db))
+
+
+@router.delete("/{observable_id}/confidence-override", response_model=ObservableResponse)
+async def clear_confidence_override(
+    observable_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(require_admin),
+) -> ObservableResponse:
+    obs = await observable_service.clear_confidence_override(db, observable_id)
+    if obs is None:
+        raise HTTPException(status_code=404, detail="Observable not found")
+    await db.commit()
+    await invalidate_observable_caches()
+    return _obs_to_response(obs, await allowlist_service.load_matcher(db))
 
 
 @router.delete("/{observable_id}", status_code=204)
