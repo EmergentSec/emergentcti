@@ -6,13 +6,16 @@ import ReportDetailPage from './ReportDetailPage'
 const mockUseReport = vi.fn()
 const mockUpdate = vi.fn()
 const mockDelete = vi.fn()
+const mockUploadAttachment = vi.fn()
+const mockRemoveAttachment = vi.fn()
+const mockToast = vi.fn()
 
 vi.mock('@/hooks/useReports', () => ({
   useReport: (id: string | null) => mockUseReport(id),
   useUpdateReport: () => ({ mutate: mockUpdate, isPending: false }),
   useDeleteReport: () => ({ mutate: mockDelete, isPending: false }),
-  useUploadReportAttachment: () => ({ mutate: vi.fn(), isPending: false }),
-  useRemoveReportAttachment: () => ({ mutate: vi.fn(), isPending: false }),
+  useUploadReportAttachment: () => ({ mutate: mockUploadAttachment, isPending: false }),
+  useRemoveReportAttachment: () => ({ mutate: mockRemoveAttachment, isPending: false }),
   useLinkReportObservable: () => ({ mutate: vi.fn(), isPending: false }),
   useUnlinkReportObservable: () => ({ mutate: vi.fn(), isPending: false }),
 }))
@@ -30,12 +33,14 @@ vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => mockAuth,
 }))
 vi.mock('@/contexts/ToastContext', () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast: mockToast }),
 }))
 
 vi.mock('@/components/reports/ReportForm', () => ({
   ReportForm: () => <div data-testid="report-form" />,
 }))
+
+import { AxiosError } from 'axios'
 
 const AI_REPORT = {
   id: 'rep-1',
@@ -59,6 +64,16 @@ const AI_REPORT = {
   observables: [],
 }
 
+const REPORT_WITH_ATTACHMENT = {
+  ...AI_REPORT,
+  has_attachment: true,
+  attachment: {
+    original_filename: 'brief.pdf',
+    size_bytes: 1024,
+    content_type: 'application/pdf',
+  },
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={['/reports/rep-1']}>
@@ -73,6 +88,9 @@ afterEach(() => {
   cleanup()
   mockAuth.isAdmin = true
   mockDelete.mockReset()
+  mockUploadAttachment.mockReset()
+  mockRemoveAttachment.mockReset()
+  mockToast.mockReset()
 })
 
 describe('ReportDetailPage', () => {
@@ -104,5 +122,48 @@ describe('ReportDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete report' }))
     expect(mockDelete).toHaveBeenCalledWith('rep-1', expect.any(Object))
+  })
+
+  it('requires confirmation before removing attachment', () => {
+    mockUseReport.mockReturnValue({
+      data: REPORT_WITH_ATTACHMENT,
+      isLoading: false,
+      error: null,
+    })
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(screen.getByRole('dialog', { name: 'Remove attachment' })).toBeTruthy()
+    expect(mockRemoveAttachment).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove attachment' }))
+    expect(mockRemoveAttachment).toHaveBeenCalledWith('rep-1', expect.any(Object))
+  })
+
+  it('surfaces API detail text on upload failure', () => {
+    mockUseReport.mockReturnValue({
+      data: REPORT_WITH_ATTACHMENT,
+      isLoading: false,
+      error: null,
+    })
+    mockUploadAttachment.mockImplementation((_args, options) => {
+      const err = new AxiosError('Request failed')
+      err.response = {
+        status: 415,
+        data: { detail: 'Unsupported media type' },
+        statusText: 'Unsupported Media Type',
+        headers: {},
+        config: {} as never,
+      }
+      options?.onError?.(err)
+    })
+
+    renderPage()
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File(['x'], 'bad.exe', { type: 'application/octet-stream' })
+    fireEvent.change(input, { target: { files: [file] } })
+
+    expect(mockToast).toHaveBeenCalledWith('Unsupported media type', 'error')
   })
 })

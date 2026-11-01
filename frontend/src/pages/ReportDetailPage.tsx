@@ -37,6 +37,8 @@ import { formatDate, typeLabels } from '@/lib/utils'
 import { apiErrorMessage } from '@/lib/apiError'
 import type { ReportCreate } from '@/types/report'
 
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -60,6 +62,7 @@ export default function ReportDetailPage() {
 
   const [showEdit, setShowEdit] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
+  const [showRemoveAttachment, setShowRemoveAttachment] = useState(false)
   const [linkQuery, setLinkQuery] = useState('')
   const [showLinkSearch, setShowLinkSearch] = useState(false)
 
@@ -82,7 +85,7 @@ export default function ReportDetailPage() {
       document.body.appendChild(a)
       a.click()
       a.remove()
-      URL.revokeObjectURL(url)
+      setTimeout(() => URL.revokeObjectURL(url), 0)
     } catch (err) {
       toast(apiErrorMessage(err, 'Failed to download attachment'), 'error')
     }
@@ -90,12 +93,16 @@ export default function ReportDetailPage() {
 
   const handleUpload = (file: File | undefined) => {
     if (!report || !file) return
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      toast('File must be 20 MiB or smaller', 'error')
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
     uploadAttachment.mutate(
       { id: report.id, file },
       {
         onSuccess: () => toast('Attachment uploaded', 'success'),
-        onError: (err) =>
-          toast(err instanceof Error ? err.message : 'Upload failed', 'error'),
+        onError: (err) => toast(apiErrorMessage(err, 'Upload failed'), 'error'),
       },
     )
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -104,9 +111,12 @@ export default function ReportDetailPage() {
   const handleRemoveAttachment = () => {
     if (!report) return
     removeAttachment.mutate(report.id, {
-      onSuccess: () => toast('Attachment removed', 'success'),
+      onSuccess: () => {
+        toast('Attachment removed', 'success')
+        setShowRemoveAttachment(false)
+      },
       onError: (err) =>
-        toast(err instanceof Error ? err.message : 'Failed to remove attachment', 'error'),
+        toast(apiErrorMessage(err, 'Failed to remove attachment'), 'error'),
     })
   }
 
@@ -119,8 +129,7 @@ export default function ReportDetailPage() {
           toast('Report updated', 'success')
           setShowEdit(false)
         },
-        onError: (err) =>
-          toast(err instanceof Error ? err.message : 'Failed to update report', 'error'),
+        onError: (err) => toast(apiErrorMessage(err, 'Failed to update report'), 'error'),
       },
     )
   }
@@ -132,8 +141,7 @@ export default function ReportDetailPage() {
         toast('Report deleted', 'success')
         navigate('/reports')
       },
-      onError: (err) =>
-        toast(err instanceof Error ? err.message : 'Failed to delete report', 'error'),
+      onError: (err) => toast(apiErrorMessage(err, 'Failed to delete report'), 'error'),
     })
   }
 
@@ -147,8 +155,7 @@ export default function ReportDetailPage() {
           setLinkQuery('')
           setShowLinkSearch(false)
         },
-        onError: (err) =>
-          toast(err instanceof Error ? err.message : 'Failed to link observable', 'error'),
+        onError: (err) => toast(apiErrorMessage(err, 'Failed to link observable'), 'error'),
       },
     )
   }
@@ -159,8 +166,7 @@ export default function ReportDetailPage() {
       { reportId: report.id, observableId },
       {
         onSuccess: () => toast('Observable unlinked', 'success'),
-        onError: (err) =>
-          toast(err instanceof Error ? err.message : 'Failed to unlink observable', 'error'),
+        onError: (err) => toast(apiErrorMessage(err, 'Failed to unlink observable'), 'error'),
       },
     )
   }
@@ -314,7 +320,7 @@ export default function ReportDetailPage() {
                 ref={fileInputRef}
                 type="file"
                 className="sr-only"
-                accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain"
+                accept=".pdf,.md,.markdown,.txt"
                 onChange={(e) => handleUpload(e.target.files?.[0])}
               />
               <Button
@@ -331,7 +337,7 @@ export default function ReportDetailPage() {
                   variant="outline"
                   size="sm"
                   disabled={removeAttachment.isPending}
-                  onClick={handleRemoveAttachment}
+                  onClick={() => setShowRemoveAttachment(true)}
                 >
                   <X size={14} />
                   Remove
@@ -439,6 +445,30 @@ export default function ReportDetailPage() {
           onCancel={() => setShowEdit(false)}
           isLoading={updateReport.isPending}
         />
+      </Dialog>
+
+      <Dialog
+        open={showRemoveAttachment}
+        onClose={() => setShowRemoveAttachment(false)}
+        title="Remove attachment"
+      >
+        <p className="text-sm text-muted-foreground">
+          Remove the attachment from{' '}
+          <span className="font-medium text-foreground">{report.title}</span>? The file will be
+          deleted from storage.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setShowRemoveAttachment(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={removeAttachment.isPending}
+            onClick={handleRemoveAttachment}
+          >
+            {removeAttachment.isPending ? 'Removing…' : 'Remove attachment'}
+          </Button>
+        </div>
       </Dialog>
 
       <Dialog open={showDelete} onClose={() => setShowDelete(false)} title="Delete report">

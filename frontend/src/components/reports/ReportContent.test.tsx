@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
-import { ReportContent } from './ReportContent'
+import { ReportContent, reportMarkdownComponents } from './ReportContent'
 
 afterEach(cleanup)
 
@@ -45,5 +45,24 @@ describe('ReportContent', () => {
     render(<ReportContent content={'line one\nline two'} contentFormat="text" />)
     const pre = screen.getByText(/line one/)
     expect(pre.tagName).toBe('PRE')
+  })
+
+  it('markdown links keep rel/target and omit node even with conflicting props', () => {
+    const Link = reportMarkdownComponents.a!
+    const { container } = render(
+      <Link
+        href="https://example.com"
+        node={{ type: 'element', tagName: 'a', properties: {}, children: [] }}
+        target="_self"
+        rel="noopener"
+      >
+        link
+      </Link>,
+    )
+    const anchor = container.querySelector('a')!
+    expect(anchor.getAttribute('href')).toBe('https://example.com')
+    expect(anchor.getAttribute('target')).toBe('_blank')
+    expect(anchor.getAttribute('rel')).toBe('noopener noreferrer nofollow')
+    expect(anchor.hasAttribute('node')).toBe(false)
   })
 })

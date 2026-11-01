@@ -28,6 +28,7 @@ import {
 import { Toggle } from '@/components/ui/Toggle'
 import { ReportForm } from '@/components/reports/ReportForm'
 import { formatDate } from '@/lib/utils'
+import { apiErrorMessage } from '@/lib/apiError'
 import type { ReportCreate, ReportFilters, ReportOrigin } from '@/types/report'
 
 const ORIGIN_OPTIONS = [
@@ -98,7 +99,7 @@ export default function ReportsPage() {
         closeCreateDialog()
       },
       onError: (err) => {
-        toast(err instanceof Error ? err.message : 'Failed to create report', 'error')
+        toast(apiErrorMessage(err, 'Failed to create report'), 'error')
       },
     })
   }
