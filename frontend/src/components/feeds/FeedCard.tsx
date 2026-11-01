@@ -1,52 +1,42 @@
 import { useState } from 'react'
 import {
-  CloudArrowDown,
-  FileText,
   Browser,
-  Play,
-  DotsThreeVertical,
   Clock,
+  CloudArrowDown,
+  DotsThreeVertical,
+  FileText,
   Gear,
+  Play,
 } from '@phosphor-icons/react'
-import { Card, CardContent } from '@/components/ui/Card'
-import { Button } from '@/components/ui/Button'
-import { Toggle } from '@/components/ui/Toggle'
-import { Popover } from '@/components/ui/Popover'
-import { FeedRunHistory } from './FeedRunHistory'
 import { useUpdateFeed, useTriggerFeed, useDeleteFeed } from '@/hooks/useFeeds'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
-import { cn, formatRelativeTime } from '@/lib/utils'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Card, CardContent } from '@/components/ui/Card'
+import { Dialog } from '@/components/ui/Dialog'
+import { Popover } from '@/components/ui/Popover'
+import { Toggle } from '@/components/ui/Toggle'
+import { apiErrorMessage } from '@/lib/apiError'
 import { compactNumber } from '@/lib/dashboardFormat'
-import type { Feed, FeedRunStatus, FeedType } from '@/types/feed'
-
-// ── Types ────────────────────────────────────────────────────────────────────
+import { cn, formatRelativeTime } from '@/lib/utils'
+import type { Feed, FeedType } from '@/types/feed'
+import { FeedRunHistory } from './FeedRunHistory'
 
 interface FeedCardProps {
   feed: Feed
   onEdit?: (feed: Feed) => void
 }
 
-// ── Constants ────────────────────────────────────────────────────────────────
-
 const FEED_TYPE_CONFIG: Record<
   FeedType,
-  { Icon: React.ElementType; color: string; label: string }
+  { Icon: React.ElementType; iconClassName: string; label: string }
 > = {
-  api: { Icon: CloudArrowDown, color: 'var(--cat-blue)', label: 'API' },
-  file: { Icon: FileText, color: 'var(--cat-green)', label: 'File' },
-  scraper: { Icon: Browser, color: 'var(--cat-purple)', label: 'Scraper' },
+  api: { Icon: CloudArrowDown, iconClassName: 'text-cat-blue', label: 'API' },
+  file: { Icon: FileText, iconClassName: 'text-cat-green', label: 'File' },
+  scraper: { Icon: Browser, iconClassName: 'text-cat-purple', label: 'Scraper' },
 }
 
-const STATUS_DISPLAY: Record<FeedRunStatus, string> = {
-  success: 'Success',
-  failure: 'Failed',
-  running: 'Running',
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-// Humanize common cron expressions; falls back to raw string.
 function humanizeCron(cron: string): string {
   const everyHours = cron.match(/^0 \*\/(\d+) \* \* \*$/)
   if (everyHours) return `every ${everyHours[1]}h`
@@ -57,226 +47,227 @@ function humanizeCron(cron: string): string {
   return cron
 }
 
-// ── Sub-components ───────────────────────────────────────────────────────────
+const MINUTE_MS = 60 * 1000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
 
-function StatusDot({ status }: { status: FeedRunStatus | null | undefined }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        'inline-block h-2 w-2 shrink-0 rounded-full',
-        !status
-          ? 'bg-muted-foreground'
-          : status === 'success'
-            ? 'bg-cat-green'
-            : status === 'failure'
-              ? 'bg-conf-critical'
-              : 'bg-cat-blue animate-pulse-dot',
-      )}
-    />
-  )
+function scheduledIntervalMs(cron: string | null): number | null {
+  if (!cron) return null
+
+  const fields = cron.trim().split(/\s+/)
+  if (fields.length !== 5) return null
+
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = fields
+  if (dayOfMonth !== '*' || month !== '*' || dayOfWeek !== '*') return null
+
+  const everyMinutes = minute.match(/^\*\/(\d+)$/)
+  if (everyMinutes && hour === '*') {
+    const minutes = Number(everyMinutes[1])
+    return minutes >= 1 && minutes <= 59 ? minutes * MINUTE_MS : null
+  }
+
+  const fixedMinute = Number(minute)
+  if (!/^\d+$/.test(minute) || fixedMinute < 0 || fixedMinute > 59) return null
+
+  if (hour === '*') return HOUR_MS
+
+  const everyHours = hour.match(/^\*\/(\d+)$/)
+  if (everyHours) {
+    const hours = Number(everyHours[1])
+    return hours >= 1 && hours <= 23 ? hours * HOUR_MS : null
+  }
+
+  const fixedHour = Number(hour)
+  if (/^\d+$/.test(hour) && fixedHour >= 0 && fixedHour <= 23) return DAY_MS
+
+  return null
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+function FeedStatus({ feed }: { feed: Feed }) {
+  if (!feed.enabled) return <Badge variant="secondary">Disabled</Badge>
+  if (feed.latest_run?.status === 'failure') return <Badge variant="destructive">Error</Badge>
+  if (feed.latest_run?.status === 'running') return <Badge variant="default">Running</Badge>
+
+  const interval = scheduledIntervalMs(feed.schedule_cron)
+  const staleAfter = interval === null ? DAY_MS : interval * 2
+  const lastRunAt = feed.last_run_at ? new Date(feed.last_run_at).getTime() : Number.NaN
+  const isStale = !Number.isFinite(lastRunAt) || Date.now() - lastRunAt > staleAfter
+  if (isStale) return <Badge variant="warning">Stale</Badge>
+  return <Badge variant="success">OK</Badge>
+}
 
 export function FeedCard({ feed, onEdit }: FeedCardProps) {
   const [showHistory, setShowHistory] = useState(false)
-
+  const [showDelete, setShowDelete] = useState(false)
   const updateFeed = useUpdateFeed()
-  const triggerFeedMut = useTriggerFeed()
+  const triggerFeed = useTriggerFeed()
   const deleteFeed = useDeleteFeed()
   const { toast } = useToast()
   const { isAdmin } = useAuth()
-
   const typeConfig = FEED_TYPE_CONFIG[feed.feed_type]
-  const { Icon } = typeConfig
-  const runStatus = feed.latest_run?.status
 
-  // ── Handlers ────────────────────────────────────────────────────────────
-
-  const handleToggle = (newEnabled: boolean) => {
+  const handleToggle = (enabled: boolean) => {
     updateFeed.mutate(
-      { id: feed.id, data: { enabled: newEnabled } },
+      { id: feed.id, data: { enabled } },
       {
-        onSuccess: () =>
-          toast(`${feed.name} ${newEnabled ? 'enabled' : 'disabled'}`, 'success'),
+        onSuccess: () => toast(`${feed.name} ${enabled ? 'enabled' : 'disabled'}`, 'success'),
         onError: () => toast(`Failed to update ${feed.name}`, 'error'),
       },
     )
   }
 
-  const handleTrigger = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    triggerFeedMut.mutate(feed.id, {
+  const handleTrigger = () => {
+    triggerFeed.mutate(feed.id, {
       onSuccess: () => toast(`${feed.name} triggered`, 'success'),
       onError: () => toast(`Failed to trigger ${feed.name}`, 'error'),
     })
   }
 
   const handleDelete = () => {
-    if (!window.confirm(`Delete feed "${feed.name}"? This cannot be undone.`)) return
     deleteFeed.mutate(feed.id, {
-      onSuccess: () => toast(`${feed.name} deleted`, 'success'),
-      onError: () => toast(`Failed to delete ${feed.name}`, 'error'),
+      onSuccess: () => {
+        toast(`${feed.name} deleted`, 'success')
+        setShowDelete(false)
+      },
+      onError: (error) => {
+        toast(apiErrorMessage(error, `Failed to delete ${feed.name}`), 'error')
+        setShowDelete(false)
+      },
     })
   }
 
-  // ── Status line color ────────────────────────────────────────────────────
-  const statusLineColor =
-    !runStatus
-      ? 'text-muted-foreground'
-      : runStatus === 'success'
-        ? 'text-cat-green'
-        : runStatus === 'failure'
-          ? 'text-conf-critical'
-          : 'text-cat-blue'
-
-  // ── Render ───────────────────────────────────────────────────────────────
-
   return (
-    <Card
-      className={cn(
-        'transition-colors hover:border-border/80',
-        !feed.enabled && 'opacity-60',
-      )}
-    >
-      <CardContent className="py-4">
-        <div className="flex items-center gap-4">
-          {/* ── Type icon tile ───────────────────────────────────────────── */}
-          <div
-            aria-hidden="true"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg"
-            style={{
-              backgroundColor: `color-mix(in srgb, ${typeConfig.color} 15%, transparent)`,
-              color: typeConfig.color,
-            }}
-          >
-            <Icon size={22} weight="duotone" />
-          </div>
-
-          {/* ── Main body ────────────────────────────────────────────────── */}
-          <div className="min-w-0 flex-1">
-            {/* Header row: status dot · name · type chip */}
-            <div className="flex items-center gap-2">
-              <StatusDot status={runStatus} />
-              <h3 className="font-semibold text-foreground">{feed.name}</h3>
-              <span
-                className="rounded px-1.5 py-0.5 text-[10px] font-medium leading-none"
-                style={{
-                  backgroundColor: `color-mix(in srgb, ${typeConfig.color} 15%, transparent)`,
-                  color: typeConfig.color,
-                }}
+    <>
+      <Card className={cn('transition-colors hover:border-borderStrong', !feed.enabled && 'opacity-75')}>
+        <CardContent className="p-4 sm:p-5">
+          <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start">
+            <div className="flex min-w-0 flex-1 gap-3 sm:gap-4">
+              <div
+                aria-hidden="true"
+                className={cn(
+                  'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-surface2',
+                  typeConfig.iconClassName,
+                )}
               >
-                {typeConfig.label}
-              </span>
-            </div>
-
-            {/* Description */}
-            {feed.description && (
-              <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">
-                {feed.description}
-              </p>
-            )}
-
-            {/* Meta row: observables · schedule · confidence */}
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 font-mono text-xs text-muted-foreground">
-              <span>
-                <span className="text-foreground">{compactNumber(feed.observable_count)}</span>
-                {' '}observables
-              </span>
-              {feed.schedule_cron && (
-                <span className="flex items-center gap-1">
-                  <Clock size={11} aria-hidden="true" />
-                  {humanizeCron(feed.schedule_cron)}
-                </span>
-              )}
-              <span className="flex items-center gap-1">
-                <Gear size={11} aria-hidden="true" />
-                conf {feed.default_confidence}
-              </span>
-            </div>
-
-            {/* Status line */}
-            {(runStatus || feed.last_run_at) && (
-              <div className={cn('mt-0.5 text-xs font-medium', statusLineColor)}>
-                {runStatus ? STATUS_DISPLAY[runStatus] : 'No status'} ·{' '}
-                {formatRelativeTime(feed.last_run_at)}
+                <typeConfig.Icon size={22} weight="duotone" />
               </div>
-            )}
+
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold text-foreground">{feed.name}</h3>
+                  <Badge variant="outline">{typeConfig.label}</Badge>
+                  <FeedStatus feed={feed} />
+                </div>
+                {feed.description && (
+                  <p className="mt-1 text-sm text-muted-foreground">{feed.description}</p>
+                )}
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+                  <span>
+                    <span className="text-foreground">{compactNumber(feed.observable_count)}</span>{' '}
+                    observables
+                  </span>
+                  {feed.schedule_cron && (
+                    <span className="flex items-center gap-1">
+                      <Clock size={12} aria-hidden="true" />
+                      {humanizeCron(feed.schedule_cron)}
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1">
+                    <Gear size={12} aria-hidden="true" />
+                    conf {feed.default_confidence}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-xs text-text3">
+                  {feed.last_run_at ? `Last run ${formatRelativeTime(feed.last_run_at)}` : 'No runs recorded'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+              <Button
+                aria-label="Run now"
+                variant="outline"
+                size="sm"
+                onClick={handleTrigger}
+                disabled={!isAdmin || !feed.enabled || triggerFeed.isPending}
+                title={!isAdmin ? 'Admin only' : undefined}
+              >
+                <Play size={14} aria-hidden="true" />
+                {triggerFeed.isPending ? 'Running…' : 'Run now'}
+              </Button>
+              <span title={!isAdmin ? 'Admin only' : undefined}>
+                <Toggle
+                  checked={feed.enabled}
+                  onChange={handleToggle}
+                  disabled={!isAdmin || updateFeed.isPending}
+                  label={feed.enabled ? 'Enabled' : 'Disabled'}
+                />
+              </span>
+              <Popover
+                trigger={
+                  <button
+                    type="button"
+                    aria-label="Feed options"
+                    className="rounded-lg p-2 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <DotsThreeVertical size={18} aria-hidden="true" />
+                  </button>
+                }
+                align="end"
+              >
+                <div className="flex flex-col py-0.5">
+                  <button
+                    type="button"
+                    className="rounded-lg px-3 py-2 text-left text-sm hover:bg-hover"
+                    onClick={() => setShowHistory((visible) => !visible)}
+                  >
+                    {showHistory ? 'Hide run history' : 'Show run history'}
+                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="rounded-lg px-3 py-2 text-left text-sm hover:bg-hover"
+                      onClick={() => onEdit?.(feed)}
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {isAdmin && !feed.is_preconfigured && (
+                    <button
+                      type="button"
+                      className="rounded-lg px-3 py-2 text-left text-sm text-destructive hover:bg-hover"
+                      onClick={() => setShowDelete(true)}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </Popover>
+            </div>
           </div>
 
-          {/* ── Right-side actions ───────────────────────────────────────── */}
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              aria-label="Run now"
-              variant="outline"
-              size="sm"
-              onClick={handleTrigger}
-              disabled={!isAdmin || !feed.enabled || triggerFeedMut.isPending}
-              title={!isAdmin ? 'Admin only' : undefined}
-            >
-              <Play size={14} aria-hidden="true" />
-              {triggerFeedMut.isPending ? 'Running…' : 'Run now'}
+          {showHistory && (
+            <div className="mt-4 border-t border-border pt-4">
+              <FeedRunHistory feedId={feed.id} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={showDelete} onClose={() => setShowDelete(false)} title="Delete feed">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Delete <span className="font-medium text-foreground">{feed.name}</span>? This action
+            cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowDelete(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleteFeed.isPending}>
+              {deleteFeed.isPending ? 'Deleting…' : 'Delete feed'}
             </Button>
-
-            <span title={!isAdmin ? 'Admin only' : undefined}>
-              <Toggle
-                checked={feed.enabled}
-                onChange={handleToggle}
-                disabled={!isAdmin || updateFeed.isPending}
-              />
-            </span>
-
-            <Popover
-              trigger={
-                <button
-                  type="button"
-                  aria-label="Feed options"
-                  className="rounded p-1 text-muted-foreground hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <DotsThreeVertical size={18} aria-hidden="true" />
-                </button>
-              }
-              align="end"
-            >
-              <div className="flex flex-col py-0.5">
-                <button
-                  type="button"
-                  className="rounded px-3 py-1.5 text-left text-sm hover:bg-hover"
-                  onClick={() => setShowHistory((p) => !p)}
-                >
-                  {showHistory ? 'Hide run history' : 'Show run history'}
-                </button>
-                {isAdmin && (
-                  <button
-                    type="button"
-                    className="rounded px-3 py-1.5 text-left text-sm hover:bg-hover"
-                    onClick={() => onEdit?.(feed)}
-                  >
-                    Edit
-                  </button>
-                )}
-                {isAdmin && !feed.is_preconfigured && (
-                  <button
-                    type="button"
-                    className="rounded px-3 py-1.5 text-left text-sm text-conf-critical hover:bg-hover"
-                    onClick={handleDelete}
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-            </Popover>
           </div>
         </div>
-
-        {/* Run history (toggles via overflow menu) */}
-        {showHistory && (
-          <div className="mt-4 border-t border-border pt-4">
-            <FeedRunHistory feedId={feed.id} />
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      </Dialog>
+    </>
   )
 }

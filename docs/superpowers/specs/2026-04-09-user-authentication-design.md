@@ -1,7 +1,7 @@
 # User Authentication System Design
 
 **Date:** 2026-04-09
-**Status:** Draft
+**Status:** Implemented
 **Scope:** Add username/password authentication with JWT sessions to EmergentCTI
 
 ## Context

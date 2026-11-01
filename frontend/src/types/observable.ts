@@ -24,6 +24,9 @@ export interface Observable {
   last_seen: string | null
   source_count: number
   sources: ObservableSource[]
+  /** Derived at read time from the current allowlist; allowlisted observables are excluded from exports. */
+  allowlisted: boolean
+  allowlist_entry_ids: string[]
   created_at: string
   updated_at: string
 }

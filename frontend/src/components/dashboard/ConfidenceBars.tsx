@@ -1,4 +1,4 @@
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/Card';
 
 interface Distribution {
   critical: number;
@@ -25,7 +25,8 @@ export function ConfidenceBars({ distribution }: ConfidenceBarsProps) {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-[15px]">Confidence distribution</CardTitle>
+        <CardTitle>Confidence distribution</CardTitle>
+        <CardDescription>Current effective score bands</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {BANDS.map((band) => {
@@ -34,7 +35,7 @@ export function ConfidenceBars({ distribution }: ConfidenceBarsProps) {
 
           return (
             <div key={band.key} className="space-y-1">
-              <div className="flex items-center justify-between text-[13px]">
+              <div className="flex items-center justify-between text-sm">
                 <span className="flex items-center gap-1.5">
                   <span className="font-medium text-foreground">{band.label}</span>
                   <span className="text-muted-foreground">{band.range}</span>

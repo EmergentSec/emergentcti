@@ -114,6 +114,31 @@ async def add_token_cleanup_job() -> None:
     )
 
 
+async def add_retention_job() -> None:
+    """Register daily retention enforcement (zero retention days disables deletion)."""
+    get_scheduler().add_job(
+        _run_retention_job,
+        CronTrigger(hour=3, minute=0, timezone="UTC"),
+        id="system:observable_retention",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
+
+async def _run_retention_job() -> None:
+    """APScheduler callback: enforce retention using a dedicated session."""
+    from cti.core.database import async_session_factory
+    from cti.services.retention import enforce_retention
+
+    async with async_session_factory() as db:
+        try:
+            await enforce_retention(db, get_settings().OBSERVABLE_RETENTION_DAYS)
+        except Exception:
+            logger.error("Observable retention job failed", exc_info=True)
+
+
 async def _run_feed_job(feed_id: uuid.UUID) -> None:
     """APScheduler callback: execute a scheduled feed ingestion run."""
     # Late imports to avoid circular dependencies at module load time.

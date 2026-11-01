@@ -72,7 +72,7 @@ export function ObservableForm({ onSubmit, onCancel, isLoading }: ObservableForm
             step="5"
             value={confidenceScore}
             onChange={(e) => setConfidenceScore(parseInt(e.target.value))}
-            className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-muted accent-primary"
+            className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-surface3 accent-primary"
           />
           <span className="min-w-[2rem] text-right text-xs tabular-nums text-muted-foreground">
             {confidenceScore}

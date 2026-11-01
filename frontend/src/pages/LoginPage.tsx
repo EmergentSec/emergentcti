@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { EmergentLogo } from '@/components/common/EmergentLogo'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
 import { Card, CardContent } from '@/components/ui/Card'
+import { Input } from '@/components/ui/Input'
 
 export default function LoginPage() {
   const [username, setUsername] = useState('')
@@ -14,8 +15,8 @@ export default function LoginPage() {
   const { login } = useAuth()
   const { toast } = useToast()
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
     if (!username.trim() || !password) return
 
     setError('')
@@ -35,42 +36,51 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
+    <main className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
-        <CardContent className="pt-6">
-          <div className="flex flex-col items-center space-y-4 mb-6">
-            <EmergentLogo size={56} className="text-foreground" />
+        <CardContent className="p-6 sm:p-8">
+          <div className="mb-7 flex flex-col items-center space-y-4">
+            <EmergentLogo size={52} />
             <div className="text-center">
-              <h1 className="text-2xl font-bold text-foreground tracking-tight">EmergentCTI</h1>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">EmergentCTI</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Sign in to your account
+                Sign in to your intelligence workspace
               </p>
             </div>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
+              label="Username"
               type="text"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(event) => setUsername(event.target.value)}
               placeholder="Username"
+              autoComplete="username"
               autoFocus
             />
             <Input
+              label="Password"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
               placeholder="Password"
-              error={error}
+              autoComplete="current-password"
             />
+            {error && (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
             <Button
               type="submit"
+              variant="brand"
               disabled={loading || !username.trim() || !password}
               className="w-full"
             >
               {loading ? (
                 <span className="flex items-center gap-2">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  <LoadingSpinner size="sm" />
                   Signing in...
                 </span>
               ) : (
@@ -80,6 +90,6 @@ export default function LoginPage() {
           </form>
         </CardContent>
       </Card>
-    </div>
+    </main>
   )
 }

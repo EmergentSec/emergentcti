@@ -43,6 +43,16 @@ describe('FeedStatusTable', () => {
     expect(viewAll.closest('a')?.getAttribute('href')).toBe('/feeds');
   });
 
+  it('gives the name column the remaining table width and only truncates overflow', () => {
+    render(<FeedStatusTable feeds={feeds} />);
+
+    const nameCell = screen.getByText('Emerging Threats').closest('td');
+    expect(nameCell?.className).toContain('truncate');
+    expect(nameCell?.className).not.toContain('max-w-0');
+    expect(nameCell?.getAttribute('title')).toBe('Emerging Threats');
+    expect(nameCell?.closest('table')?.className).toContain('table-fixed');
+  });
+
   it('renders observable counts and status dots', () => {
     render(<FeedStatusTable feeds={feeds} />);
 

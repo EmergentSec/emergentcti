@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Input } from '@/components/ui/Input'
+import { Input, controlClass } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
 import type { Feed, FeedCreate, FeedType, FeedUpdate } from '@/types/feed'
+import { cn } from '@/lib/utils'
 
 // ── Prop types ────────────────────────────────────────────────────────────────
 
@@ -147,18 +148,25 @@ export function FeedForm(props: FeedFormProps) {
   // ── Shared auth JSON textarea markup ─────────────────────────────────────
   const authJsonTextarea = (
     <div className="space-y-1.5">
-      <label className="text-sm font-medium text-foreground">
+      <label htmlFor="feed-auth-config" className="text-sm font-medium text-foreground">
         Auth Config (JSON, optional)
       </label>
       <textarea
+        id="feed-auth-config"
         value={authConfig}
         onChange={(e) => setAuthConfig(e.target.value)}
         placeholder='{"api_key": "your-key-here"}'
         rows={3}
-        className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-invalid={errors.authConfig ? true : undefined}
+        aria-describedby={errors.authConfig ? 'feed-auth-config-error' : undefined}
+        className={cn(
+          controlClass,
+          'h-auto min-h-20 resize-y py-2 font-mono',
+          errors.authConfig && 'border-destructive focus-visible:border-destructive focus-visible:ring-destructive',
+        )}
       />
       {errors.authConfig && (
-        <p className="text-xs text-destructive">{errors.authConfig}</p>
+        <p id="feed-auth-config-error" className="text-xs text-destructive">{errors.authConfig}</p>
       )}
     </div>
   )
@@ -231,17 +239,18 @@ export function FeedForm(props: FeedFormProps) {
       />
 
       <div className="space-y-1.5">
-        <label className="text-sm font-medium text-foreground">
+        <label htmlFor="feed-confidence" className="text-sm font-medium text-foreground">
           Default Confidence: {defaultConfidence}
         </label>
         <input
+          id="feed-confidence"
           type="range"
           min="0"
           max="100"
           step="5"
           value={defaultConfidence}
           onChange={(e) => setDefaultConfidence(parseInt(e.target.value))}
-          className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-muted accent-primary"
+          className="h-1.5 w-full cursor-pointer appearance-none rounded-xl bg-surface3 accent-primary"
         />
       </div>
 

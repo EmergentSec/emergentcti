@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import JSONResponse
 from pydantic import SecretStr
 from sqlalchemy import func, select
 
@@ -21,7 +23,16 @@ from cti.core.redis import close_redis, init_redis
 from cti.models.api_key import ApiKey
 from cti.models.user import User, UserRole
 from cti.services import feed_service
-from cti.services.scheduler import add_decay_job, add_token_cleanup_job, init_scheduler, sync_feed_jobs
+from cti.services.scheduler import (
+    add_decay_job,
+    add_retention_job,
+    add_token_cleanup_job,
+    init_scheduler,
+    sync_feed_jobs,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +144,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await sync_feed_jobs(db)
     await add_decay_job()
     await add_token_cleanup_job()
+    await add_retention_job()
     sched.start()
     logger.info("Scheduler started")
 
@@ -165,21 +177,32 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        _request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        safe_errors = [
+            {key: detail[key] for key in ("loc", "msg", "type") if key in detail}
+            for detail in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": safe_errors})
+
     app.include_router(api_router)
 
     # Authenticated API documentation routes
     from cti.core.dependencies import AuthSubject, get_current_auth
 
     @app.get("/api/openapi.json", include_in_schema=False)
-    async def openapi_schema(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: ARG001
+    async def openapi_schema(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: B008
         return app.openapi()
 
     @app.get("/api/docs", include_in_schema=False)
-    async def docs_ui(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: ARG001
+    async def docs_ui(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: B008
         return get_swagger_ui_html(openapi_url="/api/openapi.json", title="EmergentCTI — Docs")
 
     @app.get("/api/redoc", include_in_schema=False)
-    async def redoc_ui(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: ARG001
+    async def redoc_ui(_auth: AuthSubject = Depends(get_current_auth)):  # noqa: B008
         return get_redoc_html(openapi_url="/api/openapi.json", title="EmergentCTI — Docs")
 
     return app

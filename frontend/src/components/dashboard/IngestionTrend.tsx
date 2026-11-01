@@ -5,7 +5,7 @@ import {
   Tooltip,
   XAxis,
 } from 'recharts'
-import { Card, CardContent, CardHeader } from '@/components/ui/Card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 
 interface IngestionTrendProps {
   series: { date: string; count: number }[]
@@ -16,22 +16,22 @@ export function IngestionTrend({ series }: IngestionTrendProps) {
 
   return (
     <Card>
-      <CardHeader className="pb-2 p-5">
+      <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-base font-semibold text-foreground">Ingestion volume</h3>
-            <p className="mt-0.5 text-[12px] text-muted-foreground">
+            <CardTitle>Ingestion volume</CardTitle>
+            <CardDescription className="mt-1">
               New observables per day · last 14 days
-            </p>
+            </CardDescription>
           </div>
-          <p className="shrink-0 font-mono text-[22px] font-extrabold leading-none text-foreground">
+          <p className="shrink-0 font-mono text-xl font-bold leading-none text-foreground">
             {total.toLocaleString()}
-            <span className="ml-1.5 text-[12px] font-normal text-muted-foreground">total</span>
+            <span className="ml-1.5 text-xs font-normal text-muted-foreground">total</span>
           </p>
         </div>
       </CardHeader>
-      <CardContent className="px-0 pb-2">
-        <div className="h-[180px] w-full">
+      <CardContent className="px-0 pb-3">
+        <div className="h-[190px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={series} margin={{ top: 4, right: 16, bottom: 0, left: 16 }}>
               <defs>

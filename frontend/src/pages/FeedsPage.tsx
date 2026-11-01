@@ -1,24 +1,23 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Plus } from '@phosphor-icons/react'
 import { useFeeds, useCreateFeed, useUpdateFeed } from '@/hooks/useFeeds'
 import { useDashboard } from '@/hooks/useDashboard'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
+import { EmptyState } from '@/components/common/EmptyState'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent } from '@/components/ui/Card'
 import { Dialog } from '@/components/ui/Dialog'
+import { Tabs } from '@/components/ui/Tabs'
 import { FeedCard } from '@/components/feeds/FeedCard'
 import { FeedForm } from '@/components/feeds/FeedForm'
 import { compactNumber } from '@/lib/dashboardFormat'
 import { cn } from '@/lib/utils'
 import type { Feed, FeedCreate, FeedUpdate, FeedType } from '@/types/feed'
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
 type FilterSegment = 'all' | FeedType
-
-// ── Constants ────────────────────────────────────────────────────────────────
 
 const SEGMENTS: { key: FilterSegment; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -26,8 +25,6 @@ const SEGMENTS: { key: FilterSegment; label: string }[] = [
   { key: 'file', label: 'File' },
   { key: 'scraper', label: 'Scraper' },
 ]
-
-// ── Sub-components ───────────────────────────────────────────────────────────
 
 interface SummaryCardProps {
   label: string
@@ -37,25 +34,19 @@ interface SummaryCardProps {
 
 function SummaryCard({ label, value, valueClassName }: SummaryCardProps) {
   return (
-    <Card>
-      <CardContent className="px-5 py-4">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          {label}
-        </p>
-        <p
-          className={cn(
-            'mt-1.5 font-mono text-2xl font-semibold tabular-nums',
-            valueClassName,
-          )}
-        >
-          {value}
-        </p>
-      </CardContent>
-    </Card>
+    <div className="rounded-xl bg-surface2 p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p
+        className={cn(
+          'mt-1.5 font-mono text-2xl font-semibold tabular-nums text-foreground',
+          valueClassName,
+        )}
+      >
+        {value}
+      </p>
+    </div>
   )
 }
-
-// ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function FeedsPage() {
   const { data: feeds, isLoading: feedsLoading, error: feedsError } = useFeeds()
@@ -64,22 +55,31 @@ export default function FeedsPage() {
   const updateFeed = useUpdateFeed()
   const { toast } = useToast()
   const { isAdmin } = useAuth()
-
-  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [activeSegment, setActiveSegment] = useState<FilterSegment>('all')
   const [editingFeed, setEditingFeed] = useState<Feed | null>(null)
+  const showCreateDialog = isAdmin && searchParams.get('create') === '1'
+
+  const openCreateDialog = () => {
+    const params = new URLSearchParams(searchParams)
+    params.set('create', '1')
+    setSearchParams(params)
+  }
+
+  const closeCreateDialog = () => {
+    const params = new URLSearchParams(searchParams)
+    params.delete('create')
+    setSearchParams(params, { replace: true })
+  }
 
   const handleCreate = (data: FeedCreate) => {
     createFeed.mutate(data, {
       onSuccess: () => {
         toast('Feed created successfully', 'success')
-        setShowCreateDialog(false)
+        closeCreateDialog()
       },
       onError: (err) => {
-        toast(
-          err instanceof Error ? err.message : 'Failed to create feed',
-          'error',
-        )
+        toast(err instanceof Error ? err.message : 'Failed to create feed', 'error')
       },
     })
   }
@@ -114,7 +114,7 @@ export default function FeedsPage() {
   if (feedsError) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
-        <p className="text-destructive-foreground">Failed to load feeds</p>
+        <p role="alert" className="text-destructive">Failed to load feeds</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {feedsError instanceof Error ? feedsError.message : 'Unknown error'}
         </p>
@@ -124,98 +124,62 @@ export default function FeedsPage() {
 
   const allFeeds = feeds ?? []
   const configuredCount = allFeeds.length
-  const enabledCount = allFeeds.filter((f) => f.enabled).length
+  const enabledCount = allFeeds.filter((feed) => feed.enabled).length
   const errorCount = stats?.feed_errors_24h ?? 0
   const totalObservables = stats?.total_observables ?? 0
-
-  const filteredFeeds =
-    activeSegment === 'all'
-      ? allFeeds
-      : allFeeds.filter((f) => f.feed_type === activeSegment)
+  const filteredFeeds = activeSegment === 'all'
+    ? allFeeds
+    : allFeeds.filter((feed) => feed.feed_type === activeSegment)
 
   return (
-    <div className="space-y-3.5">
-      {/* ── Summary cards ───────────────────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-3.5">
-        <SummaryCard label="Configured feeds" value={configuredCount} />
-        <SummaryCard
-          label="Enabled"
-          value={enabledCount}
-          valueClassName="text-cat-green"
-        />
-        <SummaryCard
-          label="Errors (24h)"
-          value={errorCount}
-          valueClassName="text-conf-critical"
-        />
-      </div>
-
-      {/* Observables wide card */}
+    <div className="space-y-5">
       <Card>
-        <CardContent className="px-5 py-4">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Observables
-          </p>
-          <p className="mt-1.5 font-mono text-2xl font-semibold tabular-nums text-brand">
-            {compactNumber(totalObservables)}
-          </p>
+        <CardContent className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4 sm:p-5">
+          <SummaryCard label="Configured feeds" value={configuredCount} />
+          <SummaryCard label="Enabled" value={enabledCount} valueClassName="text-success" />
+          <SummaryCard label="Errors (24h)" value={errorCount} valueClassName="text-destructive" />
+          <SummaryCard
+            label="Observables"
+            value={compactNumber(totalObservables)}
+            valueClassName="text-primary"
+          />
         </CardContent>
       </Card>
 
-      {/* ── Toolbar: segmented filter + Add Feed ────────────────────────── */}
-      <div className="flex items-center justify-between gap-3">
-        {/* Segmented control */}
-        <div
-          className="flex items-center gap-0.5 rounded-md border border-border bg-surface2 p-0.5"
-          role="group"
-          aria-label="Filter feeds by type"
-        >
-          {SEGMENTS.map(({ key, label }) => {
-            const isActive = activeSegment === key
-            return (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={isActive}
-                onClick={() => setActiveSegment(key)}
-                className={cn(
-                  'rounded px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  isActive
-                    ? 'text-brand'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-                style={
-                  isActive
-                    ? {
-                        backgroundColor:
-                          'color-mix(in srgb, var(--brand) 13%, transparent)',
-                      }
-                    : undefined
-                }
-              >
-                {label}
-              </button>
-            )
-          })}
-        </div>
-
-        {/* Add Feed button — admin only */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <Tabs
+          tabs={SEGMENTS}
+          active={activeSegment}
+          onChange={(key) => setActiveSegment(key as FilterSegment)}
+          className="min-w-0 flex-1 sm:max-w-md"
+        />
         {isAdmin && (
-          <Button variant="brand" onClick={() => setShowCreateDialog(true)}>
-            <Plus size={16} weight="bold" aria-hidden="true" className="mr-1.5" />
+          <Button variant="brand" onClick={openCreateDialog} className="self-start sm:self-auto">
+            <Plus size={16} weight="bold" aria-hidden="true" />
             Add Feed
           </Button>
         )}
       </div>
 
-      {/* ── Feed list ────────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-3.5">
+      <div className="flex flex-col gap-4">
         {filteredFeeds.length === 0 ? (
-          <p className="py-12 text-center text-sm text-muted-foreground">
-            {activeSegment === 'all'
-              ? 'No feeds.'
-              : `No ${SEGMENTS.find((s) => s.key === activeSegment)?.label ?? activeSegment} feeds.`}
-          </p>
+          <Card>
+            <EmptyState
+              title={activeSegment === 'all'
+                ? 'No feeds configured'
+                : `No ${SEGMENTS.find((segment) => segment.key === activeSegment)?.label ?? activeSegment} feeds`}
+              description={activeSegment === 'all'
+                ? 'Add a feed to begin ingesting threat intelligence.'
+                : 'Choose another feed type or add a new feed.'}
+            >
+              {isAdmin && activeSegment === 'all' && (
+                <Button onClick={openCreateDialog}>
+                  <Plus size={16} weight="bold" aria-hidden="true" />
+                  Add Feed
+                </Button>
+              )}
+            </EmptyState>
+          </Card>
         ) : (
           filteredFeeds.map((feed) => (
             <FeedCard key={feed.id} feed={feed} onEdit={setEditingFeed} />
@@ -223,15 +187,10 @@ export default function FeedsPage() {
         )}
       </div>
 
-      {/* ── Create dialog ────────────────────────────────────────────────── */}
-      <Dialog
-        open={showCreateDialog}
-        onClose={() => setShowCreateDialog(false)}
-        title="Add Feed"
-      >
+      <Dialog open={showCreateDialog} onClose={closeCreateDialog} title="Add Feed">
         <FeedForm
           onSubmit={handleCreate}
-          onCancel={() => setShowCreateDialog(false)}
+          onCancel={closeCreateDialog}
           isLoading={createFeed.isPending}
         />
       </Dialog>

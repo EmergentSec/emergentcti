@@ -1,10 +1,13 @@
-"""Observable CRUD, bulk upsert, and blocklist query service."""
+"""Observable CRUD, bulk upsert, and blocklist/export query service."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import aclosing
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, func, select, tuple_
@@ -17,6 +20,8 @@ from cti.feeds.base import RawObservable
 from cti.models.feed import Feed
 from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
+from cti.services import allowlist_service
+from cti.services.allowlist_service import AllowlistMatcher
 from cti.services.confidence import compute_source_confidence
 
 logger = logging.getLogger(__name__)
@@ -27,6 +32,9 @@ _BATCH_SIZE = 500
 # Deadlock retry parameters.
 _MAX_RETRIES = 3
 _BASE_DELAY = 0.5  # seconds
+
+# Candidate rows buffered per fetch while streaming an export through the allowlist.
+_EXPORT_PAGE_SIZE = 2000
 
 
 async def get_observables(
@@ -373,29 +381,37 @@ async def bulk_upsert_from_feed(
     return total_ingested, new_count
 
 
-async def get_blocklist(
-    db: AsyncSession,
-    obs_type: ObservableType,
-    confidence_min: int = 70,
-    max_age_days: int | None = None,
-    feed_id: uuid.UUID | None = None,
-) -> list[str]:
-    """Get a plain list of observable values for blocklist export.
+# C0/C1 control characters plus the Unicode line/paragraph separators: anything a
+# line-oriented consumer could treat as a record break.
+_LINE_UNSAFE = re.compile("[\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]")
 
-    Returns distinct values ordered alphabetically.
+
+def is_line_safe(value: str) -> bool:
+    """Whether a value can be emitted as exactly one line of a text export.
+
+    A value such as ``"evil.test\\n10.0.0.5"`` would otherwise smuggle a second
+    indicator past the allowlist, which is only ever evaluated against the
+    whole stored value. Such values are omitted from text formats (JSON exports
+    keep them verbatim, safely escaped).
     """
-    stmt = (
-        select(Observable.value)
-        .distinct()
-        .where(
-            Observable.type == obs_type,
-            Observable.confidence_score >= confidence_min,
-        )
-    )
+    return _LINE_UNSAFE.search(value) is None
+
+
+def _export_filters(
+    obs_type: ObservableType | None,
+    confidence_min: int,
+    max_age_days: int | None,
+    feed_id: uuid.UUID | None,
+) -> list:
+    """WHERE clauses shared by every export query."""
+    filters = [Observable.confidence_score >= confidence_min]
+
+    if obs_type is not None:
+        filters.append(Observable.type == obs_type)
 
     if max_age_days is not None:
         cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
-        stmt = stmt.where(Observable.last_seen >= cutoff)
+        filters.append(Observable.last_seen >= cutoff)
 
     if feed_id is not None:
         source_sub = (
@@ -403,12 +419,114 @@ async def get_blocklist(
             .where(ObservableSource.feed_id == feed_id)
             .scalar_subquery()
         )
-        stmt = stmt.where(Observable.id.in_(source_sub))
+        filters.append(Observable.id.in_(source_sub))
 
-    stmt = stmt.order_by(Observable.value)
+    return filters
+
+
+async def get_blocklist(
+    db: AsyncSession,
+    obs_type: ObservableType,
+    confidence_min: int = 70,
+    max_age_days: int | None = None,
+    feed_id: uuid.UUID | None = None,
+    *,
+    apply_allowlist: bool = True,
+) -> list[str]:
+    """Get a plain list of observable values for blocklist export.
+
+    Returns distinct values ordered alphabetically, with currently allowlisted
+    values removed. Values that are not line-safe are always omitted, so the
+    pre-policy list is safe to join and cache. Pass ``apply_allowlist=False`` only to obtain the
+    pre-policy list for caching; the caller must then filter it with the
+    current allowlist before serving it.
+    """
+    stmt = (
+        select(Observable.value)
+        .distinct()
+        .where(*_export_filters(obs_type, confidence_min, max_age_days, feed_id))
+        .order_by(Observable.value)
+    )
 
     result = await db.execute(stmt)
-    return [row[0] for row in result.all()]
+    values = [row[0] for row in result.all() if is_line_safe(row[0])]
+    if not apply_allowlist:
+        return values
+    matcher = await allowlist_service.load_matcher(db)
+    return allowlist_service.filter_values(matcher, obs_type, values)
+
+
+async def _stream_export_candidates(
+    db: AsyncSession,
+    filters: list,
+    order_by: tuple,
+) -> AsyncIterator[tuple[uuid.UUID, ObservableType, str]]:
+    """Yield lightweight ``(id, type, value)`` rows for allowlist filtering.
+
+    Streams in batches so a large export never holds full ORM rows (or their
+    sources) in memory just to decide what the policy suppresses.
+    """
+    stmt = (
+        select(Observable.id, Observable.type, Observable.value)
+        .where(*filters)
+        .order_by(*order_by)
+        .execution_options(yield_per=_EXPORT_PAGE_SIZE)
+    )
+    result = await db.stream(stmt)
+    try:
+        async for row in result:
+            yield row.id, row.type, row.value
+    finally:
+        await result.close()
+
+
+async def get_export_values(
+    db: AsyncSession,
+    obs_type: ObservableType | None = None,
+    confidence_min: int = 0,
+    max_age_days: int | None = None,
+    feed_id: uuid.UUID | None = None,
+    *,
+    order: str = "recent",
+    line_safe: bool = False,
+    allowlist: AllowlistMatcher | None = None,
+) -> tuple[list[str], int]:
+    """Get every exportable value matching the filters, without a row limit.
+
+    ``order`` is ``"recent"`` (newest ``last_seen`` first, the JSON/text export
+    order) or ``"value"`` (alphabetical, deduplicated — the blocklist order).
+    Pass ``line_safe=True`` whenever the values will be written one per line:
+    values containing control characters or line breaks are then omitted.
+
+    Returns:
+        ``(values, excluded_allowlisted)`` where *excluded_allowlisted* is the
+        number of observables that matched the filters but were suppressed by
+        the current allowlist.
+    """
+    matcher = allowlist if allowlist is not None else await allowlist_service.load_matcher(db)
+
+    filters = _export_filters(obs_type, confidence_min, max_age_days, feed_id)
+    if order == "value":
+        order_by = (Observable.value, Observable.id)
+    else:
+        order_by = (Observable.last_seen.desc(), Observable.id)
+
+    values: list[str] = []
+    excluded = 0
+    seen: set[str] = set()
+    async with aclosing(_stream_export_candidates(db, filters, order_by)) as candidates:
+        async for _id, row_type, value in candidates:
+            if line_safe and not is_line_safe(value):
+                continue
+            if matcher.is_allowlisted(row_type, value):
+                excluded += 1
+                continue
+            if order == "value":
+                if value in seen:
+                    continue
+                seen.add(value)
+            values.append(value)
+    return values, excluded
 
 
 async def get_export_json(
@@ -417,31 +535,44 @@ async def get_export_json(
     confidence_min: int = 0,
     max_age_days: int | None = None,
     feed_id: uuid.UUID | None = None,
-    limit: int = 10000,
+    limit: int | None = 10000,
+    *,
+    allowlist: AllowlistMatcher | None = None,
 ) -> list[Observable]:
-    """Get observables for JSON export with sources eagerly loaded."""
-    stmt = (
-        select(Observable)
-        .where(Observable.confidence_score >= confidence_min)
-        .options(selectinload(Observable.sources))
-    )
+    """Get observables for JSON export with sources eagerly loaded.
 
-    if obs_type is not None:
-        stmt = stmt.where(Observable.type == obs_type)
+    Allowlisted observables are excluded *before* ``limit`` is applied, so a
+    limited export is never short-changed by suppressed rows. ``limit=None``
+    returns every eligible observable.
+    """
+    matcher = allowlist if allowlist is not None else await allowlist_service.load_matcher(db)
 
-    if max_age_days is not None:
-        cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
-        stmt = stmt.where(Observable.last_seen >= cutoff)
+    filters = _export_filters(obs_type, confidence_min, max_age_days, feed_id)
+    # id breaks last_seen ties so the export order is deterministic.
+    order_by = (Observable.last_seen.desc(), Observable.id)
 
-    if feed_id is not None:
-        source_sub = (
-            select(ObservableSource.observable_id)
-            .where(ObservableSource.feed_id == feed_id)
-            .scalar_subquery()
+    # Pass 1: pick the exported ids from lightweight rows, stopping at the limit.
+    selected: list[uuid.UUID] = []
+    if limit is None or limit > 0:
+        # aclosing releases the cursor before pass 2 even when we stop early.
+        async with aclosing(_stream_export_candidates(db, filters, order_by)) as candidates:
+            async for obs_id, row_type, value in candidates:
+                if matcher.is_allowlisted(row_type, value):
+                    continue
+                selected.append(obs_id)
+                if limit is not None and len(selected) >= limit:
+                    break
+
+    # Pass 2: load only the selected observables (with sources), in export order.
+    observables: list[Observable] = []
+    for start in range(0, len(selected), _BATCH_SIZE):
+        chunk = selected[start : start + _BATCH_SIZE]
+        result = await db.execute(
+            select(Observable)
+            .where(Observable.id.in_(chunk))
+            .options(selectinload(Observable.sources))
         )
-        stmt = stmt.where(Observable.id.in_(source_sub))
-
-    stmt = stmt.order_by(Observable.last_seen.desc()).limit(limit)
-
-    result = await db.execute(stmt)
-    return list(result.scalars().unique().all())
+        by_id = {obs.id: obs for obs in result.scalars().unique().all()}
+        # A row deleted between the passes is simply skipped.
+        observables.extend(by_id[i] for i in chunk if i in by_id)
+    return observables
