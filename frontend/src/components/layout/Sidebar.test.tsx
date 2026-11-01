@@ -19,6 +19,7 @@ describe('Sidebar', () => {
   it('renders brand nav with live counts and user', () => {
     render(<MemoryRouter><Sidebar /></MemoryRouter>);
     expect(screen.getByText('Dashboard')).toBeTruthy();
+    expect(screen.getByText('Reports')).toBeTruthy();
     expect(screen.getByText('1.48M')).toBeTruthy();
     expect(screen.getByText('11/13')).toBeTruthy();
     expect(screen.getByText(/api online/i)).toBeTruthy();
