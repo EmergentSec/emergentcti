@@ -3,40 +3,38 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from cti.core.redis import invalidate_blocklist_cache
+from cti.core.redis import invalidate_observable_caches
 from cti.core.security import decrypt_config
 from cti.feeds import get_connector
 from cti.feeds.defaults import DEFAULT_FEEDS
-from sqlalchemy import select
-
 from cti.models.feed import FeedRun, FeedRunStatus
-from cti.services import feed_service
-from cti.services import observable_service
+from cti.services import feed_service, observable_service
+
+if TYPE_CHECKING:
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 # Build a lookup of feeds that require API keys
 _FEEDS_REQUIRING_KEY: dict[str, str] = {
-    d["name"]: d["requires_api_key"]
-    for d in DEFAULT_FEEDS
-    if d.get("requires_api_key")
+    d["name"]: d["requires_api_key"] for d in DEFAULT_FEEDS if d.get("requires_api_key")
 }
 
 logger = logging.getLogger(__name__)
 
 
-async def run_feed(
-    feed_id: uuid.UUID, db: AsyncSession, run_id: uuid.UUID | None = None
-) -> None:
+async def run_feed(feed_id: uuid.UUID, db: AsyncSession, run_id: uuid.UUID | None = None) -> None:
     """Execute a single feed ingestion run.
 
     1. Loads the feed and creates (or reuses) a ``FeedRun`` record.
     2. Instantiates the appropriate connector, fetches and normalises data.
     3. Bulk-upserts the resulting observables.
-    4. Marks the run as success/failure and invalidates the blocklist cache.
+    4. Marks the run as success/failure and invalidates observable caches.
     """
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
@@ -62,6 +60,7 @@ async def run_feed(
         run = await feed_service.create_feed_run(db, feed.id)
         await db.commit()
 
+    ingest_attempted = False
     try:
         # Decrypt auth config if the feed has encrypted credentials.
         auth_config: dict | None = None
@@ -82,9 +81,8 @@ async def run_feed(
             await db.commit()
             return
 
-        ingested, new = await observable_service.bulk_upsert_from_feed(
-            db, feed, result.observables
-        )
+        ingest_attempted = True
+        ingested, new = await observable_service.bulk_upsert_from_feed(db, feed, result.observables)
 
         feed.last_run_at = datetime.now(UTC)
 
@@ -99,8 +97,8 @@ async def run_feed(
         )
         await db.commit()
 
-        # Invalidate blocklist cache after successful ingestion (best-effort).
-        await invalidate_blocklist_cache()
+        # Bulk upsert commits per batch, but cache invalidation happens once per run.
+        await invalidate_observable_caches()
 
         logger.info(
             "Feed %s completed: %d ingested, %d new",
@@ -124,4 +122,7 @@ async def run_feed(
             await db.commit()
         except Exception:
             logger.error("Failed to record feed run failure", exc_info=True)
+        if ingest_attempted:
+            # A later batch may have failed after earlier batches committed.
+            await invalidate_observable_caches()
         logger.error("Feed %s failed: %s", feed.name, e, exc_info=True)

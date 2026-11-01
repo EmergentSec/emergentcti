@@ -19,7 +19,7 @@ from sqlalchemy import func, select
 from cti.api.v1.router import api_router
 from cti.core.config import get_settings
 from cti.core.database import async_session_factory
-from cti.core.redis import close_redis, init_redis
+from cti.core.redis import close_redis, init_redis, invalidate_observable_caches
 from cti.models.api_key import ApiKey
 from cti.models.user import User, UserRole
 from cti.services import feed_service
@@ -75,6 +75,7 @@ async def seed_initial_admin_user() -> None:
             return  # already seeded
 
         from cti.services.auth_service import hash_password
+
         password_hash = await hash_password(admin_pass)
         user = User(
             username=settings.ADMIN_USERNAME,
@@ -124,8 +125,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if count:
             logger.info("Seeded %d default feeds", count)
     async with async_session_factory() as db:
-        await feed_service.update_preconfigured_feeds(db)
+        updated = await feed_service.update_preconfigured_feeds(db)
         await db.commit()
+        if updated:
+            await invalidate_observable_caches()
 
     # 4. Seed initial admin user
     await seed_initial_admin_user()

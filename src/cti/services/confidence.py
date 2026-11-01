@@ -25,12 +25,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_RECOMPUTE_BATCH_SIZE = 1000
+
 
 async def recompute_effective_confidence(
     db: AsyncSession,
     observable_ids: Iterable[uuid.UUID],
 ) -> None:
-    """Recompute effective confidence for observables in one set-based update."""
+    """Recompute effective confidence for observables in chunked set-based updates."""
     ids = list(set(observable_ids))
     if not ids:
         return
@@ -52,22 +54,24 @@ async def recompute_effective_confidence(
         Observable.manual_confidence,
         max_report_confidence,
     )
-    await db.execute(
-        update(Observable)
-        .where(Observable.id.in_(ids))
-        .values(
-            confidence_score=case(
-                (
-                    Observable.confidence_override.is_not(None),
-                    Observable.confidence_override,
-                ),
-                else_=func.coalesce(
-                    analyst_and_feed_floor,
-                    Observable.confidence_score,
-                ),
+    for batch_start in range(0, len(ids), _RECOMPUTE_BATCH_SIZE):
+        batch_ids = ids[batch_start : batch_start + _RECOMPUTE_BATCH_SIZE]
+        await db.execute(
+            update(Observable)
+            .where(Observable.id.in_(batch_ids))
+            .values(
+                confidence_score=case(
+                    (
+                        Observable.confidence_override.is_not(None),
+                        Observable.confidence_override,
+                    ),
+                    else_=func.coalesce(
+                        analyst_and_feed_floor,
+                        Observable.confidence_score,
+                    ),
+                )
             )
         )
-    )
 
 
 def compute_source_confidence(raw: RawObservable, feed: Feed) -> int:

@@ -44,11 +44,10 @@ def upgrade() -> None:
             "confidence_override IS NOT NULL OR override_set_at IS NULL",
         )
 
-    # Any confidence the feed sources don't explain was set by an analyst
-    # (manual create, or a manual raise of a feed observable), and nothing
-    # recorded it before this migration. Record it as the analyst floor so
-    # the first recompute can never silently lower it. Rows without sources
-    # are covered too: MAX over no rows is NULL, so they compare against -1.
+    # Any confidence that neither feed sources nor report-import attribution
+    # explains was set manually, and nothing recorded it before this migration.
+    # Record it as the manual floor so the first recompute cannot silently lower
+    # it. MAX over no rows is NULL, so sourceless rows compare against -1.
     op.execute(
         sa.text(
             """
@@ -59,6 +58,14 @@ def upgrade() -> None:
                     SELECT MAX(observable_sources.source_confidence)
                     FROM observable_sources
                     WHERE observable_sources.observable_id = observables.id
+                ),
+                -1
+            )
+            AND confidence_score > COALESCE(
+                (
+                    SELECT MAX(report_observables.analyst_confidence)
+                    FROM report_observables
+                    WHERE report_observables.observable_id = observables.id
                 ),
                 -1
             )

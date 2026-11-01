@@ -15,7 +15,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import selectinload
 
-from cti.core.redis import invalidate_observable_caches
 from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
 from cti.services import allowlist_service
@@ -406,7 +405,6 @@ async def bulk_upsert_from_feed(
                 # Commit per-batch to release row locks so concurrent feeds
                 # don't accumulate competing lock sets across batches.
                 await db.commit()
-                await invalidate_observable_caches()
                 total_ingested += batch_ingested
                 new_count += new_in_batch_count
                 break

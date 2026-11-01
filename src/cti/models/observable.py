@@ -74,7 +74,11 @@ class Observable(UUIDMixin, TimestampMixin, Base):
         default=None,
     )
     override_set_by_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey(
+            "users.id",
+            name="fk_observables_override_set_by_id",
+            ondelete="SET NULL",
+        ),
         default=None,
     )
     first_seen: Mapped[datetime | None] = mapped_column(default=None)

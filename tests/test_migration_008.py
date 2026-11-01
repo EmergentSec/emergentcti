@@ -52,6 +52,17 @@ def create_pre_008_schema(connection: sa.Connection) -> None:
         )
         """
     )
+    connection.exec_driver_sql(
+        """
+        CREATE TABLE report_observables (
+            report_id CHAR(32) NOT NULL,
+            observable_id CHAR(32) NOT NULL,
+            analyst_confidence INTEGER,
+            PRIMARY KEY(report_id, observable_id),
+            FOREIGN KEY(observable_id) REFERENCES observables(id) ON DELETE CASCADE
+        )
+        """
+    )
 
 
 def _run(migration, connection: sa.Connection, direction: str) -> None:  # type: ignore[no-untyped-def]
@@ -74,16 +85,26 @@ def test_migration_008_up_down_up_on_sqlite_with_backfill() -> None:
         connection.exec_driver_sql(f"INSERT INTO users VALUES ('{user_id}')")
         raised_id = uuid.uuid4().hex
         raised_source_id = uuid.uuid4().hex
+        report_id = uuid.uuid4().hex
+        imported_id = uuid.uuid4().hex
+        imported_then_raised_id = uuid.uuid4().hex
         connection.exec_driver_sql(
             "INSERT INTO observables VALUES "
             f"('{manual_id}', 73, 'manual.example'), ('{feed_id}', 55, 'feed.example'), "
-            f"('{raised_id}', 85, 'raised.example')"
+            f"('{raised_id}', 85, 'raised.example'), "
+            f"('{imported_id}', 60, 'report.example'), "
+            f"('{imported_then_raised_id}', 80, 'report-raised.example')"
         )
         # feed.example is explained by its feed (55). raised.example was seen
         # by a feed at 40 and manually raised to 85, which nothing recorded.
         connection.exec_driver_sql(
             f"INSERT INTO observable_sources VALUES ('{source_id}', '{feed_id}', 55), "
             f"('{raised_source_id}', '{raised_id}', 40)"
+        )
+        connection.exec_driver_sql(
+            "INSERT INTO report_observables VALUES "
+            f"('{report_id}', '{imported_id}', 60), "
+            f"('{report_id}', '{imported_then_raised_id}', 60)"
         )
 
         _run(migration, connection, "upgrade")
@@ -108,6 +129,8 @@ def test_migration_008_up_down_up_on_sqlite_with_backfill() -> None:
             ("feed.example", None),
             ("manual.example", 73),
             ("raised.example", 85),  # unexplained confidence becomes the analyst floor
+            ("report-raised.example", 80),
+            ("report.example", None),
         ]
         for column in ("manual_confidence", "confidence_override"):
             with pytest.raises(IntegrityError), connection.begin_nested():
@@ -128,7 +151,7 @@ def test_migration_008_up_down_up_on_sqlite_with_backfill() -> None:
         _run(migration, connection, "downgrade")
         remaining = {item["name"] for item in sa.inspect(connection).get_columns("observables")}
         assert remaining == {"id", "confidence_score", "value"}
-        assert connection.exec_driver_sql("SELECT count(*) FROM observables").scalar() == 3
+        assert connection.exec_driver_sql("SELECT count(*) FROM observables").scalar() == 5
 
         _run(migration, connection, "upgrade")
         columns = {item["name"] for item in sa.inspect(connection).get_columns("observables")}

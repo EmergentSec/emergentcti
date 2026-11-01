@@ -1,15 +1,20 @@
 """Feed CRUD, trigger, and run history endpoints."""
 
+# ruff: noqa: B008 - FastAPI dependencies are intentionally declared in defaults.
+
 from __future__ import annotations
 
 import logging
-import uuid
+import uuid  # noqa: TC003 - FastAPI resolves endpoint annotations at runtime.
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves this annotation.
+    AsyncSession,
+)
 
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
+from cti.core.redis import invalidate_observable_caches
 from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.schemas.feed import FeedCreate, FeedResponse, FeedRunResponse, FeedUpdate
 from cti.services import feed_service
@@ -104,6 +109,7 @@ async def create_feed(
     # Sync scheduler if feed is enabled with a schedule
     if feed.enabled and feed.schedule_cron:
         from cti.services.scheduler import sync_feed_jobs
+
         await sync_feed_jobs(db)
 
     return _feed_to_response(feed)
@@ -134,9 +140,7 @@ async def update_feed(
         raise HTTPException(status_code=404, detail="Feed not found")
 
     try:
-        feed = await feed_service.update_feed(
-            db, feed, data.model_dump(exclude_unset=True)
-        )
+        feed = await feed_service.update_feed(db, feed, data.model_dump(exclude_unset=True))
     except AuthConfigValidationError as e:
         raise HTTPException(status_code=422, detail=e.message) from None
     await db.commit()
@@ -144,6 +148,7 @@ async def update_feed(
 
     # Sync scheduler after feed update
     from cti.services.scheduler import sync_feed_jobs
+
     await sync_feed_jobs(db)
 
     count = await feed_service.get_observable_count_for_feed(db, feed.id)
@@ -180,8 +185,10 @@ async def delete_feed(
             status_code=400, detail="Cannot delete pre-configured feeds. Disable them instead."
         )
     await db.commit()
+    await invalidate_observable_caches()
 
     from cti.services.scheduler import sync_feed_jobs
+
     await sync_feed_jobs(db)
 
 
@@ -205,6 +212,7 @@ async def trigger_feed(
     async def _bg_run() -> None:
         from cti.core.database import async_session_factory
         from cti.feeds.runner import run_feed
+
         async with async_session_factory() as bg_db:
             await run_feed(feed_id, bg_db, run_id=run.id)
 
