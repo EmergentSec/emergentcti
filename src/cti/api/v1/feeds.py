@@ -9,14 +9,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
+from cti.core.security import decrypt_config
 from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.schemas.feed import FeedCreate, FeedResponse, FeedRunResponse, FeedUpdate
 from cti.services import feed_service
+from cti.services.feed_auth import AuthConfigValidationError, stored_auth_needs_repair
 
 router = APIRouter()
 
 # Preconfigured feeds that expect an API key (from defaults.py `requires_api_key`).
 _AUTH_FEED_NAMES = {d["name"] for d in DEFAULT_FEEDS if d.get("requires_api_key")}
+
+
+def _feed_auth_needs_repair(feed) -> bool:
+    if feed.auth_config_encrypted is None:
+        return False
+    decrypted = decrypt_config(feed.auth_config_encrypted)
+    return stored_auth_needs_repair(decrypted, feed_url=feed.url)
 
 
 def _feed_to_response(feed, observable_count: int = 0) -> FeedResponse:
@@ -45,6 +54,7 @@ def _feed_to_response(feed, observable_count: int = 0) -> FeedResponse:
         is_preconfigured=feed.is_preconfigured,
         has_auth=feed.auth_config_encrypted is not None,
         auth_supported=feed.is_preconfigured and feed.name in _AUTH_FEED_NAMES,
+        auth_needs_repair=_feed_auth_needs_repair(feed),
         default_confidence=feed.default_confidence,
         last_run_at=feed.last_run_at,
         observable_count=observable_count,
@@ -73,7 +83,10 @@ async def create_feed(
     db: AsyncSession = Depends(get_db),
     _auth: AuthSubject = Depends(require_admin),
 ) -> FeedResponse:
-    feed = await feed_service.create_feed(db, data.model_dump())
+    try:
+        feed = await feed_service.create_feed(db, data.model_dump())
+    except AuthConfigValidationError as e:
+        raise HTTPException(status_code=422, detail=e.message) from None
     await db.commit()
 
     # Sync scheduler if feed is enabled with a schedule
@@ -112,8 +125,8 @@ async def update_feed(
         feed = await feed_service.update_feed(
             db, feed, data.model_dump(exclude_unset=True)
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except AuthConfigValidationError as e:
+        raise HTTPException(status_code=422, detail=e.message) from None
     await db.commit()
     await db.refresh(feed)
 

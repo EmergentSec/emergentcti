@@ -1,7 +1,13 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, Field, model_validator
+
 from cti.models.feed import FeedType, FeedRunStatus
+
+_FEED_UPDATE_NON_NULLABLE = frozenset(
+    {"name", "url", "feed_type", "enabled", "default_confidence", "config"}
+)
 
 
 class FeedRunResponse(BaseModel):
@@ -28,6 +34,7 @@ class FeedResponse(BaseModel):
     is_preconfigured: bool
     has_auth: bool = False
     auth_supported: bool = False
+    auth_needs_repair: bool = False
     default_confidence: int
     last_run_at: datetime | None
     observable_count: int = 0
@@ -60,4 +67,14 @@ class FeedUpdate(BaseModel):
     enabled: bool | None = None
     auth_config: dict | None = None
     default_confidence: int | None = Field(default=None, ge=0, le=100)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_explicit_null_on_non_nullable_fields(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        for field in _FEED_UPDATE_NON_NULLABLE:
+            if field in data and data[field] is None:
+                raise ValueError(f"{field} cannot be null")
+        return data
 

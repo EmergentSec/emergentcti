@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cti.core.security import decrypt_config, encrypt_config
 from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.models.feed import Feed, FeedType
+from cti.services.feed_auth import REPAIR_MESSAGE
+from tests.policy_helpers import non_admin_client
 
 
 @pytest.mark.asyncio
@@ -52,6 +56,7 @@ async def test_feed_with_encrypted_auth_has_auth_true(
     data = resp.json()
     assert data["has_auth"] is True
     assert data["auth_supported"] is False
+    assert data["auth_needs_repair"] is True
     # Never expose the secret
     assert "auth_config" not in data
     assert "auth_config_encrypted" not in data
@@ -216,10 +221,10 @@ async def test_full_replace_when_auth_type_present(
 
 
 @pytest.mark.asyncio
-async def test_partial_auth_config_on_custom_feed_with_no_base_returns_400(
+async def test_partial_auth_config_on_custom_feed_with_no_base_returns_422(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """PUT with partial auth_config on a custom feed with no existing auth returns 400."""
+    """PUT with partial auth_config on a custom feed with no existing auth returns 422."""
     feed = Feed(
         name="MyCustomFeed",
         feed_type=FeedType.API,
@@ -233,7 +238,8 @@ async def test_partial_auth_config_on_custom_feed_with_no_base_returns_400(
         f"/api/v1/feeds/{feed.id}",
         json={"auth_config": {"api_key_value": "x"}},
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == REPAIR_MESSAGE
 
 
 @pytest.mark.asyncio
@@ -393,3 +399,190 @@ async def test_preconfigured_description_can_be_edited(
     )
     assert resp.status_code == 200
     assert resp.json()["description"] == "updated by admin"
+
+
+# ---------------------------------------------------------------------------
+# Issue #21 — nullable field clearing, auth repair, guards
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_omitting_schedule_and_description_leaves_them_unchanged(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    feed = Feed(
+        name="ManualFeed",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+        description="keep me",
+        schedule_cron=None,
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"default_confidence": 55},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["description"] == "keep me"
+    assert data["schedule_cron"] is None
+
+
+@pytest.mark.asyncio
+async def test_explicit_null_clears_description_and_schedule(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    feed = Feed(
+        name="ScheduledFeed",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+        description="will clear",
+        schedule_cron="0 */6 * * *",
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"description": None, "schedule_cron": None},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["description"] is None
+    assert data["schedule_cron"] is None
+
+    await db_session.refresh(feed)
+    assert feed.description is None
+    assert feed.schedule_cron is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_auth_partial_rotation_returns_repair_message(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    feed = Feed(
+        name="LegacyAuthFeed",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=encrypt_config({"api_key": "secret123"}),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"api_key_value": "new-secret"}},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == REPAIR_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_full_auth_config_repairs_legacy_storage(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    feed = Feed(
+        name="LegacyAuthFeed2",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=encrypt_config({"api_key": "secret123"}),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={
+            "auth_config": {
+                "auth_type": "api_key",
+                "api_key_header": "X-Key",
+                "api_key_value": "repaired",
+            }
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["auth_needs_repair"] is False
+    assert "api_key_value" not in resp.text
+    assert "repaired" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_url_template_partial_rotation_keeps_auth_type(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    old = {
+        "auth_type": "url_template",
+        "api_key_value": "old-template-key",
+    }
+    feed = Feed(
+        name="TemplateFeed",
+        feed_type=FeedType.API,
+        url="https://example.com/fetch?key={api_key}",
+        is_preconfigured=False,
+        default_confidence=50,
+        auth_config_encrypted=encrypt_config(old),
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"api_key_value": "rotated"}},
+    )
+    assert resp.status_code == 200
+
+    await db_session.refresh(feed)
+    stored = decrypt_config(feed.auth_config_encrypted)
+    assert stored["auth_type"] == "url_template"
+    assert stored["api_key_value"] == "rotated"
+
+
+@pytest.mark.asyncio
+async def test_invalid_full_auth_config_on_create_returns_422(
+    client: AsyncClient,
+) -> None:
+    resp = await client.post(
+        "/api/v1/feeds",
+        json={
+            "name": "BadAuth",
+            "feed_type": "api",
+            "auth_config": {"auth_type": "nope", "api_key_value": "x"},
+        },
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_invalid_full_auth_config_on_update_returns_422(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    feed = Feed(
+        name="UpdateBadAuth",
+        feed_type=FeedType.API,
+        is_preconfigured=False,
+        default_confidence=50,
+    )
+    db_session.add(feed)
+    await db_session.commit()
+
+    resp = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"auth_config": {"auth_type": "api_key", "api_key_header": ""}},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_non_admin_feed_update_returns_403(app) -> None:
+    async with non_admin_client(app) as user:
+        resp = await user.put(
+            f"/api/v1/feeds/{uuid.uuid4()}",
+            json={"enabled": False},
+        )
+        assert resp.status_code == 403
