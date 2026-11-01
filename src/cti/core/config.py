@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-
 from urllib.parse import quote
 
 from pydantic import Field, SecretStr, computed_field, field_validator
@@ -52,6 +51,7 @@ class Settings(BaseSettings):
     INSTANCE_NAME: str = "EmergentCTI"
     OBSERVABLE_RETENTION_DAYS: int = Field(default=180, ge=0)
     DEFAULT_EXPORT_FORMAT: str = "text"
+    REPORT_MAX_UPLOAD_BYTES: int = Field(default=20 * 1024 * 1024, ge=1)
 
     # ── CORS ─────────────────────────────────────────────────────────────
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8080"]
