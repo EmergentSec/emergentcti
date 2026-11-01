@@ -9,6 +9,13 @@ import {
   AUTH_CONFIG_PLACEHOLDER,
   validateFullAuthConfig,
 } from '@/lib/feedAuthValidation'
+import { TlpDowngradeReasonDialog } from '@/components/common/TlpDowngradeReasonDialog'
+import {
+  TLP_SELECT_OPTIONS,
+  formatTlpSelectValue,
+  needsTlpChangeReason,
+  parseTlpSelectValue,
+} from '@/lib/tlp'
 import { cn } from '@/lib/utils'
 
 // ── Prop types ────────────────────────────────────────────────────────────────
@@ -75,6 +82,13 @@ export function FeedForm(props: FeedFormProps) {
   //              apiKeyValue: friendly API key field (edit mode + knownAuth)
   const [authConfig, setAuthConfig] = useState('')
   const [apiKeyValue, setApiKeyValue] = useState('')
+  const [tlpValue, setTlpValue] = useState(formatTlpSelectValue(iv?.tlp))
+  const [showDowngradeDialog, setShowDowngradeDialog] = useState(false)
+  const [pendingSubmit, setPendingSubmit] = useState<FeedCreate | FeedUpdate | null>(null)
+
+  useEffect(() => {
+    if (iv) setTlpValue(formatTlpSelectValue(iv.tlp))
+  }, [iv?.id, iv?.tlp])
 
   useEffect(() => {
     if (!submitError) return
@@ -127,6 +141,25 @@ export function FeedForm(props: FeedFormProps) {
 
   // ── Submit ────────────────────────────────────────────────────────────────
 
+  const submitPayload = (data: FeedCreate | FeedUpdate, reason?: string) => {
+    if (reason) {
+      ;(data as FeedCreate).tlp_change_reason = reason
+    }
+    props.onSubmit(data as FeedCreate & FeedUpdate)
+  }
+
+  const finishSubmit = (data: FeedCreate | FeedUpdate) => {
+    if (isEditMode && iv) {
+      const nextTlp = (data as FeedUpdate).tlp
+      if (nextTlp !== undefined && needsTlpChangeReason(iv.tlp, nextTlp ?? null)) {
+        setPendingSubmit(data)
+        setShowDowngradeDialog(true)
+        return
+      }
+    }
+    submitPayload(data)
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     setErrors({})
@@ -144,7 +177,8 @@ export function FeedForm(props: FeedFormProps) {
       if (description.trim()) data.description = description.trim()
       if (scheduleCron.trim()) data.schedule_cron = scheduleCron.trim()
       if (authConfig.trim()) data.auth_config = JSON.parse(authConfig)
-      props.onSubmit(data)
+      data.tlp = parseTlpSelectValue(tlpValue)
+      finishSubmit(data)
     } else {
       // ── Edit mode — diff against initial feed values ─────────────────────
       const data: FeedUpdate = {}
@@ -165,6 +199,11 @@ export function FeedForm(props: FeedFormProps) {
       if (enabled !== feed.enabled) data.enabled = enabled
       if (defaultConfidence !== feed.default_confidence) {
         data.default_confidence = defaultConfidence
+      }
+
+      const nextTlp = parseTlpSelectValue(tlpValue)
+      if (nextTlp !== feed.tlp) {
+        data.tlp = nextTlp
       }
 
       if (!preconfigured) {
@@ -191,7 +230,7 @@ export function FeedForm(props: FeedFormProps) {
         data.auth_config = JSON.parse(authConfig)
       }
 
-      props.onSubmit(data)
+      finishSubmit(data)
     }
   }
 
@@ -237,6 +276,7 @@ export function FeedForm(props: FeedFormProps) {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
+    <>
     <form onSubmit={handleSubmit} className="space-y-4">
       {errors.form && (
         <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -332,6 +372,17 @@ export function FeedForm(props: FeedFormProps) {
         />
       </div>
 
+      <Select
+        label="TLP marking"
+        options={TLP_SELECT_OPTIONS}
+        value={tlpValue}
+        onChange={(e) => setTlpValue(e.target.value)}
+      />
+      <p className="text-xs text-muted-foreground">
+        Applies to every observable this feed contributes. Unspecified means no sharing policy is
+        recorded yet.
+      </p>
+
       {/* Auth section */}
       {isEditMode ? (
         authNeedsRepair ? (
@@ -376,5 +427,19 @@ export function FeedForm(props: FeedFormProps) {
         </Button>
       </div>
     </form>
+      <TlpDowngradeReasonDialog
+        open={showDowngradeDialog}
+        onClose={() => {
+          setShowDowngradeDialog(false)
+          setPendingSubmit(null)
+        }}
+        isLoading={isLoading}
+        onConfirm={(reason) => {
+          if (pendingSubmit) submitPayload(pendingSubmit, reason)
+          setShowDowngradeDialog(false)
+          setPendingSubmit(null)
+        }}
+      />
+    </>
   )
 }

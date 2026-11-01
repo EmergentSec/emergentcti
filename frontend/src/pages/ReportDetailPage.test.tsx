@@ -21,6 +21,7 @@ vi.mock('@/hooks/useReports', () => ({
   useUnlinkReportObservable: () => ({ mutate: vi.fn(), isPending: false }),
   useExtractReportIndicators: () => ({ mutate: mockExtract, isPending: false }),
   useImportReportIndicators: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetReportTags: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
 vi.mock('@/hooks/useObservables', () => ({
@@ -39,11 +40,16 @@ vi.mock('@/contexts/ToastContext', () => ({
   useToast: () => ({ toast: mockToast }),
 }))
 
+vi.mock('@/hooks/useTags', () => ({
+  useTags: () => ({ data: [] }),
+}))
+
 vi.mock('@/components/reports/ReportForm', () => ({
   ReportForm: () => <div data-testid="report-form" />,
 }))
 
 import { AxiosError } from 'axios'
+import { EMPTY_TLP_REPORT_FIELDS } from '@/test/fixtures/tlp'
 
 const AI_REPORT = {
   id: 'rep-1',
@@ -56,6 +62,7 @@ const AI_REPORT = {
   ai_provider: null,
   ai_model: null,
   has_attachment: false,
+  ...EMPTY_TLP_REPORT_FIELDS,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   source_url: null,

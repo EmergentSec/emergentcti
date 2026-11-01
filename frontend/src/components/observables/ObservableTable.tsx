@@ -14,6 +14,8 @@ import {
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { ConfidenceMeter } from '@/components/common/ConfidenceMeter'
+import { TlpBadge } from '@/components/common/TlpBadge'
+import { TagChips } from '@/components/common/TagChips'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table'
 import { useDeleteObservable } from '@/hooks/useObservables'
 import { useAuth } from '@/contexts/AuthContext'
@@ -96,6 +98,8 @@ export function ObservableTable({ observables }: ObservableTableProps) {
         <TableRow className="hover:bg-transparent">
           <TableHead className="w-36">Type</TableHead>
           <TableHead>Value</TableHead>
+          <TableHead className="w-36">TLP</TableHead>
+          <TableHead className="w-40">Tags</TableHead>
           <TableHead className="w-48">Confidence</TableHead>
           <TableHead className="w-52">Sources</TableHead>
           <TableHead className="w-28 text-right">Last Seen</TableHead>
@@ -139,6 +143,14 @@ export function ObservableTable({ observables }: ObservableTableProps) {
                   </Badge>
                 )}
               </div>
+            </TableCell>
+
+            <TableCell>
+              <TlpBadge tlp={obs.effective_tlp} />
+            </TableCell>
+
+            <TableCell>
+              <TagChips tags={obs.tags ?? []} />
             </TableCell>
 
             {/* CONFIDENCE */}

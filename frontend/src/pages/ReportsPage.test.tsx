@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import ReportsPage from './ReportsPage'
 import type { ReportFilters } from '@/types/report'
+import { EMPTY_TLP_REPORT_FIELDS } from '@/test/fixtures/tlp'
 
 const mockUseReports = vi.fn()
 const mockUseReportSources = vi.fn()
@@ -22,6 +23,10 @@ vi.mock('@/contexts/ToastContext', () => ({
   useToast: () => ({ toast: vi.fn() }),
 }))
 
+vi.mock('@/hooks/useTags', () => ({
+  useTags: () => ({ data: [] }),
+}))
+
 vi.mock('@/components/reports/ReportForm', () => ({
   ReportForm: () => <div data-testid="report-form" />,
 }))
@@ -38,6 +43,7 @@ const ITEMS = [
     ai_provider: null,
     ai_model: null,
     has_attachment: true,
+    ...EMPTY_TLP_REPORT_FIELDS,
     created_at: '',
     updated_at: '',
   },

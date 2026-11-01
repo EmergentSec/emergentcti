@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen, fireEvent } from '@testing-library/react'
+import { act, cleanup, render, screen, fireEvent, within } from '@testing-library/react'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import ObservableDetailPage from './ObservableDetailPage'
+import { EMPTY_TLP_OBSERVABLE_FIELDS } from '@/test/fixtures/tlp'
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,9 @@ vi.mock('@/hooks/useObservables', () => ({
     mutate: mockClearOverride,
     isPending: mockOverridePending.clear,
   }),
+  useSetTlpOverride: () => ({ mutate: vi.fn(), isPending: false }),
+  useClearTlpOverride: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetObservableTags: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
 const mockUseObservableReports = vi.fn()
@@ -70,6 +74,7 @@ const MOCK_OBS = {
   sources: [],
   allowlisted: false,
   allowlist_entry_ids: [] as string[],
+  ...EMPTY_TLP_OBSERVABLE_FIELDS,
   created_at: '',
   updated_at: '',
 }
@@ -94,6 +99,10 @@ function renderWithEntry(entry: string) {
       </Routes>
     </MemoryRouter>,
   )
+}
+
+function allowlistDialog() {
+  return within(screen.getByRole('dialog', { name: 'Allowlist this value' }))
 }
 
 afterEach(() => {
@@ -212,17 +221,19 @@ describe('ObservableDetailPage', () => {
   it('requires a reason before allowlisting', () => {
     renderLoaded()
     fireEvent.click(screen.getByRole('button', { name: 'Allowlist' }))
-    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: '   ' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add to allowlist' }))
-    expect(screen.getByRole('alert').textContent).toBe('Reason is required')
+    const dialog = allowlistDialog()
+    fireEvent.change(dialog.getByLabelText('Reason'), { target: { value: '   ' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Add to allowlist' }))
+    expect(dialog.getByRole('alert').textContent).toBe('Reason is required')
     expect(mockCreateEntry).not.toHaveBeenCalled()
   })
 
   it('admin allowlists the exact typed value with a trimmed reason', () => {
     renderLoaded()
     fireEvent.click(screen.getByRole('button', { name: 'Allowlist' }))
-    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: '  Corporate proxy ' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add to allowlist' }))
+    const dialog = allowlistDialog()
+    fireEvent.change(dialog.getByLabelText('Reason'), { target: { value: '  Corporate proxy ' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Add to allowlist' }))
 
     expect(mockCreateEntry).toHaveBeenCalledTimes(1)
     expect(mockCreateEntry.mock.calls[0][0]).toEqual({
@@ -234,16 +245,17 @@ describe('ObservableDetailPage', () => {
 
     // Success closes the dialog and confirms via toast
     act(() => mockCreateEntry.mock.calls[0][1].onSuccess())
-    expect(screen.queryByLabelText('Reason')).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Allowlist this value' })).toBeNull()
     expect(mockToast).toHaveBeenCalledWith('5.188.206.18 added to the allowlist', 'success')
   })
 
   it('creates a CIDR policy for a range-valued IP instead of an invalid exact rule', () => {
     renderLoaded({ value: '192.0.2.0/24' })
     fireEvent.click(screen.getByRole('button', { name: 'Allowlist' }))
-    expect(screen.getByText(/also suppresses other IP indicators overlapping this range/)).toBeTruthy()
-    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Corporate network' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add to allowlist' }))
+    const dialog = allowlistDialog()
+    expect(dialog.getByText(/also suppresses other IP indicators overlapping this range/)).toBeTruthy()
+    fireEvent.change(dialog.getByLabelText('Reason'), { target: { value: 'Corporate network' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Add to allowlist' }))
     expect(mockCreateEntry.mock.calls[0][0]).toEqual({
       kind: 'cidr',
       value: '192.0.2.0/24',
@@ -255,8 +267,9 @@ describe('ObservableDetailPage', () => {
   it('keeps the dialog open and explains a duplicate (409) entry', () => {
     renderLoaded()
     fireEvent.click(screen.getByRole('button', { name: 'Allowlist' }))
-    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Known good' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add to allowlist' }))
+    const dialog = allowlistDialog()
+    fireEvent.change(dialog.getByLabelText('Reason'), { target: { value: 'Known good' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Add to allowlist' }))
 
     act(() =>
       mockCreateEntry.mock.calls[0][1].onError(
@@ -266,8 +279,8 @@ describe('ObservableDetailPage', () => {
         } as AxiosResponse),
       ),
     )
-    expect(screen.getByRole('alert').textContent).toBe('This value is already on the allowlist.')
-    expect(screen.getByLabelText('Reason')).toBeTruthy()
+    expect(dialog.getByRole('alert').textContent).toBe('This value is already on the allowlist.')
+    expect(dialog.getByLabelText('Reason')).toBeTruthy()
     expect(mockToast).toHaveBeenCalledWith('This value is already on the allowlist.', 'error')
   })
 
