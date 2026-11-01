@@ -11,6 +11,7 @@ from sqlalchemy import delete, func, select
 from cti.core.redis import cache_delete, invalidate_blocklist_cache
 from cti.models.observable import Observable
 from cti.models.observable_source import ObservableSource
+from cti.models.report import report_observables
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,6 +67,11 @@ async def enforce_retention(
             if not ids:
                 await db.rollback()  # Release the read transaction (and any locks).
                 break
+            # Report retention is independent. Remove only links to expired
+            # observables, including under SQLite where FK cascades are disabled.
+            await db.execute(
+                delete(report_observables).where(report_observables.c.observable_id.in_(ids))
+            )
             # Explicit source deletion also works on SQLite with FK checks disabled.
             await db.execute(
                 delete(ObservableSource).where(ObservableSource.observable_id.in_(ids))
