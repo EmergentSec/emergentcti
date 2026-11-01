@@ -47,6 +47,7 @@ def create_pre_008_schema(connection: sa.Connection) -> None:
         CREATE TABLE observable_sources (
             id CHAR(32) PRIMARY KEY,
             observable_id CHAR(32) NOT NULL,
+            source_confidence INTEGER NOT NULL DEFAULT 50,
             FOREIGN KEY(observable_id) REFERENCES observables(id) ON DELETE CASCADE
         )
         """
@@ -71,12 +72,18 @@ def test_migration_008_up_down_up_on_sqlite_with_backfill() -> None:
         source_id = uuid.uuid4().hex
         user_id = uuid.uuid4().hex
         connection.exec_driver_sql(f"INSERT INTO users VALUES ('{user_id}')")
+        raised_id = uuid.uuid4().hex
+        raised_source_id = uuid.uuid4().hex
         connection.exec_driver_sql(
             "INSERT INTO observables VALUES "
-            f"('{manual_id}', 73, 'manual.example'), ('{feed_id}', 55, 'feed.example')"
+            f"('{manual_id}', 73, 'manual.example'), ('{feed_id}', 55, 'feed.example'), "
+            f"('{raised_id}', 85, 'raised.example')"
         )
+        # feed.example is explained by its feed (55). raised.example was seen
+        # by a feed at 40 and manually raised to 85, which nothing recorded.
         connection.exec_driver_sql(
-            f"INSERT INTO observable_sources VALUES ('{source_id}', '{feed_id}')"
+            f"INSERT INTO observable_sources VALUES ('{source_id}', '{feed_id}', 55), "
+            f"('{raised_source_id}', '{raised_id}', 40)"
         )
 
         _run(migration, connection, "upgrade")
@@ -97,7 +104,11 @@ def test_migration_008_up_down_up_on_sqlite_with_backfill() -> None:
         rows = connection.exec_driver_sql(
             "SELECT value, manual_confidence FROM observables ORDER BY value"
         ).all()
-        assert rows == [("feed.example", None), ("manual.example", 73)]
+        assert rows == [
+            ("feed.example", None),
+            ("manual.example", 73),
+            ("raised.example", 85),  # unexplained confidence becomes the analyst floor
+        ]
         for column in ("manual_confidence", "confidence_override"):
             with pytest.raises(IntegrityError), connection.begin_nested():
                 connection.exec_driver_sql(
@@ -117,7 +128,7 @@ def test_migration_008_up_down_up_on_sqlite_with_backfill() -> None:
         _run(migration, connection, "downgrade")
         remaining = {item["name"] for item in sa.inspect(connection).get_columns("observables")}
         assert remaining == {"id", "confidence_score", "value"}
-        assert connection.exec_driver_sql("SELECT count(*) FROM observables").scalar() == 2
+        assert connection.exec_driver_sql("SELECT count(*) FROM observables").scalar() == 3
 
         _run(migration, connection, "upgrade")
         columns = {item["name"] for item in sa.inspect(connection).get_columns("observables")}

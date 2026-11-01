@@ -44,15 +44,23 @@ def upgrade() -> None:
             "confidence_override IS NOT NULL OR override_set_at IS NULL",
         )
 
+    # Any confidence the feed sources don't explain was set by an analyst
+    # (manual create, or a manual raise of a feed observable), and nothing
+    # recorded it before this migration. Record it as the analyst floor so
+    # the first recompute can never silently lower it. Rows without sources
+    # are covered too: MAX over no rows is NULL, so they compare against -1.
     op.execute(
         sa.text(
             """
             UPDATE observables
             SET manual_confidence = confidence_score
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM observable_sources
-                WHERE observable_sources.observable_id = observables.id
+            WHERE confidence_score > COALESCE(
+                (
+                    SELECT MAX(observable_sources.source_confidence)
+                    FROM observable_sources
+                    WHERE observable_sources.observable_id = observables.id
+                ),
+                -1
             )
             """
         )

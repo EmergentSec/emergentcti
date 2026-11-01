@@ -216,8 +216,13 @@ async def test_postgres_report_import_upserts_and_attribution_constraints(pg_ses
 
     async with pg_sessions() as db:
         user = User(username="pg-importer", password_hash="unused", role=UserRole.admin)
+        # An analyst-created observable: since #28 its confidence is recorded
+        # as manual_confidence (the floor that report imports cannot lower).
         existing = Observable(
-            type=ObservableType.IP_ADDR, value="185.220.101.42", confidence_score=90
+            type=ObservableType.IP_ADDR,
+            value="185.220.101.42",
+            confidence_score=90,
+            manual_confidence=90,
         )
         report = Report(
             title="PG import",
