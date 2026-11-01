@@ -70,20 +70,43 @@ W_VALUE_TOO_LONG = "value_too_long"
 
 
 @cache
-def _format_char_re() -> re.Pattern[str]:
-    """One character class of every Unicode ``Cf`` code point (built once)."""
+def _category_class_body(categories: frozenset[str]) -> str:
+    """Regex character-class body of every non-ASCII code point in ``categories``.
+
+    Python's ``re`` has no ``\\p{..}`` classes, so they are built once from
+    ``unicodedata`` as compact ranges.
+    """
     ranges: list[tuple[int, int]] = []
     for code_point in range(0x80, sys.maxunicode + 1):
-        if unicodedata.category(chr(code_point)) == "Cf":
+        if unicodedata.category(chr(code_point)) in categories:
             if ranges and ranges[-1][1] == code_point - 1:
                 ranges[-1] = (ranges[-1][0], code_point)
             else:
                 ranges.append((code_point, code_point))
-    body = "".join(
+    return "".join(
         re.escape(chr(lo)) if lo == hi else f"{re.escape(chr(lo))}-{re.escape(chr(hi))}"
         for lo, hi in ranges
     )
-    return re.compile(f"[{body}]+")
+
+
+#: Combining marks. After NFC some remain (no precomposed form exists, or
+#: several marks are stacked), and ``\w`` does not match them, so host
+#: patterns must include them explicitly or a host would split at the mark.
+_MARK_CATEGORIES = frozenset({"Mn", "Mc", "Me"})
+
+
+def _marks() -> str:
+    return _category_class_body(_MARK_CATEGORIES)
+
+
+def _is_mark(ch: str) -> bool:
+    return unicodedata.category(ch) in _MARK_CATEGORIES
+
+
+@cache
+def _format_char_re() -> re.Pattern[str]:
+    """One character class of every Unicode ``Cf`` code point (built once)."""
+    return re.compile(f"[{_category_class_body(frozenset({'Cf'}))}]+")
 
 
 #: Characters IDNA treats as label separators: fullwidth full stop,
@@ -413,21 +436,32 @@ def _phase_urls(text: str) -> tuple[list[_Hit], list[tuple[int, int]]]:
 _EMAIL_LOCAL = r"A-Za-z0-9._%+\-"
 # Domain characters are any letter or digit (``[^\W_]``), dot or hyphen, so a
 # non-ASCII label is taken whole and IDNA-encoded rather than cut short.
-_EMAIL_RE = re.compile(rf"(?<![{_EMAIL_LOCAL}])[{_EMAIL_LOCAL}]{{1,64}}@(?:[^\W_]|[.\-]){{1,253}}")
+# Combining marks are host characters too (see ``_MARK_CATEGORIES``).
+
+
+@cache
+def _email_re() -> re.Pattern[str]:
+    return re.compile(
+        rf"(?<![{_EMAIL_LOCAL}])[{_EMAIL_LOCAL}]{{1,64}}@(?:[^\W_]|[.\-{_marks()}]){{1,253}}"
+    )
+
+
+def _is_word_char(ch: str) -> bool:
+    return ch.isalnum() or _is_mark(ch)
 
 
 def _is_host_char(ch: str) -> bool:
-    return ch.isalnum() or ch in ".-"
+    return _is_word_char(ch) or ch in ".-"
 
 
 def _phase_emails(text: str) -> tuple[list[_Hit], list[tuple[int, int]]]:
     hits: list[_Hit] = []
     spans: list[tuple[int, int]] = []
-    for match in _EMAIL_RE.finditer(text):
+    for match in _email_re().finditer(text):
         start, end = match.span()
         if end < len(text) and _is_host_char(text[end]):
             continue  # Domain part longer than any valid hostname.
-        if start > 0 and text[start - 1].isalnum():
+        if start > 0 and _is_word_char(text[start - 1]):
             # The ASCII-only local part began mid-word ("jürgen@" would match
             # as "rgen@"). Never emit a truncated address; the host can still
             # surface from the domain phase.
@@ -528,13 +562,17 @@ def _phase_hashes(text: str) -> tuple[list[_Hit], list[tuple[int, int]]]:
 
 
 # ``\w`` is Unicode-aware: a run spans every adjacent letter or digit, ASCII or
-# not, so it can never begin or end next to a non-ASCII letter or digit.
-_DOMAIN_RUN_RE = re.compile(r"(?<![\w.\-])[\w\-]*\.[\w.\-]*")
+# not, plus combining marks (which ``\w`` misses), so it can never begin or end
+# next to a non-ASCII letter, digit, or mark.
+@cache
+def _domain_run_re() -> re.Pattern[str]:
+    m = _marks()
+    return re.compile(rf"(?<![\w.\-{m}])[\w\-{m}]*\.[\w.\-{m}]*")
 
 
 def _phase_domains(text: str, offsets: _OffsetMap) -> list[_Hit]:
     hits: list[_Hit] = []
-    for match in _DOMAIN_RUN_RE.finditer(text):
+    for match in _domain_run_re().finditer(text):
         run = match.group()
         token = run.strip(".")
         if not token or "_" in token:
@@ -609,8 +647,13 @@ def extract(texts: Sequence[str]) -> ExtractionResult:
         if len(text) > remaining:
             text = text[:remaining]
             truncated = True
-        remaining -= len(text)
+        # NFC can expand text (up to 3x per code point), so the budget is
+        # enforced again on the normalized text that is actually scanned.
         text = normalize_scan_text(text)
+        if len(text) > remaining:
+            text = text[:remaining]
+            truncated = True
+        remaining -= len(text)
         scanned.append(text)
 
         hits, offsets = _scan(text)

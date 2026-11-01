@@ -432,3 +432,34 @@ def test_dot_homoglyphs_and_combining_marks_never_yield_suffix_hosts(
     text: str, expected: tuple[ObservableType, str]
 ) -> None:
     assert keys(text) == {expected}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "ex\u0301ample.com",  # x + acute has no precomposed form
+        "e\u0301\u0302vil.example",  # stacked marks: NFC composes only the first
+        "evil.ex\u0331ample.com",
+        "user@x\u0301y.example",
+        "q\u0301@pay.example",
+    ],
+)
+def test_uncomposable_combining_marks_never_yield_suffix_hosts(text: str) -> None:
+    suffixes = {"ample.com", "vil.example", "evil.ex", "y.example"}
+    emitted = keys(text)
+    assert emitted, "the whole host must still be emitted"
+    assert not any(value in suffixes for _, value in emitted)
+    for _, value in emitted:
+        assert value.isascii()  # whole host IDNA-encoded, never a raw fragment
+    if text.startswith("q"):
+        # Local part starts after a mark: no truncated email, whole host kept.
+        assert emitted == {(DOMAIN, "pay.example")}
+
+
+def test_scan_budget_applies_after_nfc_expansion(monkeypatch: pytest.MonkeyPatch) -> None:
+    # U+1D1C0 expands to three code points under NFC.
+    monkeypatch.setattr(ioc_extraction, "MAX_SCAN_CHARS", 30)
+    result = extract(["\U0001d1c0" * 20 + " evil.example"])
+    # Pre-fix, 30 raw chars normalized to 70 and " evil.exam" was scanned.
+    assert result.truncated is True
+    assert result.candidates == []
