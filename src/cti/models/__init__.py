@@ -1,3 +1,4 @@
+from cti.models.ai import AiProvider, AiProviderConfig, AiSettingsRecord
 from cti.models.allowlist import AllowlistEntry, AllowlistKind
 from cti.models.api_key import ApiKey
 from cti.models.base import Base
@@ -16,6 +17,9 @@ from cti.models.report import (
 from cti.models.user import User, UserRole
 
 __all__ = [
+    "AiProvider",
+    "AiProviderConfig",
+    "AiSettingsRecord",
     "AllowlistEntry",
     "AllowlistKind",
     "ApiKey",
