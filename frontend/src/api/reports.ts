@@ -31,13 +31,22 @@ export async function getReport(id: string): Promise<ReportDetail> {
   return data
 }
 
+/**
+ * The backend's report create/patch schemas have no `tags` field (unknown keys
+ * are ignored), so tags are saved with the dedicated admin-only
+ * `PUT /reports/{id}/tags` call after the report itself is written.
+ */
 export async function createReport(payload: ReportCreate): Promise<ReportDetail> {
-  const { data } = await api.post<ReportDetail>('/reports', payload)
+  const { tags, ...body } = payload
+  const { data } = await api.post<ReportDetail>('/reports', body)
+  if (tags && tags.length > 0) return setReportTags(data.id, tags)
   return data
 }
 
 export async function updateReport(id: string, payload: ReportUpdate): Promise<ReportDetail> {
-  const { data } = await api.patch<ReportDetail>(`/reports/${id}`, payload)
+  const { tags, ...body } = payload
+  const { data } = await api.patch<ReportDetail>(`/reports/${id}`, body)
+  if (tags !== undefined) return setReportTags(id, tags)
   return data
 }
 

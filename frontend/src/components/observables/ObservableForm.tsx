@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
+import { TLP_SELECT_OPTIONS, parseTlpSelectValue } from '@/lib/tlp'
 import type { ObservableCreate, ObservableType } from '@/types/observable'
 
 interface ObservableFormProps {
@@ -23,6 +24,7 @@ export function ObservableForm({ onSubmit, onCancel, isLoading }: ObservableForm
   const [type, setType] = useState<ObservableType>('ip-addr')
   const [value, setValue] = useState('')
   const [confidenceScore, setConfidenceScore] = useState(75)
+  const [tlpValue, setTlpValue] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const validate = (): boolean => {
@@ -40,6 +42,7 @@ export function ObservableForm({ onSubmit, onCancel, isLoading }: ObservableForm
       type,
       value: value.trim(),
       confidence_score: confidenceScore,
+      tlp: parseTlpSelectValue(tlpValue),
     })
   }
 
@@ -78,6 +81,19 @@ export function ObservableForm({ onSubmit, onCancel, isLoading }: ObservableForm
             {confidenceScore}
           </span>
         </div>
+      </div>
+
+      <div>
+        <Select
+          label="TLP marking"
+          options={TLP_SELECT_OPTIONS}
+          value={tlpValue}
+          onChange={(e) => setTlpValue(e.target.value)}
+          aria-describedby="observable-tlp-help"
+        />
+        <p id="observable-tlp-help" className="mt-1 text-xs text-muted-foreground">
+          If this observable already exists, the more restrictive marking is kept.
+        </p>
       </div>
 
       <div className="flex justify-end gap-2 pt-2">

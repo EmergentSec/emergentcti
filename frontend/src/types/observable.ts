@@ -75,6 +75,8 @@ export interface ObservableCreate {
   type: ObservableType
   value: string
   confidence_score: number
+  /** Manual marking; the API field is `tlp` (response exposes it as `manual_tlp`). */
+  tlp?: Tlp | null
 }
 
 export interface ObservableTagsUpdate {
