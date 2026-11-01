@@ -45,9 +45,13 @@ effective =
 CHECK constraint: `override_set_at` is null whenever `confidence_override` is
 null.
 
-Backfill in the migration: for observables with **no** `observable_sources`
-rows (created manually before this change), set
-`manual_confidence = confidence_score`. Must work on SQLite and PostgreSQL;
+Backfill in the migration: set `manual_confidence = confidence_score` for every
+observable whose score is explained by neither its feed sources (above
+`MAX(source_confidence)`, or no sources at all) nor a #14 report import
+(above `MAX(report_observables.analyst_confidence)`). That records manual
+raises that nothing else explains. Known, accepted side effect: a stale score
+from a since-deleted feed also becomes a floor, because the two cases can't be
+told apart. Must work on SQLite and PostgreSQL;
 use `batch_alter_table` like `007`.
 
 ## Backend
@@ -65,6 +69,24 @@ respects the override. Every recompute site calls it:
 | `observable_service.create_observable` (manual) | `confidence = greatest(existing, provided)` | upsert `manual_confidence = greatest(existing, provided)`, then recompute (the override still wins) |
 | report import (`report_import_service.import_candidates`) | new: confidence = chosen; existing: untouched | after the link rows are written, recompute all imported ids. A higher analyst confidence now **raises** an existing observable unless it's overridden. This supersedes the #14 rule "existing observables keep their confidence" (#14's contract doc gets a note). |
 | unlink report observable, delete report | no recompute | recompute affected observables after commit, since an analyst floor may have gone |
+| delete feed (`feed_service.delete_feed`, deprecated preconfigured feed removal) | no recompute | collect affected `observable_id`s before the delete, recompute after the flush, invalidate caches after commit |
+
+`recompute_effective_confidence` chunks its ids (1,000 per UPDATE) because
+PostgreSQL allows at most 65,535 parameters per statement.
+
+Feed ingest invalidates caches **once per feed run** in the runner (and on a
+failed run after partial commits), not once per batch.
+
+**No inputs left:** an observable whose last feed was deleted, with no analyst
+inputs, keeps its current score (the "else keep current" branch). The next
+analyst input (manual create or report import) then defines the score, even
+if it is lower. That's intended: no recorded evidence for the old score
+remains. Don't invent a floor from a deleted feed's score.
+
+**Concurrency:** two recomputes running at once under READ COMMITTED can
+briefly miss a just-committed input; the next recompute repairs it. This is
+accepted and documented, and is the same class of race that already existed
+between feeds.
 
 Every site that changes confidence calls `invalidate_observable_caches()` after
 commit (`core/redis.py`). This includes report imports where `created == 0`
@@ -84,7 +106,7 @@ manual_confidence: number | null;
 confidence_override: {
   value: number;
   set_at: string;                 // ISO timestamp
-  set_by: string | null;          // username; null if the user was deleted
+  set_by: string | null;          // username; null if set via an API key or the user was deleted
 } | null;
 ```
 
@@ -95,8 +117,10 @@ The export JSON format is unchanged.
 On the observable detail page (`ObservableDetailPage.tsx`):
 
 - **Confidence display:** when an override is active, show a badge ("Pinned by
-  <user>, <relative time>") next to the confidence. The page also shows the
-  analyst floor (`manual_confidence`) when it is non-null.
+  <user>, <relative time>") next to the confidence. When `set_by` is null,
+  show "Pinned by an API key or removed user, <time>". The page also shows
+  `manual_confidence` labelled "Manual floor" when it is non-null. It is not
+  the whole analyst floor, because report-import confidences also count.
 - **Admin-only "Override confidence" control:**
   - Number input, 0–100, whole numbers only, prefilled with the current
     effective confidence.
