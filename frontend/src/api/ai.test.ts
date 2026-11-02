@@ -65,6 +65,12 @@ describe('AI settings API', () => {
     await getAiUsage('2026-11')
     expect(get).toHaveBeenCalledWith('/settings/ai/usage', { params: { month: '2026-11' } })
 
+    const { getAiUsageRecords } = await import('./ai')
+    await getAiUsageRecords('2026-11', 50, 'cursor-id')
+    expect(get).toHaveBeenCalledWith('/settings/ai/usage/records', {
+      params: { month: '2026-11', limit: 50, before: 'cursor-id' },
+    })
+
     await getAiInferenceTestPreview('anthropic', 'claude-x')
     expect(get).toHaveBeenCalledWith('/settings/ai/providers/anthropic/inference-test/preview', {
       params: { model: 'claude-x' },
@@ -77,7 +83,14 @@ describe('AI settings API', () => {
       max_requests_per_minute: 10,
       unpriced_model_policy: 'block',
     })
-    expect(put).toHaveBeenCalledWith('/settings/ai/usage-policy', expect.any(Object))
+    // Exact AiUsagePolicyUpdate body: no read-only fields (updated_at, guarantee) leak in.
+    expect(put).toHaveBeenCalledWith('/settings/ai/usage-policy', {
+      monthly_budget_usd: null,
+      max_output_tokens: 1024,
+      max_concurrent_requests: 2,
+      max_requests_per_minute: 10,
+      unpriced_model_policy: 'block',
+    })
 
     await getAiPricing()
     expect(get).toHaveBeenCalledWith('/settings/ai/pricing')

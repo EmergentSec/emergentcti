@@ -29,9 +29,6 @@ import { AiPricingTable } from './AiPricing'
 import { AiUsagePanel } from './AiUsage'
 import { ModelPicker, ModelSourceLabel } from './ModelPicker'
 
-/** Fixed prompt the backend sends for the inference test (shown verbatim in the confirm dialog). */
-export const INFERENCE_TEST_PROMPT = 'Reply with the single word: OK'
-
 export function AiSettings() {
   const { data, isLoading, error } = useAiSettings()
 
@@ -520,7 +517,7 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
 
       <Dialog open={testOpen} onClose={() => setTestOpen(false)} title="Send a test prompt?">
         <div className="space-y-4 text-sm">
-          {preview.isLoading ? (
+          {preview.isLoading || (preview.isFetching && !preview.data) ? (
             <div className="flex justify-center py-4">
               <LoadingSpinner />
             </div>
@@ -529,6 +526,12 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
           ) : preview.data ? (
             <>
               <p className="text-muted-foreground">{preview.data.destination_note}</p>
+              <p>
+                Provider: <span className="font-medium text-foreground">{nameOf(preview.data.provider)}</span>
+              </p>
+              <p>
+                Model: <code className="break-all font-mono text-xs text-foreground">{preview.data.model}</code>
+              </p>
               <p>
                 Exact prompt:{' '}
                 <code className="break-all font-mono text-xs text-foreground">{preview.data.content}</code>
@@ -551,7 +554,12 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
             <Warning size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
             The provider may charge for this request.
           </p>
-          {preview.data && preview.data.policy_decision !== 'allowed' && (
+          {preview.isFetching && preview.data && (
+            <p role="status" className="text-muted-foreground">
+              Rechecking budget and policy…
+            </p>
+          )}
+          {preview.data && !preview.isFetching && preview.data.policy_decision !== 'allowed' && (
             <p role="status" className="text-destructive">
               {inferenceTestBlockReason(preview.data.policy_decision)}
             </p>
@@ -564,6 +572,8 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
               onClick={confirmTest}
               disabled={
                 preview.isLoading ||
+                // A cached preview may be stale (budget/policy changed): wait for the refetch.
+                preview.isFetching ||
                 !!preview.error ||
                 !preview.data ||
                 preview.data.policy_decision !== 'allowed'

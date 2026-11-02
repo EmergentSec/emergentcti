@@ -3,7 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import * as aiApi from '@/api/ai'
-import { aiModelsKey, aiSettingsKey, useRemoveAiProvider, useSaveAiKey } from './useAiSettings'
+import { aiModelsKey, aiSettingsKey, useAiInferenceTest, useRemoveAiProvider, useSaveAiKey } from './useAiSettings'
+import {
+  aiInferencePreviewKey,
+  aiPricingKey,
+  aiUsageKey,
+  aiUsagePolicyKey,
+  aiUsageRecordsKey,
+  useDeleteAiPricingRow,
+  useSaveAiPricingRow,
+  useSaveAiUsagePolicy,
+} from './useAiUsage'
+import { usagePolicy, usageReport } from '@/test/fixtures/ai'
 import type { AiModelList } from '@/types/ai'
 
 vi.mock('@/api/ai', () => ({
@@ -13,6 +24,9 @@ vi.mock('@/api/ai', () => ({
   checkAiProvider: vi.fn(),
   getAiModels: vi.fn(),
   runAiInferenceTest: vi.fn(),
+  putAiUsagePolicy: vi.fn(),
+  putAiPricingRow: vi.fn(),
+  deleteAiPricingRow: vi.fn(),
   putAiDefault: vi.fn(),
   deleteAiDefault: vi.fn(),
 }))
@@ -106,5 +120,69 @@ describe('useRemoveAiProvider', () => {
     expect(client.getQueryCache().find({ queryKey: aiModelsKey('openai'), exact: true })).toBeUndefined()
     expect(client.getQueryData(aiModelsKey('anthropic'))).toEqual(modelList('anthropic'))
     expect(invalidated(client, aiModelsKey('anthropic'))).toBe(false)
+  })
+})
+
+/** Seeds usage, records and a preview so invalidation is observable per key. */
+function seedSpend(client: QueryClient) {
+  client.setQueryData(aiUsageKey('2026-11'), usageReport())
+  client.setQueryData(aiUsageRecordsKey('2026-11'), { pages: [{ items: [], next_before: null }], pageParams: [undefined] })
+  client.setQueryData(aiInferencePreviewKey('anthropic', 'm'), {})
+  client.setQueryData(aiPricingKey, { items: [] })
+  client.setQueryData(aiUsagePolicyKey, usagePolicy())
+}
+
+describe('spend-affecting mutations refresh usage, records and previews (M4, M5)', () => {
+  it('an inference test invalidates usage, records and previews, even when it fails', async () => {
+    for (const outcome of ['ok', 'error'] as const) {
+      if (outcome === 'ok') {
+        api.runAiInferenceTest.mockResolvedValue({ ok: true, error: null, latency_ms: 1, usage: null })
+      } else {
+        api.runAiInferenceTest.mockRejectedValue(new Error('boom'))
+      }
+      const { client, wrapper } = setup()
+      seedSpend(client)
+      const { result } = renderHook(() => useAiInferenceTest(), { wrapper })
+      await act(async () => {
+        await result.current.mutateAsync({ provider: 'anthropic', model: 'm' }).catch(() => {})
+      })
+      await waitFor(() => expect(invalidated(client, aiUsageKey('2026-11'))).toBe(true))
+      expect(invalidated(client, aiUsageRecordsKey('2026-11'))).toBe(true)
+      expect(invalidated(client, aiInferencePreviewKey('anthropic', 'm'))).toBe(true)
+      expect(invalidated(client, aiPricingKey)).toBe(false)
+    }
+  })
+
+  it('saving the policy invalidates usage, records and previews', async () => {
+    api.putAiUsagePolicy.mockResolvedValue(usagePolicy())
+    const { client, wrapper } = setup()
+    seedSpend(client)
+    const { result } = renderHook(() => useSaveAiUsagePolicy(), { wrapper })
+    const { updated_at: _u, guarantee: _g, ...body } = usagePolicy()
+    await act(() => result.current.mutateAsync(body))
+    expect(invalidated(client, aiUsagePolicyKey)).toBe(true)
+    expect(invalidated(client, aiUsageKey('2026-11'))).toBe(true)
+    expect(invalidated(client, aiUsageRecordsKey('2026-11'))).toBe(true)
+    expect(invalidated(client, aiInferencePreviewKey('anthropic', 'm'))).toBe(true)
+  })
+
+  it('saving or deleting pricing invalidates previews', async () => {
+    api.putAiPricingRow.mockResolvedValue({} as never)
+    api.deleteAiPricingRow.mockResolvedValue(undefined)
+    for (const which of ['save', 'delete'] as const) {
+      const { client, wrapper } = setup()
+      seedSpend(client)
+      if (which === 'save') {
+        const { result } = renderHook(() => useSaveAiPricingRow(), { wrapper })
+        await act(() =>
+          result.current.mutateAsync({ provider: 'anthropic', model: 'm', input_usd_per_mtok: '1', output_usd_per_mtok: '2' }),
+        )
+      } else {
+        const { result } = renderHook(() => useDeleteAiPricingRow(), { wrapper })
+        await act(() => result.current.mutateAsync({ provider: 'anthropic', model: 'm' }))
+      }
+      expect(invalidated(client, aiPricingKey)).toBe(true)
+      expect(invalidated(client, aiInferencePreviewKey('anthropic', 'm'))).toBe(true)
+    }
   })
 })

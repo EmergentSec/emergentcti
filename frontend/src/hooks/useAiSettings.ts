@@ -10,6 +10,7 @@ import {
   runAiInferenceTest,
 } from '@/api/ai'
 import type { AiDefault, AiProvider } from '@/types/ai'
+import { invalidateAiSpendQueries } from './useAiUsage'
 
 export const aiSettingsKey = ['ai-settings'] as const
 export const aiModelsKey = (provider: AiProvider) => ['ai-models', provider] as const
@@ -86,9 +87,12 @@ export function useCheckAiConnection() {
 
 /** Billable. Only call `mutate` from an explicit confirmation. */
 export function useAiInferenceTest() {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ provider, model }: { provider: AiProvider; model: string }) =>
       runAiInferenceTest(provider, model),
+    // A test (even a failed one) writes a usage record and moves committed spend.
+    onSettled: () => invalidateAiSpendQueries(queryClient),
   })
 }
 
