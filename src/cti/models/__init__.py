@@ -1,6 +1,7 @@
 from cti.models.ai import AiProvider, AiProviderConfig, AiSettingsRecord
 from cti.models.allowlist import AllowlistEntry, AllowlistKind
 from cti.models.api_key import ApiKey
+from cti.models.audit import ActorType, AuditEvent, AuditOutcome
 from cti.models.base import Base
 from cti.models.export_profile import ExportDestination, ExportFormat, ExportProfile
 from cti.models.feed import Feed, FeedRun, FeedRunStatus, FeedType
@@ -19,12 +20,15 @@ from cti.models.tlp import Tlp
 from cti.models.user import User, UserRole
 
 __all__ = [
+    "ActorType",
     "AiProvider",
     "AiProviderConfig",
     "AiSettingsRecord",
     "AllowlistEntry",
     "AllowlistKind",
     "ApiKey",
+    "AuditEvent",
+    "AuditOutcome",
     "Base",
     "ContentFormat",
     "ExportDestination",
