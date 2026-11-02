@@ -7,7 +7,9 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from cti.api.v1.filters import parse_tag_names, parse_tlp_tokens
 from cti.api.v1.reports import report_to_summary
@@ -31,7 +33,7 @@ from cti.schemas.observable import (
     TlpSource,
 )
 from cti.schemas.report import ReportSummary
-from cti.services import allowlist_service, observable_service, report_service, tag_service
+from cti.services import allowlist_service, audit, observable_service, report_service, tag_service
 from cti.services.allowlist_service import AllowlistMatcher
 from cti.services.tlp import (
     MarkingContext,
@@ -44,6 +46,50 @@ from cti.services.tlp import (
 router = APIRouter()
 
 _RESTRICTED_REPORT = "Restricted report"
+
+
+async def _rollback_for_audit(db: AsyncSession) -> None:
+    """Roll back before an independent write, preserving clean loaded identities."""
+    loaded = [
+        (
+            obj,
+            {
+                attr.key: state.dict[attr.key]
+                for attr in state.mapper.column_attrs
+                if attr.key in state.dict
+            },
+        )
+        for obj in list(db.sync_session.identity_map.values())
+        if not (state := inspect(obj)).modified
+    ]
+    await db.rollback()
+    for obj, values in loaded:
+        if inspect(obj).persistent:
+            for key, value in values.items():
+                set_committed_value(obj, key, value)
+
+
+async def _record_observable_failure(
+    db: AsyncSession,
+    *,
+    actor: audit.Actor,
+    action: str,
+    resource_id: uuid.UUID,
+    status: int,
+    reason: str,
+    resource_label: object = None,
+) -> None:
+    await _rollback_for_audit(db)
+    await audit.record_independent(
+        actor=actor,
+        action=action,
+        resource_type="observable",
+        resource_id=resource_id,
+        resource_label=resource_label,
+        outcome=audit.AuditOutcome.FAILED,
+        summary={"reason": reason, "status": status},
+        strict=False,
+    )
 
 
 def _redact_red_reports(marking: MarkingContext) -> MarkingContext:
@@ -299,10 +345,38 @@ async def set_tlp_override(
     observable_id: uuid.UUID,
     data: TlpOverrideRequest,
     db: AsyncSession = Depends(get_db),
-    auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(
+        audit.audited_admin(
+            "observable.tlp_override_set", "observable", resource_id_param="observable_id"
+        )
+    ),
 ) -> ObservableResponse | Response:
     """Reclassify an observable (may loosen or tighten). Reason required."""
-    await ensure_observable_visible(db, auth, observable_id)
+    actor = audit.actor_from_auth(auth)
+    try:
+        await ensure_observable_visible(db, auth, observable_id)
+    except HTTPException as exc:
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tlp_override_set",
+            resource_id=observable_id,
+            status=exc.status_code,
+            reason="not_found",
+        )
+        raise
+    current = await observable_service.get_observable(db, observable_id)
+    if current is None:
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tlp_override_set",
+            resource_id=observable_id,
+            status=404,
+            reason="not_found",
+        )
+        raise HTTPException(status_code=404, detail="Observable not found")
+    before = current.tlp_override
     obs = await observable_service.set_tlp_override(
         db,
         observable_id,
@@ -311,7 +385,29 @@ async def set_tlp_override(
         set_by_id=auth.id if isinstance(auth, User) else None,
     )
     if obs is None:
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tlp_override_set",
+            resource_id=observable_id,
+            status=404,
+            reason="not_found",
+        )
         raise HTTPException(status_code=404, detail="Observable not found")
+    audit.record(
+        db,
+        actor=actor,
+        action="observable.tlp_override_set",
+        resource_type="observable",
+        resource_id=obs.id,
+        resource_label=obs.value,
+        summary={
+            "before": before,
+            "after": obs.tlp_override,
+            "reason_present": bool(data.reason),
+            "reason_length": len(data.reason),
+        },
+    )
     await db.commit()
     await invalidate_observable_caches()
     return await _mutation_response(db, obs, auth)
@@ -321,12 +417,57 @@ async def set_tlp_override(
 async def clear_tlp_override(
     observable_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(
+        audit.audited_admin(
+            "observable.tlp_override_clear", "observable", resource_id_param="observable_id"
+        )
+    ),
 ) -> ObservableResponse | Response:
-    await ensure_observable_visible(db, auth, observable_id)
+    actor = audit.actor_from_auth(auth)
+    try:
+        await ensure_observable_visible(db, auth, observable_id)
+    except HTTPException as exc:
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tlp_override_clear",
+            resource_id=observable_id,
+            status=exc.status_code,
+            reason="not_found",
+        )
+        raise
+    current = await observable_service.get_observable(db, observable_id)
+    if current is None:
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tlp_override_clear",
+            resource_id=observable_id,
+            status=404,
+            reason="not_found",
+        )
+        raise HTTPException(status_code=404, detail="Observable not found")
+    before = current.tlp_override
     obs = await observable_service.clear_tlp_override(db, observable_id)
     if obs is None:
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tlp_override_clear",
+            resource_id=observable_id,
+            status=404,
+            reason="not_found",
+        )
         raise HTTPException(status_code=404, detail="Observable not found")
+    audit.record(
+        db,
+        actor=actor,
+        action="observable.tlp_override_clear",
+        resource_type="observable",
+        resource_id=obs.id,
+        resource_label=obs.value,
+        summary={"before": before, "after": None},
+    )
     await db.commit()
     await invalidate_observable_caches()
     return await _mutation_response(db, obs, auth)
@@ -337,21 +478,66 @@ async def set_observable_tags(
     observable_id: uuid.UUID,
     data: TagsUpdate,
     db: AsyncSession = Depends(get_db),
-    auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(
+        audit.audited_admin(
+            "observable.tags_update", "observable", resource_id_param="observable_id"
+        )
+    ),
 ) -> ObservableResponse | Response:
     """Replace the observable's tag set (names are normalized; new ones created)."""
-    await ensure_observable_visible(db, auth, observable_id)
-    if await observable_service.get_observable(db, observable_id) is None:
+    actor = audit.actor_from_auth(auth)
+    try:
+        await ensure_observable_visible(db, auth, observable_id)
+    except HTTPException as exc:
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tags_update",
+            resource_id=observable_id,
+            status=exc.status_code,
+            reason="not_found",
+        )
+        raise
+    current = await observable_service.get_observable(db, observable_id)
+    if current is None:
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tags_update",
+            resource_id=observable_id,
+            status=404,
+            reason="not_found",
+        )
         raise HTTPException(status_code=404, detail="Observable not found")
+    before = {tag.name for tag in current.tags}
     try:
         await tag_service.set_observable_tags(db, observable_id, data.tags)
     except tag_service.TagValidationError as exc:
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tags_update",
+            resource_id=observable_id,
+            resource_label=current.value,
+            status=422,
+            reason="invalid_tags",
+        )
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    obs = await observable_service.get_observable(db, observable_id)
+    assert obs is not None
+    after = {tag.name for tag in obs.tags}
+    audit.record(
+        db,
+        actor=actor,
+        action="observable.tags_update",
+        resource_type="observable",
+        resource_id=obs.id,
+        resource_label=obs.value,
+        summary={"added": sorted(after - before), "removed": sorted(before - after)},
+    )
     await db.commit()
     # Tag filters feed blocklist cache keys and exports.
     await invalidate_observable_caches()
-    obs = await observable_service.get_observable(db, observable_id)
-    assert obs is not None
     return await _mutation_response(db, obs, auth)
 
 
