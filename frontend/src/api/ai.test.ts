@@ -117,6 +117,6 @@ describe('AI error mapping', () => {
     expect(describeAiCategory('something_new')).toMatch(/went wrong/)
     expect(describeAiCategory(null)).toMatch(/went wrong/)
     expect(AI_ERROR_MESSAGES.budget_exceeded).toMatch(/budget/)
-    expect(AI_ERROR_MESSAGES.sharing_forbidden).toMatch(/TLP/)
+    expect(AI_ERROR_MESSAGES.sharing_forbidden).toMatch(/cannot be shared/)
   })
 })

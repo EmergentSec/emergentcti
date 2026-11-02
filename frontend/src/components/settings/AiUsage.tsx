@@ -149,7 +149,11 @@ export function AiUsagePanel() {
             <BudgetBar committed={usage.data.budget.committed_usd} budget={usage.data.budget.monthly_budget_usd} />
             {usage.data.budget.remaining_usd !== null && (
               <p className="text-sm text-muted-foreground">
-                Remaining budget estimate: {displayUsdEstimate(usage.data.budget.remaining_usd)}
+                {Number(usage.data.budget.remaining_usd) < 0 ? (
+                  <>Over budget by {displayUsdEstimate(String(Math.abs(Number(usage.data.budget.remaining_usd))))}</>
+                ) : (
+                  <>Remaining budget estimate: {displayUsdEstimate(usage.data.budget.remaining_usd)}</>
+                )}
               </p>
             )}
             <TotalsSummary totals={usage.data.totals} />

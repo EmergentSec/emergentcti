@@ -24,7 +24,7 @@ export const AI_ERROR_MESSAGES: Record<AiErrorCategory, string> = {
   local_rate_limited: 'Too many AI requests in the last minute. Wait briefly and try again.',
   model_blocked_unpriced:
     'This model has no local pricing row and your policy blocks unpriced models. Add pricing or change the policy.',
-  sharing_forbidden: 'One or more items can no longer be shared with an external AI provider under TLP rules.',
+  sharing_forbidden: 'This content cannot be shared with an external AI provider under current policy.',
   sharing_not_approved:
     'The outbound preview changed or expired. Review the content again before sending.',
 }
