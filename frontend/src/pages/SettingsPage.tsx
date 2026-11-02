@@ -1,6 +1,7 @@
 import { useSearchParams } from 'react-router-dom'
-import { Export, Key, ShieldCheck, Sparkle, Users, SlidersHorizontal, UserCircle } from '@phosphor-icons/react'
+import { ClipboardText, Export, Key, ShieldCheck, Sparkle, Users, SlidersHorizontal, UserCircle } from '@phosphor-icons/react'
 import { AiSettings } from '@/components/settings/AiSettings'
+import { AuditHistory } from '@/components/settings/AuditHistory'
 import { AccountSettings } from '@/components/settings/AccountSettings'
 import { AllowlistManager } from '@/components/settings/AllowlistManager'
 import { ApiKeyManager } from '@/components/settings/ApiKeyManager'
@@ -12,7 +13,7 @@ import { Tabs } from '@/components/ui/Tabs'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 
-type Tab = 'apikeys' | 'members' | 'ai' | 'allowlist' | 'exportprofiles' | 'account' | 'general'
+type Tab = 'apikeys' | 'members' | 'ai' | 'audit' | 'allowlist' | 'exportprofiles' | 'account' | 'general'
 
 interface NavItem {
   id: Tab
@@ -25,6 +26,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'apikeys', label: 'API keys', Icon: Key, adminOnly: true },
   { id: 'members', label: 'Members', Icon: Users, adminOnly: true },
   { id: 'ai', label: 'AI', Icon: Sparkle, adminOnly: true },
+  { id: 'audit', label: 'Audit', Icon: ClipboardText, adminOnly: true },
   { id: 'allowlist', label: 'Allowlist', Icon: ShieldCheck, adminOnly: false },
   { id: 'exportprofiles', label: 'Export profiles', Icon: Export, adminOnly: false },
   { id: 'account', label: 'Account', Icon: UserCircle, adminOnly: false },
@@ -83,6 +85,7 @@ export default function SettingsPage() {
         {activeTab === 'apikeys' && isAdmin && <ApiKeyManager />}
         {activeTab === 'members' && isAdmin && <UserManager />}
         {activeTab === 'ai' && isAdmin && <AiSettings />}
+        {activeTab === 'audit' && isAdmin && <AuditHistory />}
         {activeTab === 'allowlist' && <AllowlistManager />}
         {activeTab === 'exportprofiles' && <ExportProfileManager />}
         {activeTab === 'account' && <AccountSettings />}

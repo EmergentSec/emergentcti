@@ -37,6 +37,10 @@ vi.mock('@/components/settings/GeneralSettings', () => ({
   GeneralSettings: () => <div>GeneralSettings</div>,
 }))
 
+vi.mock('@/components/settings/AuditHistory', () => ({
+  AuditHistory: () => <div>AuditHistory</div>,
+}))
+
 const mockUseAuth = vi.mocked(useAuth)
 
 function render(ui: ReactElement) {
@@ -53,7 +57,7 @@ afterEach(() => {
 })
 
 describe('SettingsPage', () => {
-  it('admin sees all 7 tabs and defaults to API keys pane', () => {
+  it('admin sees all 8 tabs and defaults to API keys pane', () => {
     mockUseAuth.mockReturnValue({ isAdmin: true } as ReturnType<typeof useAuth>)
 
     render(<SettingsPage />)
@@ -61,6 +65,7 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('tab', { name: 'API keys' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Members' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'AI' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Audit' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Allowlist' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Export profiles' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Account' })).toBeTruthy()
@@ -79,6 +84,7 @@ describe('SettingsPage', () => {
     expect(screen.queryByRole('tab', { name: 'API keys' })).toBeNull()
     expect(screen.queryByRole('tab', { name: 'Members' })).toBeNull()
     expect(screen.queryByRole('tab', { name: 'AI' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Audit' })).toBeNull()
     expect(screen.getByRole('tab', { name: 'Account' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'General' })).toBeTruthy()
     expect(screen.getByText('AccountSettings')).toBeTruthy()
@@ -166,6 +172,26 @@ describe('SettingsPage', () => {
 
     expect(screen.getByText('AccountSettings')).toBeTruthy()
     expect(screen.queryByText('ApiKeyManager')).toBeNull()
+  })
+
+  it('admin can open the Audit pane', () => {
+    mockUseAuth.mockReturnValue({ isAdmin: true } as ReturnType<typeof useAuth>)
+
+    render(<SettingsPage />)
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Audit' }))
+    expect(screen.getByText('AuditHistory')).toBeTruthy()
+    expect(screen.queryByText('ApiKeyManager')).toBeNull()
+  })
+
+  it('ignores ?tab=audit when the user is not an admin', () => {
+    mockUseAuth.mockReturnValue({ isAdmin: false } as ReturnType<typeof useAuth>)
+    window.history.replaceState(null, '', '/settings?tab=audit')
+
+    render(<SettingsPage />)
+
+    expect(screen.getByText('AccountSettings')).toBeTruthy()
+    expect(screen.queryByText('AuditHistory')).toBeNull()
   })
 
   it('admin can open the AI pane', () => {
