@@ -143,7 +143,7 @@ async def create_api_key_endpoint(
         resource_id=api_key.id,
         resource_label=api_key.name,
     )
-    await db.flush()
+    await db.commit()
 
     return ApiKeyCreateResponse(
         id=api_key.id,
@@ -194,7 +194,7 @@ async def revoke_api_key(
         resource_label=key.name,
         summary={"is_active": _before_after(was_active, False)},
     )
-    await db.flush()
+    await db.commit()
 
 
 # ── Global Config ─────────────────────────────────────────────────────
@@ -314,7 +314,7 @@ async def create_user(
         resource_label=user.username,
         summary={"role": user.role, "is_active": user.is_active},
     )
-    await db.flush()
+    await db.commit()
     return UserResponse.model_validate(user)
 
 
@@ -385,7 +385,7 @@ async def update_user(
         resource_label=user.username,
         summary=summary,
     )
-    await db.flush()
+    await db.commit()
     return UserResponse.model_validate(user)
 
 
@@ -428,7 +428,7 @@ async def delete_user(
     )
     await revoke_all_user_tokens(db, user.id)
     await db.delete(user)
-    await db.flush()
+    await db.commit()
 
 
 @router.put("/users/{user_id}/password", status_code=204)
@@ -509,4 +509,4 @@ async def change_user_password(
             secure=settings.ENVIRONMENT != "development",
             max_age=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         )
-    await db.flush()
+    await db.commit()
