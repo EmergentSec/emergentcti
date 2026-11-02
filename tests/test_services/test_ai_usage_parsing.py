@@ -53,8 +53,18 @@ PROVIDERS = [
 ]
 
 
+#: The output cap's request-body field, per provider (M2, #17).
+MAX_TOKENS_FIELDS = {
+    "anthropic": "max_tokens",  # Required by the Messages API.
+    "openai": "max_completion_tokens",  # max_tokens is rejected by o-series.
+    "openrouter": "max_completion_tokens",  # max_tokens is deprecated.
+    "xai": "max_tokens",  # See XAiAdapter._MAX_TOKENS_FIELD.
+}
+
+
 @pytest.mark.parametrize(("adapter", "url", "input_field", "output_field"), PROVIDERS)
 async def test_complete_parses_usage_and_sends_max_output_tokens(
+    request: pytest.FixtureRequest,
     httpx_mock: HTTPXMock,
     adapter: AiProviderAdapter,
     url: str,
@@ -68,13 +78,34 @@ async def test_complete_parses_usage_and_sends_max_output_tokens(
     usage = await adapter.complete(FAKE_KEY, "m-1", "hello", 777)
 
     assert usage == AdapterUsage(input_tokens=21, output_tokens=4)
-    request = httpx_mock.get_request()
-    assert request is not None
-    assert json.loads(request.content) == {
+    sent = httpx_mock.get_request()
+    assert sent is not None
+    field = MAX_TOKENS_FIELDS[request.node.callspec.id]
+    assert json.loads(sent.content) == {
         "model": "m-1",
-        "max_tokens": 777,
+        field: 777,
         "messages": [{"role": "user", "content": "hello"}],
     }
+
+
+@pytest.mark.parametrize("model", ["o1", "o3-mini", "o4-mini"])
+async def test_openai_reasoning_models_get_max_completion_tokens(
+    httpx_mock: HTTPXMock, model: str
+) -> None:
+    """o-series models reject ``max_tokens``; the cap must use the new field."""
+    httpx_mock.add_response(
+        url="https://api.openai.com/v1/chat/completions",
+        json={"usage": {"prompt_tokens": 3, "completion_tokens": 50}},
+    )
+
+    await OpenAiAdapter().complete(FAKE_KEY, model, "hello", 512)
+
+    sent = httpx_mock.get_request()
+    assert sent is not None
+    payload = json.loads(sent.content)
+    assert payload["model"] == model
+    assert payload["max_completion_tokens"] == 512
+    assert "max_tokens" not in payload
 
 
 @pytest.mark.parametrize(("adapter", "url", "input_field", "output_field"), PROVIDERS)

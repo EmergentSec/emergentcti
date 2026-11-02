@@ -13,6 +13,8 @@ from cti.services.ai.base import (
 
 class OpenRouterAdapter(AiProviderAdapter):
     _BASE_URL = "https://openrouter.ai/api/v1"
+    # OpenRouter deprecates ``max_tokens`` in favour of ``max_completion_tokens``.
+    _MAX_TOKENS_FIELD = "max_completion_tokens"
 
     @staticmethod
     def _headers(api_key: str) -> dict[str, str]:

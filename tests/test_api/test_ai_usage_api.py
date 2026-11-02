@@ -352,7 +352,8 @@ async def test_inference_returns_usage_and_records_retry_of(
     assert str(row.id) == usage["record_id"]
     assert row.retry_of == previous
     assert row.actor_label == "Test Key"
-    assert json.loads(httpx_mock.get_request().content)["max_tokens"] == 1024  # type: ignore[union-attr]
+    sent = json.loads(httpx_mock.get_request().content)  # type: ignore[union-attr]
+    assert sent["max_completion_tokens"] == 1024
     # The ai.request audit trail is unchanged: initiated + succeeded.
     assert [e.outcome for e in await events(db_session, "ai.request")] == [
         "initiated",
