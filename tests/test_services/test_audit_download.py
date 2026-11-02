@@ -135,16 +135,105 @@ async def test_interrupted_when_client_disconnects(db_session) -> None:
     async def send(message: dict) -> None:
         if message["type"] == "http.response.body":
             bodies.append(message["body"])
-            disconnect.set()  # the client goes away after the first chunk
+            if len(bodies) == 2:
+                disconnect.set()  # the client goes away during the second chunk
         await asyncio.sleep(0)
 
     response = audit.AuditedDownload(BODY, disclosure=disclosure, chunk_size=2000)
     await response(SCOPE, receive, send)  # no exception: nobody is left to tell
 
-    assert len(bodies) < 4
+    assert len(bodies) == 2  # nothing more is sent once the disconnect is seen
     _, interrupted = await outcomes(db_session)
     assert interrupted.outcome == "interrupted"
-    assert interrupted.summary["bytes_sent"] == sum(len(b) for b in bodies)
+    # The second chunk's send returned after the disconnect: not counted.
+    assert interrupted.summary["bytes_sent"] == 2000
+
+
+class FakeDisclosure:
+    """Duck-typed ``Disclosure`` that records outcomes in memory."""
+
+    def __init__(self) -> None:
+        self.outcomes: list[tuple[str, dict]] = []
+
+    async def record_outcome(self, outcome, summary) -> None:
+        self.outcomes.append((str(AuditOutcome(outcome).value), dict(summary or {})))
+
+
+async def test_already_disconnected_sends_nothing() -> None:
+    """Like uvicorn: once the client is gone, ``send`` silently drops writes."""
+    disclosure = FakeDisclosure()
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict) -> None:  # never suspends, never raises
+        sent.append(message)
+
+    await audit.AuditedDownload(BODY, disclosure=disclosure)(SCOPE, receive, send)  # type: ignore[arg-type]
+    assert sent == []
+    assert disclosure.outcomes == [("interrupted", {"bytes_sent": 0})]
+
+
+async def test_disconnect_during_final_send_is_interrupted() -> None:
+    disclosure = FakeDisclosure()
+    gone = asyncio.Event()
+
+    async def receive() -> dict:
+        await gone.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict) -> None:
+        if message.get("more_body") is False:
+            gone.set()  # the client drops while the final send drains
+            await asyncio.sleep(0)
+
+    response = audit.AuditedDownload(BODY, disclosure=disclosure, chunk_size=3000)
+    await response(SCOPE, receive, send)  # type: ignore[arg-type]
+    assert disclosure.outcomes == [("interrupted", {"bytes_sent": 6000})]
+
+
+async def test_disconnect_reported_after_completion_is_not_interruption() -> None:
+    """uvicorn's ``receive`` returns ``http.disconnect`` once a response completes."""
+    disclosure = FakeDisclosure()
+    complete = asyncio.Event()
+
+    async def receive() -> dict:
+        await complete.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict) -> None:
+        if message.get("more_body") is False:
+            complete.set()  # synchronously, before send returns, as uvicorn does
+
+    response = audit.AuditedDownload(BODY, disclosure=disclosure, chunk_size=3000)
+    await response(SCOPE, receive, send)  # type: ignore[arg-type]
+    assert disclosure.outcomes == [("completed", {"bytes_sent": 8000})]
+
+
+@pytest.mark.parametrize(
+    ("headers_sent", "expected"), [(True, "completed"), (False, "interrupted")]
+)
+async def test_head_counts_no_body_bytes(headers_sent: bool, expected: str) -> None:
+    disclosure = FakeDisclosure()
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        if not headers_sent:
+            return {"type": "http.disconnect"}
+        return await never_disconnects()
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    response = audit.AuditedDownload(BODY, disclosure=disclosure, chunk_size=3000)
+    await response({**SCOPE, "method": "HEAD"}, receive, send)  # type: ignore[arg-type]
+    assert disclosure.outcomes == [(expected, {"bytes_sent": 0})]
+    if headers_sent:
+        assert (b"content-length", b"8000") in sent[0]["headers"]
+        assert sent[1:] == [{"type": "http.response.body", "body": b"", "more_body": False}]
+    else:
+        assert sent == []
 
 
 async def test_begin_disclosure_fails_closed(monkeypatch, db_session) -> None:

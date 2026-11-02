@@ -126,14 +126,20 @@ These are the rules that satisfy "never falsely report an event was recorded".
    requests) fail closed: before any content leaves, write an `initiated` event
    with `record_independent(..., strict=True)`. If that write fails, return
    `503 {"detail": "Audit log unavailable"}` and disclose nothing.
-4. **Delivery outcome.** Download bodies are sent through `AuditedDownload`,
-   which, once the ASGI send of the final body chunk returns, writes
-   `completed`; if sending raises or the client disconnects (including
-   `asyncio.CancelledError`), writes `interrupted` and re-raises. Both carry
-   `{"initiated_event_id": ..., "bytes_sent": n}` and use `strict=False`.
-   `completed` means the full body was handed to the server transport. It does
-   not prove client receipt. An `initiated` event with no matching `completed`
-   means delivery was not proven.
+4. **Delivery outcome.** Download bodies are sent through `AuditedDownload`.
+   It writes `completed` only when every body chunk was handed to the server
+   (its ASGI `send` returned) and no client disconnect had been observed by the
+   time the final chunk's `send` returned. Otherwise it writes `interrupted`:
+   when a disconnect is observed (before or during any send, including the
+   final send while it waits for flow control; sending then stops) or when
+   sending raises (including `asyncio.CancelledError`, which is re-raised).
+   The server's own `http.disconnect` after a completed response is not an
+   interruption. Both carry `{"initiated_event_id": ..., "bytes_sent": n}` and
+   use `strict=False`; `bytes_sent` counts only chunks whose `send` returned
+   with no disconnect observed. For `HEAD`, `bytes_sent` is 0 and `completed`
+   means the headers were sent. `completed` still does not prove client
+   receipt. An `initiated` event with no matching `completed` means delivery
+   was not proven.
 5. **AI requests** (provider check, model listing, inference test): `initiated`
    (strict) before calling the provider, then `succeeded` or `failed`
    (`strict=False`) with `{"operation", "provider", "model", "error_code"}`.

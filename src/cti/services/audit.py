@@ -112,7 +112,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
-    from starlette.types import Receive, Scope, Send
+    from starlette.types import Message, Receive, Scope, Send
 
 __all__ = [
     "ACTION_CATALOG",
@@ -611,14 +611,32 @@ async def begin_disclosure(
 _pending_writes: set[asyncio.Task[Any]] = set()
 
 
+async def _reap(task: asyncio.Future[Any]) -> None:
+    """Cancel ``task`` and wait for it to finish, without raising its result."""
+    task.cancel()
+    with anyio.CancelScope(shield=True):
+        await asyncio.wait({task})
+
+
 class AuditedDownload(Response):
     """A ``Response`` that records whether its body was handed to the server.
 
-    After the final body chunk's ASGI ``send`` returns, it records
-    ``completed``. If sending raises (including ``asyncio.CancelledError``) it
-    records ``interrupted`` and re-raises; if the client disconnects first it
-    records ``interrupted``. Both carry ``initiated_event_id`` and
-    ``bytes_sent``. ``completed`` does not prove the client received it.
+    It records ``completed`` only when every chunk's ASGI ``send`` returned and
+    no client disconnect had been observed by the time the final ``send``
+    returned. Otherwise it records ``interrupted``: on an observed disconnect
+    (it then stops sending) or when sending raises (including
+    ``asyncio.CancelledError``, which is re-raised). Both carry
+    ``initiated_event_id`` and ``bytes_sent``, which counts only chunks whose
+    ``send`` returned with no disconnect observed. ``completed`` does not prove
+    the client received it.
+
+    Servers such as uvicorn make ``send`` a silent no-op once the client is
+    gone, and may not suspend in it at all, so a watcher task consumes
+    ``receive()`` and the sender yields to it before every ``send`` and checks
+    its flag, synchronously, right after every ``send`` returns. The
+    ``http.disconnect`` a server reports after a completed response is never
+    looked at: by then the outcome is settled. For ``HEAD`` the body is not
+    sent: ``bytes_sent`` is 0 and ``completed`` means the headers were.
     """
 
     def __init__(
@@ -652,30 +670,46 @@ class AuditedDownload(Response):
                 pass
             disconnected.set()
 
+        async def send_unless_disconnected(message: Message) -> bool:
+            # Yield first so the watcher can observe a connection that is
+            # already gone; check right after ``send`` returns, with no await
+            # in between, so a disconnect observed during the send (e.g. while
+            # it waited for flow control) is never taken for delivery.
+            await asyncio.sleep(0)
+            if disconnected.is_set():
+                return False
+            await send(message)
+            return not disconnected.is_set()
+
+        head_only = scope.get("method") == "HEAD"
+        body = b"" if head_only else bytes(self.body)
+        starts: Sequence[int] = range(0, len(body), self.chunk_size) or (0,)
         watcher = asyncio.ensure_future(watch_disconnect())
         try:
-            await send(
-                {
+            try:
+                start_message = {
                     "type": "http.response.start",
                     "status": self.status_code,
                     "headers": self.raw_headers,
                 }
-            )
-            body = bytes(self.body)
-            starts: Sequence[int] = range(0, len(body), self.chunk_size) or (0,)
-            for start in starts:
-                if disconnected.is_set():
-                    break
-                chunk = body[start : start + self.chunk_size]
-                last = start + self.chunk_size >= len(body)
-                await send({"type": "http.response.body", "body": chunk, "more_body": not last})
-                sent += len(chunk)
-                delivered = last
+                if await send_unless_disconnected(start_message):
+                    for start in starts:
+                        chunk = body[start : start + self.chunk_size]
+                        last = start + self.chunk_size >= len(body)
+                        message = {
+                            "type": "http.response.body",
+                            "body": chunk,
+                            "more_body": not last,
+                        }
+                        if not await send_unless_disconnected(message):
+                            break
+                        sent += len(chunk)
+                        delivered = last
+            finally:
+                await _reap(watcher)
         except BaseException:
             await self._record(AuditOutcome.INTERRUPTED, sent, cancelled_ok=True)
             raise
-        finally:
-            watcher.cancel()
         await self._record(
             AuditOutcome.COMPLETED if delivered else AuditOutcome.INTERRUPTED,
             sent,
