@@ -20,10 +20,18 @@ function policyToDraft(policy: AiUsagePolicy) {
   }
 }
 
+/** Backend `_MAX_BUDGET` for `monthly_budget_usd` (schemas/ai.py). */
+export const MAX_MONTHLY_BUDGET_USD = '99999999.9999'
+
+/** Plain digits only: `Number()` would also accept "1e3" or "0x10". */
+function parseIntField(value: string): number {
+  return /^\d+$/.test(value.trim()) ? Number(value.trim()) : Number.NaN
+}
+
 function parseDraft(draft: ReturnType<typeof policyToDraft>): Omit<AiUsagePolicy, 'updated_at' | 'guarantee'> | string {
-  const max_output_tokens = Number(draft.max_output_tokens)
-  const max_concurrent_requests = Number(draft.max_concurrent_requests)
-  const max_requests_per_minute = Number(draft.max_requests_per_minute)
+  const max_output_tokens = parseIntField(draft.max_output_tokens)
+  const max_concurrent_requests = parseIntField(draft.max_concurrent_requests)
+  const max_requests_per_minute = parseIntField(draft.max_requests_per_minute)
   if (!Number.isInteger(max_output_tokens) || max_output_tokens < 1 || max_output_tokens > 32000) {
     return 'Max output tokens must be between 1 and 32000.'
   }
@@ -37,6 +45,9 @@ function parseDraft(draft: ReturnType<typeof policyToDraft>): Omit<AiUsagePolicy
   let monthly_budget_usd: string | null = null
   if (budgetTrim !== '') {
     if (!/^\d+(\.\d{1,4})?$/.test(budgetTrim)) return 'Monthly budget must be a decimal with up to four places, or blank for none.'
+    if (Number(budgetTrim) > Number(MAX_MONTHLY_BUDGET_USD)) {
+      return `Monthly budget can't exceed ${MAX_MONTHLY_BUDGET_USD}.`
+    }
     monthly_budget_usd = budgetTrim
   }
   return {
@@ -94,12 +105,14 @@ export function AiGuardrailsForm() {
           {AI_GUARDRAILS_NOTICE}
         </p>
 
-        {isLoading || !draft ? (
+        {error && !draft ? (
+          <p role="alert" className="text-sm text-destructive">
+            {aiRequestErrorMessage(error, "Couldn't load guardrails.")}
+          </p>
+        ) : isLoading || !draft ? (
           <div className="flex justify-center py-6">
             <LoadingSpinner />
           </div>
-        ) : error ? (
-          <p className="text-sm text-destructive">{aiRequestErrorMessage(error, "Couldn't load guardrails.")}</p>
         ) : (
           <form onSubmit={handleSubmit} noValidate className="space-y-4">
             <Input

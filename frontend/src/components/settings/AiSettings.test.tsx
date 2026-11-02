@@ -6,6 +6,8 @@ import { AiSettings } from './AiSettings'
 import * as aiApi from '@/api/ai'
 import { AI_ERROR_MESSAGES } from '@/lib/aiErrors'
 import type { AiModelList, AiProviderStatus, AiSettings as AiSettingsData } from '@/types/ai'
+import * as AiSettingsModule from './AiSettings'
+import { inferencePreview } from '@/test/fixtures/ai'
 
 vi.mock('@/api/ai', () => ({
   getAiSettings: vi.fn(),
@@ -34,6 +36,7 @@ vi.mock('@/hooks/useAiUsage', () => ({
   useSaveAiPricingRow: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteAiPricingRow: () => ({ mutate: vi.fn(), isPending: false }),
   useAiInferenceTestPreview: (...args: unknown[]) => mockPreview(...args),
+  invalidateAiSpendQueries: vi.fn(),
 }))
 
 const mockToast = vi.fn()
@@ -118,21 +121,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.getAiSettings.mockResolvedValue(settings())
   api.getAiModels.mockResolvedValue(MODELS)
-  mockPreview.mockReturnValue({
-    data: {
-      provider: 'anthropic',
-      model: 'claude-alpha-20260101',
-      action: 'inference_test',
-      content: 'Reply with the single word: OK',
-      max_output_tokens: 1024,
-      pricing_known: true,
-      estimated_max_cost_usd: '0.0100',
-      policy_decision: 'allowed',
-      destination_note: 'Sent to Anthropic (api.anthropic.com)',
-    },
-    isLoading: false,
-    error: null,
-  })
+  mockPreview.mockReturnValue({ data: inferencePreview(), isLoading: false, isFetching: false, error: null })
 })
 
 afterEach(() => {
@@ -365,6 +354,10 @@ describe('AiSettings', () => {
     let dialog = screen.getByRole('dialog', { name: 'Send a test prompt?' })
     expect(within(dialog).getByText(/may charge for this request/)).toBeTruthy()
     expect(within(dialog).getByText('Reply with the single word: OK')).toBeTruthy()
+    // M3: provider, host and model are all shown once the preview has loaded.
+    expect(within(dialog).getByText('Sent to Anthropic (api.anthropic.com)')).toBeTruthy()
+    expect(within(dialog).getByText('claude-alpha-20260101')).toBeTruthy()
+    expect(within(dialog).getByText(/^Provider:/).textContent).toBe('Provider: Anthropic')
     expect(api.runAiInferenceTest).not.toHaveBeenCalled()
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
@@ -385,18 +378,9 @@ describe('AiSettings', () => {
       settings({ default: { provider: 'anthropic', model: 'claude-alpha-20260101', is_custom: false } }),
     )
     mockPreview.mockReturnValue({
-      data: {
-        provider: 'anthropic',
-        model: 'claude-alpha-20260101',
-        action: 'inference_test',
-        content: 'Reply with the single word: OK',
-        max_output_tokens: 1024,
-        pricing_known: false,
-        estimated_max_cost_usd: null,
-        policy_decision: 'blocked_unpriced',
-        destination_note: 'Sent to Anthropic (api.anthropic.com)',
-      },
+      data: inferencePreview({ pricing_known: false, estimated_max_cost_usd: null, policy_decision: 'blocked_unpriced' }),
       isLoading: false,
+      isFetching: false,
       error: null,
     })
     renderPage()
@@ -406,6 +390,59 @@ describe('AiSettings', () => {
     const send = within(dialog).getByRole('button', { name: 'Send test prompt' }) as HTMLButtonElement
     expect(send.disabled).toBe(true)
     expect(within(dialog).getByText(/no local pricing row/)).toBeTruthy()
+  })
+
+  it('disables inference confirm when the preview says over budget', async () => {
+    api.getAiSettings.mockResolvedValue(
+      settings({ default: { provider: 'anthropic', model: 'claude-alpha-20260101', is_custom: false } }),
+    )
+    mockPreview.mockReturnValue({
+      data: inferencePreview({ policy_decision: 'over_budget' }),
+      isLoading: false,
+      isFetching: false,
+      error: null,
+    })
+    renderPage()
+    const section = await screen.findByRole('region', { name: 'Default model' })
+    fireEvent.click(await within(section).findByRole('button', { name: 'Send test prompt…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Send a test prompt?' })
+    expect(button(dialog, 'Send test prompt').disabled).toBe(true)
+    expect(within(dialog).getByText(/exceed the configured monthly budget/)).toBeTruthy()
+  })
+
+  it('shows the preview error and keeps confirm disabled', async () => {
+    api.getAiSettings.mockResolvedValue(
+      settings({ default: { provider: 'anthropic', model: 'claude-alpha-20260101', is_custom: false } }),
+    )
+    mockPreview.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isFetching: false,
+      error: httpError(503, { detail: { category: 'not_configured', message: 'raw' } }),
+    })
+    renderPage()
+    const section = await screen.findByRole('region', { name: 'Default model' })
+    fireEvent.click(await within(section).findByRole('button', { name: 'Send test prompt…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Send a test prompt?' })
+    expect(within(dialog).getByText(AI_ERROR_MESSAGES.not_configured)).toBeTruthy()
+    expect(button(dialog, 'Send test prompt').disabled).toBe(true)
+  })
+
+  it('keeps confirm disabled while a cached preview is being refetched (M4)', async () => {
+    api.getAiSettings.mockResolvedValue(
+      settings({ default: { provider: 'anthropic', model: 'claude-alpha-20260101', is_custom: false } }),
+    )
+    mockPreview.mockReturnValue({ data: inferencePreview(), isLoading: false, isFetching: true, error: null })
+    renderPage()
+    const section = await screen.findByRole('region', { name: 'Default model' })
+    fireEvent.click(await within(section).findByRole('button', { name: 'Send test prompt…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Send a test prompt?' })
+    expect(button(dialog, 'Send test prompt').disabled).toBe(true)
+    expect(within(dialog).getByText('Rechecking budget and policy…')).toBeTruthy()
+  })
+
+  it('no longer exports a hard-coded inference prompt (L6)', () => {
+    expect('INFERENCE_TEST_PROMPT' in AiSettingsModule).toBe(false)
   })
 
   it('maps a failed inference test to a category message', async () => {

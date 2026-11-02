@@ -1,5 +1,9 @@
 // Shared contract: docs/superpowers/specs/2026-11-01-ai-provider-settings.md
 // No type here ever carries an API key: keys are write-only.
+// Response shapes mirror the backend Pydantic schemas (src/cti/schemas/ai.py,
+// src/cti/schemas/ai_outbound.py) field for field, including nullability.
+
+import type { Tlp } from './tlp'
 
 export type AiProvider = 'anthropic' | 'openai' | 'openrouter' | 'xai'
 
@@ -122,8 +126,13 @@ export interface UsageTotals {
   reserved: number
   input_tokens: number
   output_tokens: number
+  /** Requests (other than non-billable ones) missing input or output token counts. */
   token_unknown_requests: number
-  estimated_cost_usd: string | null
+  /**
+   * Sum of KNOWN costs only, 6-dp string; "0.000000" when nothing is known.
+   * Never null: always read it together with `cost_unknown_requests`.
+   */
+  estimated_cost_usd: string
   cost_unknown_requests: number
   committed_usd: string
 }
@@ -141,23 +150,40 @@ export interface AiUsageBudget {
   remaining_usd: string | null
 }
 
+/** Backend `AiUsageByProviderModel`; `provider` is a plain `str` there. */
+export interface AiUsageByProviderModel extends UsageTotals {
+  provider: string
+  model: string
+}
+
+/** Backend `AiUsageByDay`; `date` is an ISO `YYYY-MM-DD` string. */
+export interface AiUsageByDay extends UsageTotals {
+  date: string
+}
+
 export interface AiUsageResponse {
   period: AiUsagePeriod
-  actions_in_scope: AiAction[]
+  /** Backend `list[str]`; today only "inference_test". */
+  actions_in_scope: string[]
   guarantee: 'local_estimate_only'
   totals: UsageTotals
   budget: AiUsageBudget
-  by_provider_model: ({ provider: AiProvider; model: string } & UsageTotals)[]
-  by_day: ({ date: string } & UsageTotals)[]
+  by_provider_model: AiUsageByProviderModel[]
+  by_day: AiUsageByDay[]
 }
 
+/** Mirrors backend `AiUsageRecordItem` (schemas/ai.py). */
 export interface AiUsageRecord {
   id: string
-  actor_label: string
-  action: AiAction
-  provider: AiProvider
+  /** Null when the acting user has no label. */
+  actor_label: string | null
+  /** Backend `str`. */
+  action: string
+  /** Backend `str`. */
+  provider: string
   model: string
   status: AiUsageRecordStatus
+  stale: boolean
   billable: AiUsageBillable
   started_at: string
   completed_at: string | null
@@ -165,10 +191,14 @@ export interface AiUsageRecord {
   input_tokens: number | null
   output_tokens: number | null
   usage_source: AiUsageSource
+  /** Amount held against the budget while the request is in flight. */
+  reserved_usd: string | null
   cost_usd: string | null
   cost_source: AiCostSource
-  error_category: AiErrorCategory | null
-  stale: boolean
+  /** Backend `str`; normally an `AiErrorCategory`. */
+  error_category: string | null
+  /** Record this one retried, if any. */
+  retry_of: string | null
 }
 
 export interface AiUsageRecordsResponse {
@@ -182,8 +212,9 @@ export interface AiUsagePolicy {
   max_concurrent_requests: number
   max_requests_per_minute: number
   unpriced_model_policy: AiUnpricedModelPolicy
-  updated_at: string
   guarantee: 'local_estimate_only'
+  /** Null before the policy is first saved. */
+  updated_at: string | null
 }
 
 export interface AiModelPricingRow {
@@ -191,7 +222,7 @@ export interface AiModelPricingRow {
   model: string
   input_usd_per_mtok: string
   output_usd_per_mtok: string
-  updated_at: string
+  updated_at: string | null
 }
 
 export interface AiPricingList {
@@ -210,7 +241,8 @@ export interface OutboundPreviewItem {
   type: OutboundRefType
   id: string
   label: string
-  tlp: string | null
+  /** Backend `Tlp | None`: lowercase markings. */
+  tlp: Tlp | null
   included: boolean
   excluded_reason: OutboundExcludedReason | null
   redactions: number

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import {
   deleteAiPricingRow,
   getAiInferenceTestPreview,
@@ -22,8 +22,26 @@ export function useAiUsage(month: string) {
   return useQuery({ queryKey: aiUsageKey(month), queryFn: () => getAiUsage(month) })
 }
 
+export const AI_USAGE_RECORDS_PAGE = 50
+
+/** Newest-first records for `month`, paged with the backend's `before` cursor. */
 export function useAiUsageRecords(month: string) {
-  return useQuery({ queryKey: aiUsageRecordsKey(month), queryFn: () => getAiUsageRecords(month) })
+  return useInfiniteQuery({
+    queryKey: aiUsageRecordsKey(month),
+    queryFn: ({ pageParam }) => getAiUsageRecords(month, AI_USAGE_RECORDS_PAGE, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next_before ?? undefined,
+  })
+}
+
+/**
+ * Anything that can change spend, budget, pricing or the policy decision makes
+ * the usage report, the records and every cached inference preview stale.
+ */
+export function invalidateAiSpendQueries(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ['ai-usage'] })
+  queryClient.invalidateQueries({ queryKey: ['ai-usage-records'] })
+  queryClient.invalidateQueries({ queryKey: ['ai-inference-preview'] })
 }
 
 export function useAiUsagePolicy() {
@@ -36,7 +54,7 @@ export function useSaveAiUsagePolicy() {
     mutationFn: (body: Omit<AiUsagePolicy, 'updated_at' | 'guarantee'>) => putAiUsagePolicy(body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: aiUsagePolicyKey })
-      queryClient.invalidateQueries({ queryKey: ['ai-usage'] })
+      invalidateAiSpendQueries(queryClient)
     },
   })
 }
@@ -59,7 +77,10 @@ export function useSaveAiPricingRow() {
       input_usd_per_mtok: string
       output_usd_per_mtok: string
     }) => putAiPricingRow(provider, model, { input_usd_per_mtok, output_usd_per_mtok }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: aiPricingKey }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: aiPricingKey })
+      queryClient.invalidateQueries({ queryKey: ['ai-inference-preview'] })
+    },
   })
 }
 
@@ -67,7 +88,10 @@ export function useDeleteAiPricingRow() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ provider, model }: { provider: AiProvider; model: string }) => deleteAiPricingRow(provider, model),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: aiPricingKey }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: aiPricingKey })
+      queryClient.invalidateQueries({ queryKey: ['ai-inference-preview'] })
+    },
   })
 }
 
@@ -77,5 +101,7 @@ export function useAiInferenceTestPreview(provider: AiProvider | null, model: st
     queryFn: () => getAiInferenceTestPreview(provider!, model),
     enabled: enabled && !!provider && model.trim() !== '',
     retry: false,
+    // The decision depends on live budget/policy state: always refetch on open.
+    staleTime: 0,
   })
 }
