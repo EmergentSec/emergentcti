@@ -9,9 +9,10 @@ without one.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from cti.models.ai import AiProvider
+if TYPE_CHECKING:
+    from cti.models.ai import AiProvider
 
 OutboundItemType = Literal["report", "observable"]
 
