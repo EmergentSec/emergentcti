@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
@@ -138,7 +139,40 @@ def test_sanitize_oversized_summary_keeps_only_field_names() -> None:
     huge_keys = audit.sanitize_summary({("k" * 200) + str(i): i for i in range(500)})
     # Every key above contains "k"... but not the denied "key" substring.
     assert huge_keys["truncated"] is True
+    assert huge_keys["field_count"] == 500
     assert len(json.dumps(huge_keys, ensure_ascii=False).encode()) <= audit.MAX_SUMMARY_BYTES
+
+
+def serialized_bytes(value: dict) -> int:
+    # The sanitizer's own serialization options.
+    return len(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
+    )
+
+
+def test_sanitize_fallback_bounded_for_multibyte_and_control_names() -> None:
+    emoji = audit.sanitize_summary({str(i) + "\U0001f600" * 64: "x" * 256 for i in range(50)})
+    assert emoji["truncated"] is True and emoji["field_count"] == 50
+    assert 0 < len(emoji["fields"]) < 50  # names were dropped to fit
+    assert emoji["fields"][0] == "0" + "\U0001f600" * 63
+    assert serialized_bytes(emoji) <= audit.MAX_SUMMARY_BYTES
+
+    controls = audit.sanitize_summary({f"{i}" + "\x01" * 300: "v" * 256 for i in range(60)})
+    assert controls["truncated"] is True and controls["field_count"] == 60
+    assert serialized_bytes(controls) <= audit.MAX_SUMMARY_BYTES
+
+
+def test_sanitize_result_never_exceeds_byte_bound() -> None:
+    rng = random.Random(16)
+    alphabet = ["a", "\x00", "\x1f", '"', "\\", "\u00e9", "\u4e2d", "\U0001f600", "\u2028"]
+    for _ in range(200):
+        summary = {
+            "".join(rng.choices(alphabet, k=rng.randint(1, 300))) + str(i): "".join(
+                rng.choices(alphabet, k=rng.randint(0, 300))
+            )
+            for i in range(rng.randint(1, 120))
+        }
+        assert serialized_bytes(audit.sanitize_summary(summary)) <= audit.MAX_SUMMARY_BYTES
 
 
 def test_sanitize_empty() -> None:
@@ -240,9 +274,10 @@ async def test_record_clips_identifiers_and_labels(db_session) -> None:
 
 @pytest.mark.usefixtures("separate_audit_sessions")
 async def test_record_independent_survives_caller_rollback(db_session) -> None:
+    # The request's transaction is open (it has work in progress) when the
+    # independent event is written on another connection...
+    assert await count(db_session, AuditEvent) == 0
     db_session.add(allowlist_entry())
-    await db_session.flush()
-    await db_session.rollback()  # the request transaction is doomed: roll back first
     event_id = await audit.record_independent(
         actor=ADMIN,
         action="allowlist.create",
@@ -251,11 +286,19 @@ async def test_record_independent_survives_caller_rollback(db_session) -> None:
         summary={"reason": "duplicate", "status": 409},
         strict=True,
     )
-    [stored] = await events(db_session)
-    assert stored.id == event_id
-    assert stored.outcome == "failed"
-    assert stored.summary == {"reason": "duplicate", "status": 409}
-    assert await count(db_session, AllowlistEntry) == 0
+    # ...then the request writes and is rolled back afterwards. (SQLite allows
+    # one writer, so the request's INSERT can only start after that commit;
+    # concurrent write transactions need PostgreSQL to exercise.)
+    await db_session.flush()
+    await db_session.rollback()
+
+    # A third session sees the event, and not the rolled-back mutation.
+    async with TestSessionFactory() as third:
+        [stored] = await events(third)
+        assert stored.id == event_id
+        assert stored.outcome == "failed"
+        assert stored.summary == {"reason": "duplicate", "status": 409}
+        assert await count(third, AllowlistEntry) == 0
 
 
 @pytest.mark.usefixtures("separate_audit_sessions")
