@@ -19,6 +19,7 @@ from cti.models.ai import AiProvider
 from cti.models.api_key import ApiKey
 from cti.models.observable import Observable
 from cti.models.report import Report
+from cti.schemas.ai import AiErrorCategory
 from cti.schemas.ai_outbound import OutboundPreview, OutboundPreviewItem
 from cti.services.ai.outbound_types import ApprovedOutbound, OutboundRef
 from cti.services.tlp import (
@@ -40,8 +41,8 @@ if TYPE_CHECKING:
 
     from cti.core.dependencies import AuthSubject
 
-SHARING_FORBIDDEN = "sharing_forbidden"
-SHARING_NOT_APPROVED = "sharing_not_approved"
+SHARING_FORBIDDEN = AiErrorCategory.SHARING_FORBIDDEN.value
+SHARING_NOT_APPROVED = AiErrorCategory.SHARING_NOT_APPROVED.value
 
 REPORT_SUMMARY_MAX_CHARS = 4_000
 PREVIEW_TTL = timedelta(minutes=10)
