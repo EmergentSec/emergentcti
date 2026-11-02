@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import uuid
 
+import pytest
 from sqlalchemy import select
 
 from cti.models.audit import AuditEvent
-from tests.policy_helpers import add_observable
+from tests.policy_helpers import add_feed, add_observable
 
 
 async def _events(db, action: str) -> list[AuditEvent]:
@@ -25,6 +26,9 @@ async def test_tag_create_delete_audits_success_and_failure(client, db_session) 
     created = await client.post("/api/v1/tags", json={"name": "Threat Intel"})
     assert created.status_code == 201
     tag_id = created.json()["id"]
+    existing = await client.post("/api/v1/tags", json={"name": "THREAT INTEL"})
+    assert existing.status_code == 200
+    assert existing.json()["id"] == tag_id
     assert (await client.post("/api/v1/tags", json={"name": "bad tag?"})).status_code == 422
     assert (await client.delete(f"/api/v1/tags/{tag_id}")).status_code == 204
     assert (await client.delete(f"/api/v1/tags/{tag_id}")).status_code == 404
@@ -40,6 +44,21 @@ async def test_tag_create_delete_audits_success_and_failure(client, db_session) 
     assert create_failed.summary == {"reason": "invalid_name", "status": 422}
     assert (delete_ok.resource_id, delete_ok.resource_label) == (tag_id, "threat-intel")
     assert delete_failed.summary == {"reason": "not_found", "status": 404}
+
+
+async def test_tag_delete_in_use_records_failed(client, db_session) -> None:
+    created = await client.post("/api/v1/tags", json={"name": "profile-filter"})
+    tag_id = created.json()["id"]
+    profile = await client.post(
+        "/api/v1/export/profiles",
+        json={"name": "Tagged audit profile", "format": "text", "tags": ["profile-filter"]},
+    )
+    assert profile.status_code == 201
+    response = await client.delete(f"/api/v1/tags/{tag_id}")
+    assert response.status_code == 409
+    events = await _events(db_session, "tag.delete")
+    assert all(event.outcome != "succeeded" for event in events)
+    assert [event.summary for event in events] == [{"reason": "in_use", "status": 409}]
 
 
 async def test_observable_tlp_set_clear_audits_markings_and_reason_metadata(
@@ -122,3 +141,73 @@ async def test_observable_tags_update_audits_added_removed_and_failure(client, d
     assert second_event.summary == {"added": ["gamma"], "removed": ["alpha"]}
     assert failed_event.outcome == "failed"
     assert failed_event.summary == {"reason": "invalid_tags", "status": 422}
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix", "body", "action"),
+    [
+        (
+            "put",
+            "/tlp-override",
+            {"tlp": "green", "reason": "attempted declassification"},
+            "observable.tlp_override_set",
+        ),
+        ("delete", "/tlp-override", None, "observable.tlp_override_clear"),
+        ("put", "/tags", {"tags": ["blocked"]}, "observable.tags_update"),
+    ],
+)
+async def test_api_key_red_observable_mutations_record_denied(
+    client,
+    db_session,
+    method: str,
+    suffix: str,
+    body: dict | None,
+    action: str,
+) -> None:
+    feed = await add_feed(db_session, f"RED audit {action}", tlp="red")
+    obs = await add_observable(db_session, "198.51.100.240", feed=feed)
+    kwargs = {"json": body} if body is not None else {}
+    response = await client.request(
+        method.upper(), f"/api/v1/observables/{obs.id}{suffix}", **kwargs
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Observable not found"}
+    events = await _events(db_session, action)
+    assert all(event.outcome != "succeeded" for event in events)
+    [event] = events
+    assert event.outcome == "denied"
+    assert event.summary == {"reason": "red_restricted", "status": 404}
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix", "body", "action"),
+    [
+        (
+            "put",
+            "/tlp-override",
+            {"tlp": "green", "reason": "missing"},
+            "observable.tlp_override_set",
+        ),
+        ("delete", "/tlp-override", None, "observable.tlp_override_clear"),
+        ("put", "/tags", {"tags": ["missing"]}, "observable.tags_update"),
+    ],
+)
+async def test_missing_observable_mutations_remain_failed_not_found(
+    client,
+    db_session,
+    method: str,
+    suffix: str,
+    body: dict | None,
+    action: str,
+) -> None:
+    missing = uuid.uuid4()
+    kwargs = {"json": body} if body is not None else {}
+    response = await client.request(
+        method.upper(), f"/api/v1/observables/{missing}{suffix}", **kwargs
+    )
+    assert response.status_code == 404
+    events = await _events(db_session, action)
+    assert all(event.outcome != "succeeded" for event in events)
+    [event] = events
+    assert event.outcome == "failed"
+    assert event.summary == {"reason": "not_found", "status": 404}
