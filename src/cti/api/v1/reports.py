@@ -69,7 +69,7 @@ async def _record_failure(
     ``label`` is only passed once the report is known to be visible to the
     caller, so a RED report hidden from an API key leaves no title behind.
     """
-    await db.rollback()
+    await audit.rollback_for_independent_audit(db, actor=actor)
     await audit.record_independent(
         actor=actor,
         action=action,
