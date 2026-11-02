@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import raiseload, selectinload
 
 from cti.core.config import get_settings
 from cti.models.ai import AiProvider
@@ -219,12 +219,12 @@ async def _load_visible_items(
         if (parsed := _parse_ref_id(ref)) is not None
     }
 
-    report_query = (
-        select(Report).options(selectinload(Report.tags)).where(Report.id.in_(report_ids))
-    )
+    # Keep ORM relationships from silently widening the data fetched for a preview.
+    # Reports need scalar allowlist fields only; observables additionally need tag names.
+    report_query = select(Report).options(raiseload("*")).where(Report.id.in_(report_ids))
     observable_query = (
         select(Observable)
-        .options(selectinload(Observable.tags))
+        .options(raiseload("*"), selectinload(Observable.tags))
         .where(Observable.id.in_(observable_ids))
     )
     if hide_red_for(auth):
