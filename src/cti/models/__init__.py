@@ -1,4 +1,5 @@
 from cti.models.ai import AiProvider, AiProviderConfig, AiSettingsRecord
+from cti.models.ai_usage import AiAction, AiModelPricing, AiUsagePolicy, AiUsageRecord
 from cti.models.allowlist import AllowlistEntry, AllowlistKind
 from cti.models.api_key import ApiKey
 from cti.models.audit import ActorType, AuditEvent, AuditOutcome
@@ -21,9 +22,13 @@ from cti.models.user import User, UserRole
 
 __all__ = [
     "ActorType",
+    "AiAction",
+    "AiModelPricing",
     "AiProvider",
     "AiProviderConfig",
     "AiSettingsRecord",
+    "AiUsagePolicy",
+    "AiUsageRecord",
     "AllowlistEntry",
     "AllowlistKind",
     "ApiKey",

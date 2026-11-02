@@ -73,6 +73,7 @@ def audit_independent_sessions(
     ``sync_feed_jobs`` mock) and breaks their LIFO restore order.
     """
     from cti.services import audit
+    from cti.services.ai import gateway
 
     @asynccontextmanager
     async def shared_connection_session() -> AsyncGenerator[AsyncSession, None]:
@@ -85,9 +86,13 @@ def audit_independent_sessions(
             yield session
 
     previous = audit._session_factory
+    previous_gateway = gateway._session_factory
     audit._session_factory = shared_connection_session
+    # The AI gateway's admission/reconcile transactions (#17) share it too.
+    gateway._session_factory = shared_connection_session
     yield
     audit._session_factory = previous
+    gateway._session_factory = previous_gateway
 
 
 @pytest.fixture
@@ -96,6 +101,27 @@ def separate_audit_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
     from cti.services import audit
 
     monkeypatch.setattr(audit, "_session_factory", TestSessionFactory)
+
+
+@pytest.fixture
+async def priced_gpt_test(db_session: AsyncSession) -> None:
+    """Price ``openai``/``gpt-test`` so an inference test is admitted (#17).
+
+    The default usage policy blocks unpriced models, and no prices ship.
+    """
+    from decimal import Decimal
+
+    from cti.models.ai_usage import AiModelPricing
+
+    db_session.add(
+        AiModelPricing(
+            provider="openai",
+            model="gpt-test",
+            input_usd_per_mtok=Decimal("1.000000"),
+            output_usd_per_mtok=Decimal("2.000000"),
+        )
+    )
+    await db_session.commit()
 
 
 @pytest.fixture

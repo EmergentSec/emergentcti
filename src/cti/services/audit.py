@@ -183,6 +183,9 @@ ACTION_CATALOG: Mapping[str, str] = MappingProxyType(
         "ai_default.set": "ai_default",
         "ai_default.clear": "ai_default",
         "ai.request": "ai_provider",
+        "ai_usage_policy.update": "ai_usage_policy",
+        "ai_pricing.update": "ai_pricing",
+        "ai_pricing.delete": "ai_pricing",
         "retention.observables_cleanup": "retention",
         "audit.retention_cleanup": "audit",
     }
