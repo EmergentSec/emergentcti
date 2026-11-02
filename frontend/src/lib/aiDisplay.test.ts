@@ -70,9 +70,12 @@ describe('absDecimal (L1)', () => {
 })
 
 describe('isValidUsageMonth (M2)', () => {
-  it('accepts only YYYY-MM from 2000 on', () => {
+  it('accepts only YYYY-MM from 2000-01 to 9999-11, like the backend', () => {
     expect(isValidUsageMonth('2026-11')).toBe(true)
     expect(isValidUsageMonth('2000-01')).toBe(true)
+    expect(isValidUsageMonth('9999-11')).toBe(true)
+    // The backend rejects 9999-12: its exclusive end would be year 10000.
+    expect(isValidUsageMonth('9999-12')).toBe(false)
     for (const bad of ['', '2026-13', '2026-00', '1999-12', '2026-1', 'nov 2026', '2026-11-01']) {
       expect(isValidUsageMonth(bad)).toBe(false)
     }

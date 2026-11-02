@@ -168,7 +168,13 @@ export interface AiUsageResponse {
   guarantee: 'local_estimate_only'
   totals: UsageTotals
   budget: AiUsageBudget
+  /** At most `by_provider_model_limit` rows, most requests first. */
   by_provider_model: AiUsageByProviderModel[]
+  by_provider_model_limit: number
+  /** Provider/model groups beyond the limit; never silently dropped. */
+  by_provider_model_omitted_groups: number
+  /** Exact aggregate of the omitted groups; `null` when none are omitted. */
+  by_provider_model_other: UsageTotals | null
   by_day: AiUsageByDay[]
 }
 

@@ -23,8 +23,10 @@ import {
   formatUtcMonthLabel,
   formatUtcTimestamp,
   isValidUsageMonth,
+  MAX_USAGE_MONTH,
+  MIN_USAGE_MONTH,
 } from '@/lib/aiDisplay'
-import type { AiUsageByDay, AiUsageByProviderModel, UsageTotals } from '@/types/ai'
+import type { AiUsageByDay, AiUsageResponse, UsageTotals } from '@/types/ai'
 
 function TotalsSummary({ totals }: { totals: UsageTotals }) {
   return (
@@ -137,8 +139,21 @@ function BreakdownTable({ label, keyHeader, rows }: { label: string; keyHeader: 
   )
 }
 
-const providerModelRows = (rows: AiUsageByProviderModel[]) =>
-  rows.map((r) => ({ key: `${r.provider} / ${r.model}`, totals: r }))
+/**
+ * Provider/model rows, then one "Other models (N more)" row for the groups the
+ * backend summed beyond its row limit, so no usage is ever silently left out.
+ */
+const providerModelRows = (report: AiUsageResponse) => {
+  const rows: { key: string; totals: UsageTotals }[] = report.by_provider_model.map((r) => ({
+    key: `${r.provider} / ${r.model}`,
+    totals: r,
+  }))
+  const other = report.by_provider_model_other
+  if (other && report.by_provider_model_omitted_groups > 0) {
+    rows.push({ key: `Other models (${report.by_provider_model_omitted_groups} more)`, totals: other })
+  }
+  return rows
+}
 const dayRows = (rows: AiUsageByDay[]) => rows.map((r) => ({ key: r.date, totals: r }))
 
 export function AiUsagePanel() {
@@ -147,7 +162,7 @@ export function AiUsagePanel() {
   const [monthInput, setMonthInput] = useState(month)
   const usage = useAiUsage(month)
   const records = useAiUsageRecords(month)
-  const monthError = isValidUsageMonth(monthInput) ? undefined : 'Enter a month as YYYY-MM (2000 or later).'
+  const monthError = isValidUsageMonth(monthInput) ? undefined : `Enter a month as YYYY-MM, from ${MIN_USAGE_MONTH} to ${MAX_USAGE_MONTH}.`
 
   const onMonthChange = (value: string) => {
     setMonthInput(value)
@@ -175,6 +190,8 @@ export function AiUsagePanel() {
             id="ai-usage-month"
             label="Month (UTC)"
             type="month"
+            min={MIN_USAGE_MONTH}
+            max={MAX_USAGE_MONTH}
             placeholder="YYYY-MM"
             value={monthInput}
             error={monthError}
@@ -237,7 +254,7 @@ export function AiUsagePanel() {
             <BreakdownTable
               label="By provider and model"
               keyHeader="Provider / model"
-              rows={providerModelRows(usage.data.by_provider_model)}
+              rows={providerModelRows(usage.data)}
             />
             <BreakdownTable label="By day" keyHeader="Day (UTC)" rows={dayRows(usage.data.by_day)} />
           </div>

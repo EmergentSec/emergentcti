@@ -149,6 +149,53 @@ describe('AiUsagePanel budget meter (M6, L1)', () => {
   })
 })
 
+describe('AiUsagePanel provider/model remainder (R4 M1)', () => {
+  it('renders the groups beyond the row limit as an "Other models" row with unknown counts', async () => {
+    const other = {
+      requests: 40,
+      input_tokens: 0,
+      output_tokens: 0,
+      token_unknown_requests: 40,
+      estimated_cost_usd: '0.000000',
+      cost_unknown_requests: 40,
+      committed_usd: '0.700000',
+    }
+    api.getAiUsage.mockResolvedValue(
+      usageReport({
+        totals: usageTotals({ requests: 41, cost_unknown_requests: 40, token_unknown_requests: 40 }),
+        by_provider_model: [byProviderModel('openai', 'gpt-z', { requests: 1, estimated_cost_usd: '0.000102' })],
+        by_provider_model_omitted_groups: 30,
+        by_provider_model_other: usageTotals(other),
+      }),
+    )
+    api.getAiUsageRecords.mockResolvedValue(NO_RECORDS)
+    renderPanel()
+    const section = await panel()
+
+    const byModel = await within(section).findByRole('table', { name: 'By provider and model' })
+    const row = within(byModel).getByText('Other models (30 more)').closest('tr')
+    expect(row).toBeTruthy()
+    const cells = within(row as HTMLElement)
+    expect(cells.getByText('40')).toBeTruthy()
+    // Unknown cost and tokens read as unknown, never as a bare zero.
+    expect(cells.getByText('Unknown (40 requests)')).toBeTruthy()
+    expect(cells.getByText(/Unknown \(40 requests\) \/ Unknown \(40 requests\)/)).toBeTruthy()
+    expect(row?.textContent).not.toMatch(/\$0\.000000 est\./)
+    expect(cells.getByText('$0.700000 est.')).toBeTruthy()
+  })
+
+  it('shows no "Other models" row when nothing was omitted', async () => {
+    api.getAiUsage.mockResolvedValue(
+      usageReport({ by_provider_model: [byProviderModel('openai', 'gpt-z')] }),
+    )
+    api.getAiUsageRecords.mockResolvedValue(NO_RECORDS)
+    renderPanel()
+    const section = await panel()
+    await within(section).findByRole('table', { name: 'By provider and model' })
+    expect(within(section).queryByText(/Other models/)).toBeNull()
+  })
+})
+
 describe('AiUsagePanel month picker and period copy (M2, L5)', () => {
   it('ignores a cleared or malformed month: no empty month is ever requested', async () => {
     api.getAiUsage.mockResolvedValue(usageReport())
@@ -177,6 +224,23 @@ describe('AiUsagePanel month picker and period copy (M2, L5)', () => {
     fireEvent.change(within(section).getByLabelText('Month (UTC)'), { target: { value: '2026-10' } })
     await waitFor(() => expect(api.getAiUsage).toHaveBeenCalledWith('2026-10'))
     expect(api.getAiUsageRecords).toHaveBeenCalledWith('2026-10', 50, undefined)
+  })
+
+  it('accepts 9999-11 but rejects 9999-12, which the backend cannot serve', async () => {
+    api.getAiUsage.mockResolvedValue(usageReport())
+    api.getAiUsageRecords.mockResolvedValue(NO_RECORDS)
+    renderPanel()
+    const section = await panel()
+    const input = within(section).getByLabelText('Month (UTC)')
+
+    fireEvent.change(input, { target: { value: '9999-12' } })
+    expect(await within(section).findByText('Enter a month as YYYY-MM, from 2000-01 to 9999-11.')).toBeTruthy()
+    expect(api.getAiUsage).not.toHaveBeenCalledWith('9999-12')
+    expect(api.getAiUsageRecords).not.toHaveBeenCalledWith('9999-12', 50, undefined)
+
+    fireEvent.change(input, { target: { value: '9999-11' } })
+    await waitFor(() => expect(api.getAiUsage).toHaveBeenCalledWith('9999-11'))
+    expect(input.getAttribute('aria-invalid')).not.toBe('true')
   })
 
   it('builds the period line from the response, including actions in scope', async () => {

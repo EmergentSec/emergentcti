@@ -81,10 +81,14 @@ export function absDecimal(value: string): string {
 
 const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/
 
-/** True for a `YYYY-MM` the backend's `parse_month` accepts (year 2000 or later). */
+/** First and last month the backend's `parse_month` accepts (its exclusive end must fit in year 9999). */
+export const MIN_USAGE_MONTH = '2000-01'
+export const MAX_USAGE_MONTH = '9999-11'
+
+/** True for a `YYYY-MM` the backend's `parse_month` accepts: 2000-01 through 9999-11. */
 export function isValidUsageMonth(value: string): boolean {
-  const m = MONTH_RE.exec(value)
-  return !!m && Number(m[1]) >= 2000
+  // Fixed-width `YYYY-MM` strings order like the months they name.
+  return MONTH_RE.test(value) && value >= MIN_USAGE_MONTH && value <= MAX_USAGE_MONTH
 }
 
 /** `2026-11-02 14:05 UTC` from an ISO timestamp; the raw value if it can't be parsed. */
