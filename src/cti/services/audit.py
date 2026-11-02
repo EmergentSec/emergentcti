@@ -352,15 +352,28 @@ def sanitize_summary(summary: Mapping[str, Any] | None) -> dict[str, Any]:
     * UUIDs, dates and enums become strings; non-finite floats become null;
       any other object becomes ``"<TypeName>"`` (never its ``str()``).
     * If the result serializes to more than 4 KB it is replaced by
-      ``{"truncated": true, "fields": [<top-level key names>]}``.
+      ``{"truncated": true, "field_count": n, "fields": [<top-level key names>]}``,
+      where ``fields`` holds as many leading names (each clipped to 64
+      characters, at most 50) as fit, so the fallback is itself within 4 KB.
     """
     if not summary:
         return {}
     cleaned = _clean_mapping(summary, 1)
     if _serialized_size(cleaned) <= MAX_SUMMARY_BYTES:
         return cleaned
-    names = [name[:_MAX_FALLBACK_FIELD_NAME] for name in cleaned]
-    return {"truncated": True, "fields": _clip_list(names, 2)}
+    return _oversized_fallback(list(cleaned))
+
+
+def _oversized_fallback(names: list[str]) -> dict[str, Any]:
+    """Field names only, built under the same serialized byte budget."""
+    fields: list[str] = []
+    fallback: dict[str, Any] = {"truncated": True, "field_count": len(names), "fields": fields}
+    for name in names[:MAX_SUMMARY_LIST]:
+        fields.append(name[:_MAX_FALLBACK_FIELD_NAME])
+        if _serialized_size(fallback) > MAX_SUMMARY_BYTES:
+            fields.pop()
+            break
+    return fallback
 
 
 # ── Writing events ─────────────────────────────────────────────────────────
