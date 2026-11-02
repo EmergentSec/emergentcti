@@ -7,9 +7,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import set_committed_value
 
 from cti.api.v1.filters import parse_tag_names, parse_tlp_tokens
 from cti.api.v1.reports import report_to_summary
@@ -48,27 +46,6 @@ router = APIRouter()
 _RESTRICTED_REPORT = "Restricted report"
 
 
-async def _rollback_for_audit(db: AsyncSession) -> None:
-    """Roll back before an independent write, preserving clean loaded identities."""
-    loaded = [
-        (
-            obj,
-            {
-                attr.key: state.dict[attr.key]
-                for attr in state.mapper.column_attrs
-                if attr.key in state.dict
-            },
-        )
-        for obj in list(db.sync_session.identity_map.values())
-        if not (state := inspect(obj)).modified
-    ]
-    await db.rollback()
-    for obj, values in loaded:
-        if inspect(obj).persistent:
-            for key, value in values.items():
-                set_committed_value(obj, key, value)
-
-
 async def _record_observable_failure(
     db: AsyncSession,
     *,
@@ -78,15 +55,16 @@ async def _record_observable_failure(
     status: int,
     reason: str,
     resource_label: object = None,
+    outcome: audit.AuditOutcome = audit.AuditOutcome.FAILED,
 ) -> None:
-    await _rollback_for_audit(db)
+    await audit.rollback_for_independent_audit(db, actor=actor)
     await audit.record_independent(
         actor=actor,
         action=action,
         resource_type="observable",
         resource_id=resource_id,
         resource_label=resource_label,
-        outcome=audit.AuditOutcome.FAILED,
+        outcome=outcome,
         summary={"reason": reason, "status": status},
         strict=False,
     )
@@ -353,6 +331,17 @@ async def set_tlp_override(
 ) -> ObservableResponse | Response:
     """Reclassify an observable (may loosen or tighten). Reason required."""
     actor = audit.actor_from_auth(auth)
+    if hide_red_for(auth) and await is_red_observable(db, observable_id):
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tlp_override_set",
+            resource_id=observable_id,
+            status=404,
+            reason="red_restricted",
+            outcome=audit.AuditOutcome.DENIED,
+        )
+        raise HTTPException(status_code=404, detail="Observable not found")
     try:
         await ensure_observable_visible(db, auth, observable_id)
     except HTTPException as exc:
@@ -424,6 +413,17 @@ async def clear_tlp_override(
     ),
 ) -> ObservableResponse | Response:
     actor = audit.actor_from_auth(auth)
+    if hide_red_for(auth) and await is_red_observable(db, observable_id):
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tlp_override_clear",
+            resource_id=observable_id,
+            status=404,
+            reason="red_restricted",
+            outcome=audit.AuditOutcome.DENIED,
+        )
+        raise HTTPException(status_code=404, detail="Observable not found")
     try:
         await ensure_observable_visible(db, auth, observable_id)
     except HTTPException as exc:
@@ -486,6 +486,17 @@ async def set_observable_tags(
 ) -> ObservableResponse | Response:
     """Replace the observable's tag set (names are normalized; new ones created)."""
     actor = audit.actor_from_auth(auth)
+    if hide_red_for(auth) and await is_red_observable(db, observable_id):
+        await _record_observable_failure(
+            db,
+            actor=actor,
+            action="observable.tags_update",
+            resource_id=observable_id,
+            status=404,
+            reason="red_restricted",
+            outcome=audit.AuditOutcome.DENIED,
+        )
+        raise HTTPException(status_code=404, detail="Observable not found")
     try:
         await ensure_observable_visible(db, auth, observable_id)
     except HTTPException as exc:

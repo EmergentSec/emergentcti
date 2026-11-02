@@ -16,9 +16,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse
-from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import set_committed_value
 
 from cti.api.v1.filters import parse_tag_names
 from cti.core.database import get_db
@@ -52,27 +50,6 @@ _AD_HOC_DESTINATION = "internal"
 _TAG_QUERY = Query(default=None, description="Match ANY listed tag (repeatable)")
 
 
-async def _rollback_for_audit(db: AsyncSession) -> None:
-    """Roll back before an independent write, preserving clean loaded identities."""
-    loaded = [
-        (
-            obj,
-            {
-                attr.key: state.dict[attr.key]
-                for attr in state.mapper.column_attrs
-                if attr.key in state.dict
-            },
-        )
-        for obj in list(db.sync_session.identity_map.values())
-        if not (state := inspect(obj)).modified
-    ]
-    await db.rollback()
-    for obj, values in loaded:
-        if inspect(obj).persistent:
-            for key, value in values.items():
-                set_committed_value(obj, key, value)
-
-
 async def _record_profile_failure(
     db: AsyncSession,
     *,
@@ -83,7 +60,7 @@ async def _record_profile_failure(
     resource_id: object = None,
     resource_label: object = None,
 ) -> None:
-    await _rollback_for_audit(db)
+    await audit.rollback_for_independent_audit(db, actor=actor)
     await audit.record_independent(
         actor=actor,
         action=action,
@@ -104,7 +81,7 @@ async def _record_download_failure(
     status: int,
     reason: str,
 ) -> None:
-    await _rollback_for_audit(db)
+    await audit.rollback_for_independent_audit(db, actor=actor)
     await audit.record_independent(
         actor=actor,
         action="export.download",

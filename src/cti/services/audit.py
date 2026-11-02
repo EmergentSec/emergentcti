@@ -102,11 +102,13 @@ from typing import TYPE_CHECKING, Any
 import anyio
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import delete, func, inspect, select
+from sqlalchemy.orm.attributes import set_committed_value
 from starlette.responses import Response
 
 from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
 from cti.models.api_key import ApiKey
 from cti.models.audit import ActorType, AuditEvent, AuditOutcome
+from cti.models.user import User
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -131,6 +133,7 @@ __all__ = [
     "purge_expired_events",
     "record",
     "record_independent",
+    "rollback_for_independent_audit",
     "sanitize_summary",
     "system_actor",
 ]
@@ -377,6 +380,61 @@ def _oversized_fallback(names: list[str]) -> dict[str, Any]:
 
 
 # ── Writing events ─────────────────────────────────────────────────────────
+
+
+async def rollback_for_independent_audit(db: AsyncSession, *, actor: Actor) -> None:
+    """Roll back while keeping identities and the actor snapshot readable.
+
+    SQLAlchemy expires persistent instances on rollback. Some callers retain
+    those instances long enough to inspect their identity after the failed
+    request, and dependency overrides may return the same auth instance on the
+    next request. Restore mapped primary keys plus only the actor fields needed
+    for attribution and authorization. All other columns remain expired so
+    rolled-back mutable state can never be mistaken for committed state.
+
+    This is safe only on a terminal failure path, immediately before an
+    independent audit write and raising the response exception. The caller
+    must not resume application work with the request session afterward, and
+    the audited route must not mutate its authenticated principal.
+    """
+    loaded_identities: list[tuple[object, tuple[tuple[str, object], ...]]] = []
+    actor_state: tuple[object, tuple[tuple[str, object], ...]] | None = None
+    for obj in list(db.sync_session.identity_map.values()):
+        state = inspect(obj)
+        if state.identity is None:
+            continue
+        loaded_identities.append(
+            (
+                obj,
+                tuple(
+                    (column.key, value)
+                    for column, value in zip(
+                        state.mapper.primary_key, state.identity, strict=True
+                    )
+                ),
+            )
+        )
+        actor_fields: tuple[str, ...] = ()
+        if actor.type is ActorType.USER and isinstance(obj, User):
+            actor_fields = ("username", "role", "is_active")
+        elif actor.type is ActorType.API_KEY and isinstance(obj, ApiKey):
+            actor_fields = ("name", "is_active")
+        if str(state.identity[0]) == actor.id and actor_fields:
+            actor_state = (
+                obj,
+                tuple((name, state.dict[name]) for name in actor_fields if name in state.dict),
+            )
+
+    await db.rollback()
+    for obj, identity in loaded_identities:
+        if inspect(obj).persistent:
+            for key, value in identity:
+                set_committed_value(obj, key, value)
+    if actor_state is not None:
+        obj, values = actor_state
+        if inspect(obj).persistent:
+            for key, value in values:
+                set_committed_value(obj, key, value)
 
 
 def _clip(value: object, limit: int) -> str | None:

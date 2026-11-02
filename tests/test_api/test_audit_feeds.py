@@ -11,8 +11,9 @@ from unittest.mock import AsyncMock
 from sqlalchemy import select
 
 from cti.models.audit import AuditEvent
+from cti.models.feed import Feed, FeedType
 from cti.models.user import UserRole
-from tests.policy_helpers import non_admin_client
+from tests.policy_helpers import add_feed, non_admin_client
 
 if TYPE_CHECKING:
     import pytest
@@ -114,6 +115,73 @@ async def test_feed_update_tlp_summary_uses_before_after_not_reason(
     assert (event.actor_type, event.actor_label, event.outcome) == ("user", "bob", "succeeded")
     assert event.summary == {"changed_fields": ["tlp"], "before": "red", "after": "green"}
     assert reason not in json.dumps(event.summary)
+
+
+async def test_api_key_red_feed_declassify_records_denied(client, db_session) -> None:
+    feed = await add_feed(db_session, "RED declassify audit", tlp="red")
+    response = await client.put(
+        f"/api/v1/feeds/{feed.id}",
+        json={"tlp": "green", "tlp_change_reason": "approved declassification"},
+    )
+    assert response.status_code == 403
+    events = await _events(db_session, "feed.update")
+    assert all(event.outcome != "succeeded" for event in events)
+    [event] = events
+    assert event.outcome == "denied"
+    assert event.summary == {"reason": "interactive_admin_required", "status": 403}
+
+
+async def test_api_key_red_feed_delete_records_denied(client, db_session) -> None:
+    feed = await add_feed(db_session, "RED delete audit", tlp="red")
+    response = await client.delete(f"/api/v1/feeds/{feed.id}")
+    assert response.status_code == 403
+    events = await _events(db_session, "feed.delete")
+    assert all(event.outcome != "succeeded" for event in events)
+    [event] = events
+    assert event.outcome == "denied"
+    assert event.summary == {"reason": "interactive_admin_required", "status": 403}
+
+
+async def test_feed_update_without_tlp_reason_records_failed(client, db_session) -> None:
+    feed = await add_feed(db_session, "TLP reason audit", tlp="amber")
+    response = await client.put(f"/api/v1/feeds/{feed.id}", json={"tlp": "green"})
+    assert response.status_code == 422
+    events = await _events(db_session, "feed.update")
+    assert all(event.outcome != "succeeded" for event in events)
+    assert [event.summary for event in events] == [
+        {"reason": "tlp_reason_required", "status": 422}
+    ]
+
+
+async def test_feed_delete_in_use_records_failed(client, db_session) -> None:
+    feed = await add_feed(db_session, "Referenced feed audit")
+    created = await client.post(
+        "/api/v1/export/profiles",
+        json={"name": "Feed reference", "format": "text", "feed_id": str(feed.id)},
+    )
+    assert created.status_code == 201
+    response = await client.delete(f"/api/v1/feeds/{feed.id}")
+    assert response.status_code == 409
+    events = await _events(db_session, "feed.delete")
+    assert all(event.outcome != "succeeded" for event in events)
+    assert [event.summary for event in events] == [{"reason": "in_use", "status": 409}]
+
+
+async def test_preconfigured_feed_delete_records_failed(client, db_session) -> None:
+    feed = Feed(
+        name="Preconfigured audit",
+        feed_type=FeedType.FILE,
+        is_preconfigured=True,
+    )
+    db_session.add(feed)
+    await db_session.commit()
+    response = await client.delete(f"/api/v1/feeds/{feed.id}")
+    assert response.status_code == 400
+    events = await _events(db_session, "feed.delete")
+    assert all(event.outcome != "succeeded" for event in events)
+    assert [event.summary for event in events] == [
+        {"reason": "preconfigured", "status": 400}
+    ]
 
 
 async def test_feed_trigger_audits_success_and_disabled_failure(

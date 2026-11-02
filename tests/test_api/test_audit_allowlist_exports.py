@@ -78,6 +78,25 @@ async def test_allowlist_create_delete_audits_success_failure_and_api_key_attrib
     assert key.key_hash not in dumped
 
 
+async def test_allowlist_invalid_entry_omits_untrusted_resource_label(
+    client: AsyncClient, db_session
+) -> None:
+    response = await client.post(
+        "/api/v1/allowlist",
+        json={
+            "kind": "exact",
+            "value": "arbitrary invalid input",
+            "observable_type": "ip-addr",
+            "reason": "validation test",
+        },
+    )
+    assert response.status_code == 422
+    [event] = await _events(db_session, "allowlist.create")
+    assert event.outcome != "succeeded"
+    assert event.resource_label is None
+    assert event.summary == {"reason": "invalid_entry", "status": 422}
+
+
 async def test_export_profile_create_update_delete_audits_success_and_failure(
     client: AsyncClient, db_session
 ) -> None:
@@ -117,6 +136,40 @@ async def test_export_profile_create_update_delete_audits_success_and_failure(
         "failed",
         "not_found",
     )
+
+
+async def test_export_profile_feed_not_found_records_failed(
+    client: AsyncClient, db_session
+) -> None:
+    response = await client.post(
+        "/api/v1/export/profiles",
+        json={
+            "name": "Missing feed",
+            "format": "text",
+            "feed_id": str(uuid.uuid4()),
+        },
+    )
+    assert response.status_code == 422
+    events = await _events(db_session, "export_profile.create")
+    assert all(event.outcome != "succeeded" for event in events)
+    assert [event.summary for event in events] == [
+        {"reason": "feed_not_found", "status": 422}
+    ]
+
+
+async def test_export_profile_invalid_tags_records_failed(
+    client: AsyncClient, db_session
+) -> None:
+    response = await client.post(
+        "/api/v1/export/profiles",
+        json={"name": "Invalid tags", "format": "text", "tags": ["bad tag?"]},
+    )
+    assert response.status_code == 422
+    events = await _events(db_session, "export_profile.create")
+    assert all(event.outcome != "succeeded" for event in events)
+    assert [event.summary for event in events] == [
+        {"reason": "invalid_tags", "status": 422}
+    ]
 
 
 @pytest.mark.parametrize(
@@ -186,6 +239,36 @@ async def test_profile_download_and_cache_hit_are_audited(
     ]
 
 
+async def test_json_profile_download_records_initiated_and_completed(
+    client: AsyncClient, db_session
+) -> None:
+    marker = "203.0.113.181"
+    await add_observable(db_session, marker)
+    profile = (
+        await client.post(
+            "/api/v1/export/profiles",
+            json={"name": "JSON profile", "format": "json", "confidence_min": 0},
+        )
+    ).json()
+
+    response = await client.get(f"/api/v1/export/profiles/{profile['id']}/download")
+
+    assert response.status_code == 200
+    assert [item["value"] for item in response.json()["observables"]] == [marker]
+    initiated, completed = await _events(db_session, "export.download")
+    assert (initiated.resource_id, initiated.resource_label, initiated.outcome) == (
+        profile["id"],
+        "JSON profile",
+        "initiated",
+    )
+    assert initiated.summary == {"format": "json", "count": 1, "tlp_excluded": 0}
+    assert completed.outcome == "completed"
+    assert completed.summary == {
+        "initiated_event_id": str(initiated.id),
+        "bytes_sent": len(response.content),
+    }
+
+
 async def test_profile_download_not_found_records_failed(client: AsyncClient, db_session) -> None:
     missing = uuid.uuid4()
     response = await client.get(f"/api/v1/export/profiles/{missing}/download")
@@ -198,10 +281,49 @@ async def test_profile_download_not_found_records_failed(client: AsyncClient, db
     )
 
 
+@pytest.mark.parametrize(
+    "download_case",
+    [
+        "json",
+        "text",
+        "blocklist_miss",
+        "blocklist_hit",
+        "profile_text",
+        "profile_json",
+    ],
+)
 async def test_download_audit_write_failure_returns_503_without_export_content(
-    client: AsyncClient, db_session, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient,
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+    download_case: str,
 ) -> None:
-    await add_observable(db_session, "203.0.113.199")
+    from cti.api.v1 import export as export_api
+
+    marker = "203.0.113.199"
+    await add_observable(db_session, marker)
+    if download_case == "json":
+        url = "/api/v1/export/json"
+    elif download_case == "text":
+        url = "/api/v1/export/text"
+    elif download_case.startswith("blocklist_"):
+        url = "/api/v1/export/blocklist/ip-addr"
+        cached = marker if download_case == "blocklist_hit" else None
+        monkeypatch.setattr(export_api, "cache_get", AsyncMock(return_value=cached))
+        monkeypatch.setattr(export_api, "cache_set", AsyncMock())
+    else:
+        profile_format = download_case.removeprefix("profile_")
+        profile = (
+            await client.post(
+                "/api/v1/export/profiles",
+                json={
+                    "name": f"Fail closed {profile_format}",
+                    "format": profile_format,
+                    "confidence_min": 0,
+                },
+            )
+        ).json()
+        url = f"/api/v1/export/profiles/{profile['id']}/download"
 
     class Broken:
         def add(self, _obj: object) -> None: ...
@@ -215,10 +337,10 @@ async def test_download_audit_write_failure_returns_503_without_export_content(
         async def __aexit__(self, *exc: object) -> None: ...
 
     monkeypatch.setattr(audit, "_session_factory", Broken)
-    response = await client.get("/api/v1/export/text")
+    response = await client.get(url)
     assert response.status_code == 503
     assert response.json() == {"detail": "Audit log unavailable"}
-    assert b"203.0.113.199" not in response.content
+    assert marker.encode() not in response.content
     assert await _events(db_session, "export.download") == []
 
 

@@ -6,9 +6,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import set_committed_value
 
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth
@@ -17,27 +15,6 @@ from cti.schemas.tag import TagCreate, TagResponse, TagWithCounts
 from cti.services import audit, tag_service
 
 router = APIRouter()
-
-
-async def _rollback_for_audit(db: AsyncSession) -> None:
-    """Roll back before an independent write, preserving clean loaded identities."""
-    loaded = [
-        (
-            obj,
-            {
-                attr.key: state.dict[attr.key]
-                for attr in state.mapper.column_attrs
-                if attr.key in state.dict
-            },
-        )
-        for obj in list(db.sync_session.identity_map.values())
-        if not (state := inspect(obj)).modified
-    ]
-    await db.rollback()
-    for obj, values in loaded:
-        if inspect(obj).persistent:
-            for key, value in values.items():
-                set_committed_value(obj, key, value)
 
 
 async def _record_failure(
@@ -50,7 +27,7 @@ async def _record_failure(
     resource_id: object = None,
     resource_label: object = None,
 ) -> None:
-    await _rollback_for_audit(db)
+    await audit.rollback_for_independent_audit(db, actor=actor)
     await audit.record_independent(
         actor=actor,
         action=action,
@@ -94,15 +71,16 @@ async def create_tag(
         )
         raise HTTPException(status_code=422, detail=str(exc)) from None
     tag, created = await tag_service.get_or_create_tag(db, name)
-    audit.record(
-        db,
-        actor=actor,
-        action="tag.create",
-        resource_type="tag",
-        resource_id=tag.id,
-        resource_label=tag.name,
-        summary={"created": created},
-    )
+    if created:
+        audit.record(
+            db,
+            actor=actor,
+            action="tag.create",
+            resource_type="tag",
+            resource_id=tag.id,
+            resource_label=tag.name,
+            summary={"created": True},
+        )
     await db.commit()
     response.status_code = 201 if created else 200
     return TagResponse(id=tag.id, name=tag.name)
