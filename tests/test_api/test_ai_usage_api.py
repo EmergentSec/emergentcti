@@ -352,7 +352,8 @@ async def test_inference_returns_usage_and_records_retry_of(
     assert str(row.id) == usage["record_id"]
     assert row.retry_of == previous
     assert row.actor_label == "Test Key"
-    assert json.loads(httpx_mock.get_request().content)["max_tokens"] == 1024  # type: ignore[union-attr]
+    sent = json.loads(httpx_mock.get_request().content)  # type: ignore[union-attr]
+    assert sent["max_completion_tokens"] == 1024
     # The ai.request audit trail is unchanged: initiated + succeeded.
     assert [e.outcome for e in await events(db_session, "ai.request")] == [
         "initiated",
@@ -471,7 +472,8 @@ async def test_usage_report_totals_breakdowns_and_unknowns(
     )
     # Billed, no usage reported: tokens and cost unknown; reservation committed.
     await add_record(db_session, day_one, reserved_usd=Decimal("0.2"))
-    # Refused by the provider: committed 0 and not "unknown".
+    # Refused by the provider: committed 0, but its usage and cost are still
+    # unknown (NULL), so it counts toward both unknown counters.
     await add_record(db_session, day_two, status="failed", billable="no", reserved_usd=Decimal("9"))
     # Possibly billed failure on another model, unpriced and permitted.
     await add_record(
@@ -512,9 +514,9 @@ async def test_usage_report_totals_breakdowns_and_unknowns(
         "reserved": 1,
         "input_tokens": 105,
         "output_tokens": 10,
-        "token_unknown_requests": 3,
+        "token_unknown_requests": 4,
         "estimated_cost_usd": "0.010000",
-        "cost_unknown_requests": 3,
+        "cost_unknown_requests": 4,
         "committed_usd": "0.510000",
     }
     assert body["budget"] == {
@@ -531,6 +533,66 @@ async def test_usage_report_totals_breakdowns_and_unknowns(
         ("2026-11-02", 2),
         ("2026-11-03", 3),
     ]
+
+
+async def test_usage_report_counts_unknowns_regardless_of_billable(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Unknown is never zero: NULL usage/cost counts even when billable is "no"."""
+    started = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
+    await add_record(db_session, started, status="failed", billable="no", reserved_usd=Decimal("1"))
+    await add_record(
+        db_session,
+        started,
+        status="failed",
+        billable="no",
+        input_tokens=7,
+        output_tokens=0,
+        usage_source="provider_reported",
+        cost_usd=Decimal("0"),
+        cost_source="estimated",
+    )
+
+    totals = (await client.get(f"{BASE}/usage?month=2026-11")).json()["totals"]
+
+    assert totals["input_tokens"] == 7
+    assert totals["token_unknown_requests"] == 1
+    assert totals["estimated_cost_usd"] == "0.000000"
+    assert totals["cost_unknown_requests"] == 1
+    assert totals["committed_usd"] == "0.000000"
+
+
+async def test_usage_report_aggregates_in_sql_without_loading_records(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The report must not materialize the month's records (one GROUP BY)."""
+    from sqlalchemy import event
+    from sqlalchemy.ext.asyncio import AsyncEngine
+
+    engine = db_session.bind
+    assert isinstance(engine, AsyncEngine)
+    for hour in range(3):
+        await add_record(db_session, datetime(2026, 11, 2, hour, tzinfo=UTC))
+    statements: list[str] = []
+
+    def capture(_conn: Any, _cursor: Any, statement: str, *_: Any) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        response = await client.get(f"{BASE}/usage?month=2026-11")
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", capture)
+
+    assert response.status_code == 200
+    assert response.json()["totals"]["requests"] == 3
+    usage_reads = [s for s in statements if "FROM ai_usage_records" in s]
+    assert len(usage_reads) == 1, usage_reads
+    [report_query] = usage_reads
+    assert "GROUP BY" in report_query
+    # An entity load would select per-record columns such as the id or actor.
+    assert "ai_usage_records.id" not in report_query
+    assert "ai_usage_records.actor_label" not in report_query
 
 
 async def test_usage_month_boundary_is_utc(client: AsyncClient, db_session: AsyncSession) -> None:
@@ -555,9 +617,20 @@ async def test_usage_defaults_to_current_utc_month_and_validates(client: AsyncCl
     assert body["totals"]["committed_usd"] == "0.000000"
     assert body["budget"]["remaining_usd"] is None
 
-    for bad in ("2026-13", "2026-1", "26-11", "1999-12", "2026-11-01", "x"):
+    for bad in ("2026-13", "2026-1", "26-11", "1999-12", "9999-12", "2026-11-01", "x"):
         assert (await client.get(f"{BASE}/usage?month={bad}")).status_code == 422, bad
         assert (await client.get(f"{BASE}/usage/records?month={bad}")).status_code == 422, bad
+
+
+@pytest.mark.parametrize(
+    ("month", "status"),
+    [("1999-12", 422), ("2000-01", 200), ("9999-11", 200), ("9999-12", 422)],
+)
+async def test_usage_month_range_edges(client: AsyncClient, month: str, status: int) -> None:
+    """Periods run 2000-01..9999-11; 9999-12 would need a year-10000 end bound."""
+    for path in ("/usage", "/usage/records"):
+        response = await client.get(f"{BASE}{path}?month={month}")
+        assert response.status_code == status, (path, response.text)
 
 
 # ── usage records ──────────────────────────────────────────────────────────

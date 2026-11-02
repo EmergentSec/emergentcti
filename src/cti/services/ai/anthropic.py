@@ -13,6 +13,8 @@ from cti.services.ai.base import (
 
 class AnthropicAdapter(AiProviderAdapter):
     _BASE_URL = "https://api.anthropic.com/v1"
+    # The Messages API requires ``max_tokens`` (it has no other name).
+    _MAX_TOKENS_FIELD = "max_tokens"
 
     @staticmethod
     def _headers(api_key: str) -> dict[str, str]:

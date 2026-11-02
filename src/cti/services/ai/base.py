@@ -10,7 +10,7 @@ from cti.schemas.ai import AiError, AiErrorCategory, AiModel
 
 REQUEST_TIMEOUT_SECONDS = 10.0
 INFERENCE_PROMPT = "Reply with the single word: OK"
-#: ``max_tokens`` sent by a direct ``inference_test`` call. The gateway always
+#: Max output tokens sent by a direct ``inference_test`` call. The gateway always
 #: passes the usage policy's ``max_output_tokens`` instead.
 DEFAULT_INFERENCE_MAX_OUTPUT_TOKENS = 16
 #: Token counts above this are treated as garbage, not usage.
@@ -162,6 +162,9 @@ def parse_json(response: httpx.Response) -> Any:
 
 class AiProviderAdapter(ABC):
     _BASE_URL: str = ""
+    #: The request-body field that caps generated tokens. Chat-completions
+    #: providers that deprecate ``max_tokens`` override this.
+    _MAX_TOKENS_FIELD: str = "max_tokens"
 
     @property
     def host(self) -> str:
@@ -216,7 +219,8 @@ class AiProviderAdapter(ABC):
         max_output_tokens: int,
     ) -> AdapterUsage:
         """Send one user message with ``max_output_tokens`` as the provider's
-        max-tokens parameter, and return the provider-reported usage.
+        max-tokens parameter (:attr:`_MAX_TOKENS_FIELD`), and return the
+        provider-reported usage.
 
         Only :mod:`cti.services.ai.gateway` may call this for accounted actions.
         """
@@ -247,7 +251,7 @@ class AiProviderAdapter(ABC):
             headers=headers,
             json={
                 "model": model,
-                "max_tokens": max_output_tokens,
+                self._MAX_TOKENS_FIELD: max_output_tokens,
                 "messages": [{"role": "user", "content": prompt}],
             },
         )

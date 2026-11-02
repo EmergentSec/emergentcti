@@ -13,6 +13,11 @@ from cti.services.ai.base import (
 
 class XAiAdapter(AiProviderAdapter):
     _BASE_URL = "https://api.x.ai/v1"
+    # Kept as ``max_tokens``: xAI's OpenAI-compatible chat completions has long
+    # accepted it, and support for ``max_completion_tokens`` could not be
+    # confirmed from xAI's published reference when this was written (#17).
+    # Switch only after verifying it, so a cap is never silently ignored.
+    _MAX_TOKENS_FIELD = "max_tokens"
 
     @staticmethod
     def _headers(api_key: str) -> dict[str, str]:

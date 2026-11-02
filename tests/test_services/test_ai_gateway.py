@@ -187,9 +187,10 @@ async def test_success_records_provider_usage_and_estimated_cost(
     assert row.actor_label == "analyst-one"
     # Committed spend uses the known cost, not the reservation: no double count.
     assert await committed(db_session) == Decimal("0.000026")
-    # The policy's max_output_tokens is the provider's max_tokens.
+    # The policy's max_output_tokens is OpenAI's max_completion_tokens.
     sent = json.loads(httpx_mock.get_request().content)  # type: ignore[union-attr]
-    assert sent["max_tokens"] == 1024
+    assert sent["max_completion_tokens"] == 1024
+    assert "max_tokens" not in sent
 
 
 async def test_success_without_usage_keeps_tokens_and_cost_unknown(

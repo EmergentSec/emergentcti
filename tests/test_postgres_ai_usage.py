@@ -23,6 +23,7 @@ import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import func, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from cti.core.security import encrypt_config
@@ -183,3 +184,155 @@ async def test_simultaneous_admissions_never_exceed_budget(pg_factory: Any) -> N
         spent = await gateway.committed_spend(db, start, end)
     # Settled with known (tiny) costs, committed spend is far below the budget.
     assert spent <= Decimal("4.5")
+
+
+# ── migration 011 down and up again, and the usage report, on PostgreSQL ──
+
+
+def _migration_011() -> Any:
+    path = MIGRATIONS / "011_add_ai_usage.py"
+    spec = importlib.util.spec_from_file_location("cti_pg_migration_011_again", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _assert_011_schema(connection: Any) -> None:
+    from sqlalchemy import inspect
+
+    inspector = inspect(connection)
+    assert {"ai_usage_policy", "ai_model_pricing", "ai_usage_records"} <= set(
+        inspector.get_table_names()
+    )
+    indexes = {i["name"]: i["column_names"] for i in inspector.get_indexes("ai_usage_records")}
+    assert indexes == {
+        "ix_ai_usage_records_started_at": ["started_at"],
+        "ix_ai_usage_records_provider_model": ["provider", "model", "started_at"],
+    }
+    [fk] = inspector.get_foreign_keys("ai_usage_records")
+    assert (fk["referred_table"], fk["constrained_columns"]) == ("users", ["actor_user_id"])
+    assert fk["options"].get("ondelete") == "SET NULL"
+    checks = {c["name"] for c in inspector.get_check_constraints("ai_usage_policy")}
+    assert "ck_ai_usage_policy_singleton" in checks
+    policy = connection.execute(text("SELECT * FROM ai_usage_policy")).mappings().all()
+    assert [{k: v for k, v in row.items() if k != "updated_at"} for row in policy] == [
+        {
+            "id": 1,
+            "monthly_budget_usd": None,
+            "max_output_tokens": 1024,
+            "max_concurrent_requests": 2,
+            "max_requests_per_minute": 10,
+            "unpriced_model_policy": "block",
+        }
+    ]
+    # Constraints are live: a second policy row and a bad status are refused.
+    for statement in (
+        "INSERT INTO ai_usage_policy (id) VALUES (2)",
+        "INSERT INTO ai_usage_records (id, action, provider, model, status, billable, "
+        "started_at, usage_source, cost_source) VALUES (gen_random_uuid(), 'inference_test', "
+        "'openai', 'm', 'done', 'unknown', now(), 'unknown', 'unknown')",
+    ):
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            connection.execute(text(statement))
+
+
+def _down_and_up(connection: Any) -> None:
+    from sqlalchemy import inspect
+
+    migration = _migration_011()
+    _assert_011_schema(connection)
+    with Operations.context(MigrationContext.configure(connection)):
+        migration.downgrade()
+    tables = set(inspect(connection).get_table_names())
+    assert not {"ai_usage_policy", "ai_model_pricing", "ai_usage_records"} & tables
+    assert "users" in tables
+    with Operations.context(MigrationContext.configure(connection)):
+        migration.upgrade()
+    _assert_011_schema(connection)
+
+    # ON DELETE SET NULL survives the round trip.
+    user_id = uuid.uuid4()
+    connection.execute(
+        text(
+            "INSERT INTO users (id, username, email, password_hash, role) "
+            "VALUES (:id, 'pg-user', 'pg@example.test', 'x', 'admin')"
+        ),
+        {"id": user_id},
+    )
+    record_id = uuid.uuid4()
+    connection.execute(
+        text(
+            "INSERT INTO ai_usage_records (id, actor_user_id, actor_label, action, provider, "
+            "model, status, billable, started_at, usage_source, cost_source) VALUES (:id, "
+            ":user, 'pg-user', 'inference_test', 'openai', 'm', 'reserved', 'unknown', now(), "
+            "'unknown', 'unknown')"
+        ),
+        {"id": record_id, "user": user_id},
+    )
+    connection.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
+    row = connection.execute(
+        text("SELECT actor_user_id, actor_label FROM ai_usage_records WHERE id = :id"),
+        {"id": record_id},
+    ).one()
+    assert tuple(row) == (None, "pg-user")
+
+
+async def test_migration_011_down_and_up_again_on_postgresql(pg_factory: Any) -> None:
+    async with pg_factory() as db:
+        connection = await db.connection()
+        await connection.run_sync(_down_and_up)
+        await db.commit()
+
+
+async def test_usage_report_buckets_utc_days_whatever_the_session_time_zone(
+    pg_factory: Any,
+) -> None:
+    from datetime import UTC, datetime
+
+    from cti.services.ai_settings_service import usage_report
+
+    def record(started_at: datetime, **values: Any) -> AiUsageRecord:
+        row: dict[str, Any] = {
+            "action": "inference_test",
+            "provider": "openai",
+            "model": "gpt-test",
+            "status": "succeeded",
+            "billable": "yes",
+            "started_at": started_at,
+            "usage_source": "unknown",
+            "cost_source": "unknown",
+        }
+        row.update(values)
+        return AiUsageRecord(**row)
+
+    async with pg_factory() as db:
+        # 03:00 UTC on 2 November is still 1 November in Los Angeles.
+        db.add(
+            record(
+                datetime(2026, 11, 2, 3, 0, tzinfo=UTC),
+                input_tokens=10,
+                output_tokens=2,
+                cost_usd=Decimal("0.25"),
+                reserved_usd=Decimal("1"),
+            )
+        )
+        db.add(
+            record(
+                datetime(2026, 11, 2, 23, 0, tzinfo=UTC),
+                status="failed",
+                billable="no",
+                reserved_usd=Decimal("3"),
+            )
+        )
+        await db.commit()
+        await db.execute(text("SET TIME ZONE 'America/Los_Angeles'"))
+
+        report = await usage_report(db, 2026, 11)
+
+    assert [(d.date.isoformat(), d.requests) for d in report.by_day] == [("2026-11-02", 2)]
+    totals = report.totals
+    assert (totals.requests, totals.succeeded, totals.failed) == (2, 1, 1)
+    assert (totals.input_tokens, totals.output_tokens) == (10, 2)
+    assert (totals.token_unknown_requests, totals.cost_unknown_requests) == (1, 1)
+    assert (totals.estimated_cost_usd, totals.committed_usd) == ("0.250000", "0.250000")

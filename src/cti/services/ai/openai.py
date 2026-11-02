@@ -26,6 +26,10 @@ _NON_TEXT_MODEL_MARKERS = (
 
 class OpenAiAdapter(AiProviderAdapter):
     _BASE_URL = "https://api.openai.com/v1"
+    # ``max_tokens`` is deprecated and rejected by o-series reasoning models;
+    # ``max_completion_tokens`` also bounds reasoning tokens, so the reservation
+    # covers every billed output token.
+    _MAX_TOKENS_FIELD = "max_completion_tokens"
 
     @staticmethod
     def _headers(api_key: str) -> dict[str, str]:
