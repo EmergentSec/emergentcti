@@ -216,7 +216,9 @@ provider's console: those are the real safeguard.
   metadata only: actor, action, provider, model, timestamps, status, token counts
   and estimates. They never hold prompts, responses, provider error text or keys.
   Unknown token counts and costs are shown as unknown, and totals report how many
-  requests had unknown usage or cost.
+  requests had unknown usage or cost, including refused requests (which still add
+  nothing to committed spend). Reports cover UTC calendar months from `2000-01`
+  to `9999-11`.
 
 ## Audit history
 

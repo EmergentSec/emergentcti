@@ -381,7 +381,9 @@ def _month_param(month: str | None) -> tuple[int, int]:
     try:
         return parse_month(month)
     except ValueError:
-        raise HTTPException(status_code=422, detail="month must be YYYY-MM") from None
+        raise HTTPException(
+            status_code=422, detail="month must be YYYY-MM, 2000-01 to 9999-11"
+        ) from None
 
 
 def _policy_summary(policy: AiUsagePolicyOut) -> dict[str, object]:

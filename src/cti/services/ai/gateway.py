@@ -34,12 +34,14 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Numeric, case, cast, delete, func, or_, select, update
+from sqlalchemy import Date, Numeric, case, cast, delete, func, or_, select, update
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.functions import FunctionElement
 
 from cti.core.security import decrypt_config
 from cti.models.ai_usage import (
@@ -249,6 +251,29 @@ def month_bounds(year: int, month: int) -> tuple[datetime, datetime]:
         else datetime(year, month + 1, 1, tzinfo=UTC)
     )
     return start, end
+
+
+class utc_day(FunctionElement[date]):  # noqa: N801 - SQL function naming
+    """The UTC calendar day of a stored timestamp, on SQLite and PostgreSQL.
+
+    PostgreSQL's ``timestamptz::date`` uses the session time zone, so the value
+    is converted to UTC first. SQLite stores naive UTC text, so ``date()``
+    already yields the UTC day.
+    """
+
+    type = Date()
+    inherit_cache = True
+    name = "utc_day"
+
+
+@compiles(utc_day)
+def _utc_day_default(element: utc_day, compiler: Any, **kw: Any) -> str:
+    return f"date({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(utc_day, "postgresql")
+def _utc_day_postgresql(element: utc_day, compiler: Any, **kw: Any) -> str:
+    return f"CAST(timezone('UTC', {compiler.process(element.clauses, **kw)}) AS DATE)"
 
 
 def current_month(now: datetime | None = None) -> tuple[int, int]:

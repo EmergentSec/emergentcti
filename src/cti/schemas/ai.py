@@ -178,11 +178,20 @@ _MAX_BUDGET = Decimal("99999999.9999")  # Numeric(12, 4)
 _MAX_PRICE = Decimal("999999.999999")  # Numeric(12, 6)
 
 
+#: Accepted accounting periods. The upper bound stops at 9999-11 because a
+#: period's exclusive end (the next month's first instant) must be a datetime.
+_FIRST_MONTH = (2000, 1)
+_LAST_MONTH = (9999, 11)
+
+
 def parse_month(value: str) -> tuple[int, int]:
     match = _MONTH_PATTERN.fullmatch(value)
-    if match is None or int(match.group(1)) < 2000:
+    if match is None:
         raise ValueError("month must be YYYY-MM")
-    return int(match.group(1)), int(match.group(2))
+    period = int(match.group(1)), int(match.group(2))
+    if not _FIRST_MONTH <= period <= _LAST_MONTH:
+        raise ValueError("month must be between 2000-01 and 9999-11")
+    return period
 
 
 def _decimal(value: object, *, places: int, maximum: Decimal, field: str) -> Decimal:

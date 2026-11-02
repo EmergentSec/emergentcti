@@ -4,9 +4,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import Numeric, and_, case, cast, delete, func, or_, select
 
 from cti.core.security import decrypt_config, encrypt_config
 from cti.models.ai import AiProvider, AiProviderConfig, AiSettingsRecord
@@ -15,7 +15,6 @@ from cti.models.ai_usage import (
     AiModelPricing,
     AiUsagePolicy,
     AiUsageRecord,
-    Billable,
     UnpricedModelPolicy,
     UsageStatus,
 )
@@ -54,9 +53,10 @@ from cti.services.ai.registry import get_adapter
 
 if TYPE_CHECKING:
     import uuid
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.elements import ColumnElement
 
     from cti.services.audit import Actor
 
@@ -449,10 +449,17 @@ def _price_str(value: Decimal) -> str:
     return str(Decimal(value).quantize(Decimal("0.000001")))
 
 
+def _count_where(condition: ColumnElement[bool]) -> ColumnElement[int]:
+    return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)
+
+
 @dataclass
 class _Totals:
     requests: int = 0
-    by_status: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    succeeded: int = 0
+    failed: int = 0
+    cancelled: int = 0
+    reserved: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     token_unknown_requests: int = 0
@@ -460,36 +467,17 @@ class _Totals:
     cost_unknown_requests: int = 0
     committed_usd: Decimal = field(default_factory=Decimal)
 
-    def add(self, row: AiUsageRecord) -> None:
-        self.requests += 1
-        self.by_status[row.status] += 1
-        # A request refused by the provider (billable "no") did no work: its
-        # missing counts are not "unknown usage".
-        counts_as_unknown = row.billable != Billable.NO.value
-        if row.input_tokens is not None:
-            self.input_tokens += row.input_tokens
-        if row.output_tokens is not None:
-            self.output_tokens += row.output_tokens
-        if counts_as_unknown and (row.input_tokens is None or row.output_tokens is None):
-            self.token_unknown_requests += 1
-        if row.cost_usd is not None:
-            self.estimated_cost_usd += Decimal(row.cost_usd)
-        elif counts_as_unknown:
-            self.cost_unknown_requests += 1
-        self.committed_usd += gateway.committed_contribution(
-            status=row.status,
-            billable=row.billable,
-            reserved_usd=row.reserved_usd,
-            cost_usd=row.cost_usd,
-        )
+    def add(self, other: _Totals) -> None:
+        for name in self.__dataclass_fields__:
+            setattr(self, name, getattr(self, name) + getattr(other, name))
 
     def fields(self) -> dict[str, object]:
         return {
             "requests": self.requests,
-            "succeeded": self.by_status[UsageStatus.SUCCEEDED.value],
-            "failed": self.by_status[UsageStatus.FAILED.value],
-            "cancelled": self.by_status[UsageStatus.CANCELLED.value],
-            "reserved": self.by_status[UsageStatus.RESERVED.value],
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "cancelled": self.cancelled,
+            "reserved": self.reserved,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "token_unknown_requests": self.token_unknown_requests,
@@ -499,22 +487,80 @@ class _Totals:
         }
 
 
+def _usage_aggregates() -> list[ColumnElement[Any]]:
+    """Per-group report columns, in :class:`_Totals` field order.
+
+    "Unknown" counts every record whose provider usage or cost is NULL, whatever
+    its billability: a missing number is never reported as zero. Committed spend
+    is the separate :func:`gateway.committed_amount` rule.
+    """
+    record = AiUsageRecord
+    usd = Numeric(14, 6)
+    return [
+        func.count(),
+        _count_where(record.status == UsageStatus.SUCCEEDED.value),
+        _count_where(record.status == UsageStatus.FAILED.value),
+        _count_where(record.status == UsageStatus.CANCELLED.value),
+        _count_where(record.status == UsageStatus.RESERVED.value),
+        func.coalesce(func.sum(record.input_tokens), 0),
+        func.coalesce(func.sum(record.output_tokens), 0),
+        _count_where(or_(record.input_tokens.is_(None), record.output_tokens.is_(None))),
+        func.coalesce(func.sum(cast(record.cost_usd, usd)), 0),
+        _count_where(record.cost_usd.is_(None)),
+        func.coalesce(func.sum(cast(gateway.committed_amount(), usd)), 0),
+    ]
+
+
+def _totals_from_row(values: Sequence[Any]) -> _Totals:
+    (
+        requests,
+        succeeded,
+        failed,
+        cancelled,
+        reserved,
+        input_tokens,
+        output_tokens,
+        token_unknown,
+        cost,
+        cost_unknown,
+        committed,
+    ) = values
+    return _Totals(
+        requests=int(requests),
+        succeeded=int(succeeded),
+        failed=int(failed),
+        cancelled=int(cancelled),
+        reserved=int(reserved),
+        input_tokens=int(input_tokens),
+        output_tokens=int(output_tokens),
+        token_unknown_requests=int(token_unknown),
+        estimated_cost_usd=Decimal(str(cost)),
+        cost_unknown_requests=int(cost_unknown),
+        committed_usd=Decimal(str(committed)),
+    )
+
+
 async def usage_report(db: AsyncSession, year: int, month: int) -> AiUsageReport:
+    """Month totals and breakdowns from one SQL ``GROUP BY``; no record is loaded.
+
+    Rows are grouped by (provider, model, UTC day): at most pairs x 31 groups,
+    rolled up here into totals, per-pair and per-day figures.
+    """
     start, end = gateway.month_bounds(year, month)
-    rows = (
-        await db.scalars(
-            select(AiUsageRecord)
-            .where(AiUsageRecord.started_at >= start, AiUsageRecord.started_at < end)
-            .order_by(AiUsageRecord.started_at, AiUsageRecord.id)
-        )
-    ).all()
+    day = gateway.utc_day(AiUsageRecord.started_at)
+    groups = await db.execute(
+        select(AiUsageRecord.provider, AiUsageRecord.model, day, *_usage_aggregates())
+        .where(AiUsageRecord.started_at >= start, AiUsageRecord.started_at < end)
+        .group_by(AiUsageRecord.provider, AiUsageRecord.model, day)
+    )
     totals = _Totals()
     by_pair: dict[tuple[str, str], _Totals] = defaultdict(_Totals)
     by_day: dict[date, _Totals] = defaultdict(_Totals)
-    for row in rows:
-        totals.add(row)
-        by_pair[(row.provider, row.model)].add(row)
-        by_day[gateway.as_utc(row.started_at).date()].add(row)
+    for provider, model, group_day, *values in groups.all():
+        group = _totals_from_row(values)
+        totals.add(group)
+        by_pair[(provider, model)].add(group)
+        by_day[group_day].add(group)
 
     policy = await gateway.read_policy(db)
     budget = policy.monthly_budget_usd
