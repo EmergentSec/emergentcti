@@ -427,10 +427,11 @@ async def test_link_unlink_both_directions_and_export_unchanged(
     assert export_after["count"] == export_before["count"]
     assert export_after["observables"] == export_before["observables"]
 
-    response = await client.delete(f"{url}/{observable.id}")
+    observable_id = observable.id  # The failed unlink below rolls back the shared session.
+    response = await client.delete(f"{url}/{observable_id}")
     assert response.status_code == 204
-    assert (await client.delete(f"{url}/{observable.id}")).status_code == 404
-    assert (await client.get(f"/api/v1/observables/{observable.id}/reports")).json() == []
+    assert (await client.delete(f"{url}/{observable_id}")).status_code == 404
+    assert (await client.get(f"/api/v1/observables/{observable_id}/reports")).json() == []
 
 
 async def test_delete_report_removes_attachment_and_links(
