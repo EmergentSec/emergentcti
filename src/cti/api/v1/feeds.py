@@ -8,11 +8,9 @@ import logging
 import uuid  # noqa: TC003 - FastAPI resolves endpoint annotations at runtime.
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves this annotation.
     AsyncSession,
 )
-from sqlalchemy.orm.attributes import set_committed_value
 
 from cti.core.database import get_db
 from cti.core.dependencies import AuthSubject, get_current_auth
@@ -37,27 +35,6 @@ _AUTH_FEED_NAMES = {d["name"] for d in DEFAULT_FEEDS if d.get("requires_api_key"
 _SENSITIVE_CHANGE_FIELDS = frozenset({"auth_config", "tlp_change_reason"})
 
 
-async def _rollback_for_audit(db: AsyncSession) -> None:
-    """Roll back before an independent write, preserving clean loaded identities."""
-    loaded = [
-        (
-            obj,
-            {
-                attr.key: state.dict[attr.key]
-                for attr in state.mapper.column_attrs
-                if attr.key in state.dict
-            },
-        )
-        for obj in list(db.sync_session.identity_map.values())
-        if not (state := inspect(obj)).modified
-    ]
-    await db.rollback()
-    for obj, values in loaded:
-        if inspect(obj).persistent:
-            for key, value in values.items():
-                set_committed_value(obj, key, value)
-
-
 def _changed_fields(data: FeedCreate | FeedUpdate) -> list[str]:
     return sorted(data.model_fields_set - _SENSITIVE_CHANGE_FIELDS)
 
@@ -73,7 +50,7 @@ async def _record_failure(
     resource_label: object = None,
     outcome: audit.AuditOutcome = audit.AuditOutcome.FAILED,
 ) -> None:
-    await _rollback_for_audit(db)
+    await db.rollback()
     await audit.record_independent(
         actor=actor,
         action=action,

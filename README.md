@@ -205,7 +205,9 @@ disconnects. `completed` does not prove the client received the file; an
 **Retention.** A daily job at 03:30 UTC deletes events older than
 `AUDIT_RETENTION_DAYS` (default 365, allowed 30–3650; it cannot be disabled) in
 batches of 5,000 and records one `audit.retention_cleanup` event. This is
-independent of `OBSERVABLE_RETENTION_DAYS`.
+independent of `OBSERVABLE_RETENTION_DAYS`; snapshot labels such as observable
+values and report titles remain for the audit retention period even after the
+underlying item is removed by observable retention.
 
 **Storage and backup.** Expect roughly 0.5–1 KB per event. Most volume comes from
 automated downloads: a firewall pulling a blocklist every 5 minutes adds about
