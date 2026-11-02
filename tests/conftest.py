@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
+from contextlib import asynccontextmanager
 
 import pytest
 from fastapi import FastAPI
@@ -49,6 +50,52 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """Provide a test database session."""
     async with TestSessionFactory() as session:
         yield session
+
+
+@pytest.fixture(autouse=True)
+def audit_independent_sessions(
+    setup_db: None,  # Explicit: tables first, and db_session closed before they drop.
+    db_session: AsyncSession,
+) -> Generator[None, None, None]:
+    """Route ``audit.record_independent`` writes to the test database.
+
+    SQLite (unlike PostgreSQL) allows one writer per database, and API tests
+    share ``db_session`` with the app, so a second connection cannot insert
+    while a request holds a write (even the autoflushed API-key
+    ``last_used_at``). Independent writes therefore run in a SAVEPOINT on the
+    shared session's connection: they are visible to ``db_session``, and a
+    failure path must roll back *before* recording, as in production.
+    Tests proving true independence (own session, survives the caller's
+    rollback) use the ``separate_audit_sessions`` fixture instead.
+
+    Deliberately not ``monkeypatch``: requesting it from an autouse fixture
+    moves its teardown after other autouse patches (e.g. the API suite's
+    ``sync_feed_jobs`` mock) and breaks their LIFO restore order.
+    """
+    from cti.services import audit
+
+    @asynccontextmanager
+    async def shared_connection_session() -> AsyncGenerator[AsyncSession, None]:
+        connection = await db_session.connection()
+        async with AsyncSession(
+            bind=connection,
+            join_transaction_mode="create_savepoint",
+            expire_on_commit=False,
+        ) as session:
+            yield session
+
+    previous = audit._session_factory
+    audit._session_factory = shared_connection_session
+    yield
+    audit._session_factory = previous
+
+
+@pytest.fixture
+def separate_audit_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Independent audit writes use their own connection, as in production."""
+    from cti.services import audit
+
+    monkeypatch.setattr(audit, "_session_factory", TestSessionFactory)
 
 
 @pytest.fixture
