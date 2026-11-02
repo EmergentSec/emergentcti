@@ -14,8 +14,26 @@ vi.mock('@/api/ai', () => ({
   checkAiProvider: vi.fn(),
   getAiModels: vi.fn(),
   runAiInferenceTest: vi.fn(),
+  getAiInferenceTestPreview: vi.fn(),
   putAiDefault: vi.fn(),
   deleteAiDefault: vi.fn(),
+  getAiUsage: vi.fn(),
+  getAiUsageRecords: vi.fn(),
+  getAiUsagePolicy: vi.fn(),
+  putAiUsagePolicy: vi.fn(),
+  getAiPricing: vi.fn(),
+}))
+
+const mockPreview = vi.fn()
+vi.mock('@/hooks/useAiUsage', () => ({
+  useAiUsage: () => ({ data: undefined, isLoading: true, error: null }),
+  useAiUsageRecords: () => ({ data: undefined, isLoading: true, error: null }),
+  useAiUsagePolicy: () => ({ data: undefined, isLoading: true, error: null }),
+  useSaveAiUsagePolicy: () => ({ mutate: vi.fn(), isPending: false }),
+  useAiPricing: () => ({ data: { items: [] }, isLoading: false, error: null }),
+  useSaveAiPricingRow: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteAiPricingRow: () => ({ mutate: vi.fn(), isPending: false }),
+  useAiInferenceTestPreview: (...args: unknown[]) => mockPreview(...args),
 }))
 
 const mockToast = vi.fn()
@@ -100,6 +118,21 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.getAiSettings.mockResolvedValue(settings())
   api.getAiModels.mockResolvedValue(MODELS)
+  mockPreview.mockReturnValue({
+    data: {
+      provider: 'anthropic',
+      model: 'claude-alpha-20260101',
+      action: 'inference_test',
+      content: 'Reply with the single word: OK',
+      max_output_tokens: 1024,
+      pricing_known: true,
+      estimated_max_cost_usd: '0.0100',
+      policy_decision: 'allowed',
+      destination_note: 'Sent to Anthropic (api.anthropic.com)',
+    },
+    isLoading: false,
+    error: null,
+  })
 })
 
 afterEach(() => {
@@ -311,7 +344,19 @@ describe('AiSettings', () => {
     api.getAiSettings.mockResolvedValue(
       settings({ default: { provider: 'anthropic', model: 'claude-alpha-20260101', is_custom: false } }),
     )
-    api.runAiInferenceTest.mockResolvedValue({ ok: true, error: null, latency_ms: 321 })
+    api.runAiInferenceTest.mockResolvedValue({
+      ok: true,
+      error: null,
+      latency_ms: 321,
+      usage: {
+        record_id: 'rec-1',
+        input_tokens: 5,
+        output_tokens: 1,
+        usage_source: 'provider_reported',
+        cost_usd: '0.0001',
+        cost_source: 'estimated',
+      },
+    })
     renderPage()
     const section = await screen.findByRole('region', { name: 'Default model' })
     const open = await within(section).findByRole('button', { name: 'Send test prompt…' })
@@ -332,6 +377,35 @@ describe('AiSettings', () => {
     await waitFor(() => expect(api.runAiInferenceTest).toHaveBeenCalledTimes(1))
     expect(api.runAiInferenceTest).toHaveBeenCalledWith('anthropic', 'claude-alpha-20260101')
     expect(await within(section).findByText(/replied in 321 ms/)).toBeTruthy()
+    expect(within(section).getByText(/\$0\.0001 est\./)).toBeTruthy()
+  })
+
+  it('disables inference confirm when preview policy blocks the request', async () => {
+    api.getAiSettings.mockResolvedValue(
+      settings({ default: { provider: 'anthropic', model: 'claude-alpha-20260101', is_custom: false } }),
+    )
+    mockPreview.mockReturnValue({
+      data: {
+        provider: 'anthropic',
+        model: 'claude-alpha-20260101',
+        action: 'inference_test',
+        content: 'Reply with the single word: OK',
+        max_output_tokens: 1024,
+        pricing_known: false,
+        estimated_max_cost_usd: null,
+        policy_decision: 'blocked_unpriced',
+        destination_note: 'Sent to Anthropic (api.anthropic.com)',
+      },
+      isLoading: false,
+      error: null,
+    })
+    renderPage()
+    const section = await screen.findByRole('region', { name: 'Default model' })
+    fireEvent.click(await within(section).findByRole('button', { name: 'Send test prompt…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Send a test prompt?' })
+    const send = within(dialog).getByRole('button', { name: 'Send test prompt' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    expect(within(dialog).getByText(/no local pricing row/)).toBeTruthy()
   })
 
   it('maps a failed inference test to a category message', async () => {
@@ -342,6 +416,7 @@ describe('AiSettings', () => {
       ok: false,
       error: { category: 'model_unavailable', message: 'raw' },
       latency_ms: null,
+      usage: null,
     })
     renderPage()
     const section = await screen.findByRole('region', { name: 'Default model' })

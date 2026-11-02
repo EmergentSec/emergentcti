@@ -49,9 +49,47 @@ describe('AI settings API', () => {
   })
 
   it('sends the inference test with confirm: true', async () => {
-    const post = vi.spyOn(api, 'post').mockResolvedValue({ data: { ok: true, error: null, latency_ms: 10 } })
+    const post = vi.spyOn(api, 'post').mockResolvedValue({ data: { ok: true, error: null, latency_ms: 10, usage: null } })
     await runAiInferenceTest('openai', 'gpt-x')
     expect(post).toHaveBeenCalledWith('/settings/ai/providers/openai/inference-test', { model: 'gpt-x', confirm: true })
+  })
+
+  it('uses the contract routes for usage and preview', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue({ data: {} })
+    const put = vi.spyOn(api, 'put').mockResolvedValue({ data: {} })
+    const del = vi.spyOn(api, 'delete').mockResolvedValue({ data: undefined })
+
+    const { getAiUsage, getAiInferenceTestPreview, putAiUsagePolicy, getAiPricing, putAiPricingRow, deleteAiPricingRow } =
+      await import('./ai')
+
+    await getAiUsage('2026-11')
+    expect(get).toHaveBeenCalledWith('/settings/ai/usage', { params: { month: '2026-11' } })
+
+    await getAiInferenceTestPreview('anthropic', 'claude-x')
+    expect(get).toHaveBeenCalledWith('/settings/ai/providers/anthropic/inference-test/preview', {
+      params: { model: 'claude-x' },
+    })
+
+    await putAiUsagePolicy({
+      monthly_budget_usd: null,
+      max_output_tokens: 1024,
+      max_concurrent_requests: 2,
+      max_requests_per_minute: 10,
+      unpriced_model_policy: 'block',
+    })
+    expect(put).toHaveBeenCalledWith('/settings/ai/usage-policy', expect.any(Object))
+
+    await getAiPricing()
+    expect(get).toHaveBeenCalledWith('/settings/ai/pricing')
+
+    await putAiPricingRow('openai', 'gpt/x', { input_usd_per_mtok: '1', output_usd_per_mtok: '2' })
+    expect(put).toHaveBeenCalledWith('/settings/ai/pricing/openai/gpt%2Fx', {
+      input_usd_per_mtok: '1',
+      output_usd_per_mtok: '2',
+    })
+
+    await deleteAiPricingRow('anthropic', 'claude')
+    expect(del).toHaveBeenCalledWith('/settings/ai/pricing/anthropic/claude')
   })
 })
 
@@ -78,5 +116,7 @@ describe('AI error mapping', () => {
     expect(aiRequestErrorMessage(new Error('boom'), 'fallback')).toBe('fallback')
     expect(describeAiCategory('something_new')).toMatch(/went wrong/)
     expect(describeAiCategory(null)).toMatch(/went wrong/)
+    expect(AI_ERROR_MESSAGES.budget_exceeded).toMatch(/budget/)
+    expect(AI_ERROR_MESSAGES.sharing_forbidden).toMatch(/cannot be shared/)
   })
 })

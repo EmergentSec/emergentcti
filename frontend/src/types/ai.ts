@@ -17,6 +17,20 @@ export type AiErrorCategory =
   | 'network_error'
   | 'provider_error'
   | 'not_configured'
+  | 'budget_exceeded'
+  | 'concurrency_limit'
+  | 'local_rate_limited'
+  | 'model_blocked_unpriced'
+  | 'sharing_forbidden'
+  | 'sharing_not_approved'
+
+export type AiUsageSource = 'provider_reported' | 'unknown'
+export type AiCostSource = 'estimated' | 'unknown'
+export type AiUnpricedModelPolicy = 'block' | 'permit'
+export type AiInferencePolicyDecision = 'allowed' | 'blocked_unpriced' | 'over_budget'
+export type AiUsageRecordStatus = 'reserved' | 'succeeded' | 'failed' | 'cancelled'
+export type AiUsageBillable = 'no' | 'yes' | 'unknown'
+export type AiAction = 'inference_test'
 
 export interface AiModel {
   /** Exact provider model ID. */
@@ -72,8 +86,143 @@ export interface AiCheckResult {
   checked_at: string
 }
 
+export interface AiUsageSummary {
+  record_id: string
+  input_tokens: number | null
+  output_tokens: number | null
+  usage_source: AiUsageSource
+  cost_usd: string | null
+  cost_source: AiCostSource
+}
+
 export interface AiInferenceResult {
   ok: boolean
   error: AiError | null
   latency_ms: number | null
+  usage: AiUsageSummary | null
+}
+
+export interface AiInferenceTestPreview {
+  provider: AiProvider
+  model: string
+  action: AiAction
+  content: string
+  max_output_tokens: number
+  pricing_known: boolean
+  estimated_max_cost_usd: string | null
+  policy_decision: AiInferencePolicyDecision
+  destination_note: string
+}
+
+export interface UsageTotals {
+  requests: number
+  succeeded: number
+  failed: number
+  cancelled: number
+  reserved: number
+  input_tokens: number
+  output_tokens: number
+  token_unknown_requests: number
+  estimated_cost_usd: string | null
+  cost_unknown_requests: number
+  committed_usd: string
+}
+
+export interface AiUsagePeriod {
+  month: string
+  start: string
+  end: string
+  timezone: 'UTC'
+}
+
+export interface AiUsageBudget {
+  monthly_budget_usd: string | null
+  committed_usd: string
+  remaining_usd: string | null
+}
+
+export interface AiUsageResponse {
+  period: AiUsagePeriod
+  actions_in_scope: AiAction[]
+  guarantee: 'local_estimate_only'
+  totals: UsageTotals
+  budget: AiUsageBudget
+  by_provider_model: ({ provider: AiProvider; model: string } & UsageTotals)[]
+  by_day: ({ date: string } & UsageTotals)[]
+}
+
+export interface AiUsageRecord {
+  id: string
+  actor_label: string
+  action: AiAction
+  provider: AiProvider
+  model: string
+  status: AiUsageRecordStatus
+  billable: AiUsageBillable
+  started_at: string
+  completed_at: string | null
+  latency_ms: number | null
+  input_tokens: number | null
+  output_tokens: number | null
+  usage_source: AiUsageSource
+  cost_usd: string | null
+  cost_source: AiCostSource
+  error_category: AiErrorCategory | null
+  stale: boolean
+}
+
+export interface AiUsageRecordsResponse {
+  items: AiUsageRecord[]
+  next_before: string | null
+}
+
+export interface AiUsagePolicy {
+  monthly_budget_usd: string | null
+  max_output_tokens: number
+  max_concurrent_requests: number
+  max_requests_per_minute: number
+  unpriced_model_policy: AiUnpricedModelPolicy
+  updated_at: string
+  guarantee: 'local_estimate_only'
+}
+
+export interface AiModelPricingRow {
+  provider: AiProvider
+  model: string
+  input_usd_per_mtok: string
+  output_usd_per_mtok: string
+  updated_at: string
+}
+
+export interface AiPricingList {
+  items: AiModelPricingRow[]
+}
+
+export type OutboundRefType = 'report' | 'observable'
+export type OutboundExcludedReason = 'tlp_restricted' | 'not_found' | 'not_visible'
+
+export interface OutboundRef {
+  type: OutboundRefType
+  id: string
+}
+
+export interface OutboundPreviewItem {
+  type: OutboundRefType
+  id: string
+  label: string
+  tlp: string | null
+  included: boolean
+  excluded_reason: OutboundExcludedReason | null
+  redactions: number
+}
+
+export interface OutboundPreview {
+  provider: AiProvider
+  model: string
+  destination_note: string
+  items: OutboundPreviewItem[]
+  content: string
+  content_chars: number
+  digest: string
+  expires_at: string
 }
