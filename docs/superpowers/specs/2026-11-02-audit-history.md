@@ -72,6 +72,31 @@ Use the existing session factory (`cti.core.database.async_session_factory`)
 for independent writes, through one module-level indirection that tests can
 point at the test engine.
 
+Approved additive helpers (the preferred path for instrumenting routers; see
+the module docstring for usage examples):
+
+```python
+async def begin_disclosure(*, actor, action, resource_type, resource_id=None,
+           resource_label=None, summary=None) -> Disclosure
+    # record_independent(outcome=INITIATED, strict=True); on AuditWriteError
+    # raises HTTPException(503, "Audit log unavailable"). Call before any body exists.
+
+@dataclass(frozen=True)
+class Disclosure:   # event_id, actor, action, resource_type, resource_id, resource_label
+    async def record_outcome(self, outcome, summary=None) -> uuid.UUID | None
+    # Non-strict; adds {"initiated_event_id": str(event_id)} to the summary.
+
+AuditedDownload(content, *, disclosure, status_code=200, headers=None,
+                media_type=None, chunk_size=65536)
+
+audited_admin(action, resource_type, *, resource_id_param=None)
+    # resource_id_param names a path parameter used as the denied event's resource_id.
+```
+
+`ACTION_CATALOG` (action → resource_type) in `services/audit.py` is the single
+source of truth; `record`/`record_independent` raise `ValueError` for an
+action not in it or a mismatched `resource_type`.
+
 ## Write semantics
 
 These are the rules that satisfy "never falsely report an event was recorded".
@@ -89,6 +114,14 @@ These are the rules that satisfy "never falsely report an event was recorded".
    have got is unchanged. These events never use `succeeded`. Pydantic body
    validation that FastAPI rejects before the handler runs is not audited.
    Unauthenticated (401) requests are not audited: there is no actor.
+   **On a failure path, build the actor with `actor_from_auth(auth)` first,
+   then `await db.rollback()`, then call `record_independent`.** PostgreSQL
+   rejects statements in an aborted transaction (for example after an
+   `IntegrityError`), and SQLite (tests) allows one writer, so an open
+   request write would block the independent insert. In tests, independent
+   writes run in a SAVEPOINT on the shared test session's connection
+   (`tests/conftest.py`); the `separate_audit_sessions` fixture gives each
+   write its own connection to prove independence.
 3. **Disclosures** (export downloads, report attachment downloads, outbound AI
    requests) fail closed: before any content leaves, write an `initiated` event
    with `record_independent(..., strict=True)`. If that write fails, return

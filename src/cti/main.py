@@ -24,6 +24,7 @@ from cti.models.api_key import ApiKey
 from cti.models.user import User, UserRole
 from cti.services import feed_service
 from cti.services.scheduler import (
+    add_audit_retention_job,
     add_decay_job,
     add_retention_job,
     add_token_cleanup_job,
@@ -148,6 +149,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await add_decay_job()
     await add_token_cleanup_job()
     await add_retention_job()
+    await add_audit_retention_job(sched)
     sched.start()
     logger.info("Scheduler started")
 
