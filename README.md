@@ -174,6 +174,50 @@ policies belong to the external provider. Saving a key, checking a connection, a
 listing models do not send CTI instance data; only the separately confirmed
 inference test makes a potentially billable request, using one fixed tiny prompt.
 
+### AI usage guardrails
+
+**Budgets are local estimates, not a billing guarantee.** EmergentCTI estimates
+cost from prices an administrator enters and from the token counts a provider
+reports. It cannot see your provider bill. Set hard spending limits in each
+provider's console: those are the real safeguard.
+
+- **In scope:** connection inference tests (`inference_test`). Report generation
+  will be added when it exists. Model-list refreshes and credential checks are not
+  inference and are never counted.
+- **Period:** a UTC calendar month, `[YYYY-MM-01T00:00Z, next month)`. A request
+  belongs to the month in which it started.
+- **Policy** (Settings → AI, admin only; `GET`/`PUT /api/v1/settings/ai/usage-policy`):
+  monthly budget (blank means none), max output tokens per request (sent to the
+  provider as its max-tokens limit), concurrent requests, requests per minute
+  (every attempt counts, failures included), and whether models with no pricing
+  are blocked (the default) or permitted. Changes are audited as
+  `ai_usage_policy.update`.
+- **Pricing** (`/api/v1/settings/ai/pricing`) is admin-entered per provider and
+  model, in USD per million input and output tokens. No price table ships. Changes
+  are audited as `ai_pricing.update` and `ai_pricing.delete`.
+- **Before sending**, the server reserves the most the request could cost:
+  `(UTF-8 bytes of the prompt + 64) × input price + max output tokens × output price`.
+  It rejects the request without contacting the provider if the model is unpriced
+  and blocked (409), too many requests are in flight or were made in the last
+  minute (429), or committed spend plus the reservation would exceed the budget
+  (402). On PostgreSQL the check holds a row lock, so simultaneous requests and
+  multiple workers cannot overrun the limits.
+- **After the response**, the reservation is settled once: with the estimated cost
+  when the provider reported both token counts and the model is priced. Otherwise
+  the cost stays **unknown**, never zero, and the reservation keeps counting as
+  committed spend whenever the request may have been billed (success, timeout, 429,
+  5xx, cancellation). Requests the provider refused outright (400, 401, 403, 404,
+  or never sent) count as zero. A reservation left behind by a crash is shown as
+  stale. It stops counting toward concurrency after the request timeout plus 60
+  seconds, but still counts as spend.
+- Nothing is retried automatically and there is no fallback to another provider
+  or model. A retry by the user is a new, separately counted request.
+- Usage records (`GET /api/v1/settings/ai/usage` and `/usage/records`) hold
+  metadata only: actor, action, provider, model, timestamps, status, token counts
+  and estimates. They never hold prompts, responses, provider error text or keys.
+  Unknown token counts and costs are shown as unknown, and totals report how many
+  requests had unknown usage or cost.
+
 ## Audit history
 
 EmergentCTI keeps an admin-only history of sensitive changes and disclosures in the
