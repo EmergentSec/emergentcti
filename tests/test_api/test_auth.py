@@ -355,6 +355,8 @@ async def test_admin_self_password_change_requires_current_password(
 ) -> None:
     await _login(anon, "alice")
     own_url = f"/api/v1/settings/users/{admin_user.id}/password"
+    # Read before the request: the failed attempt rolls back the shared test session.
+    other_url = f"/api/v1/settings/users/{normal_user.id}/password"
     new_password = "a-brand-new-passphrase"
 
     response = await anon.put(
@@ -363,10 +365,7 @@ async def test_admin_self_password_change_requires_current_password(
     assert response.status_code == 400
 
     # Resetting someone else's password still needs no current password.
-    response = await anon.put(
-        f"/api/v1/settings/users/{normal_user.id}/password",
-        json={"new_password": new_password},
-    )
+    response = await anon.put(other_url, json={"new_password": new_password})
     assert response.status_code == 204
 
 

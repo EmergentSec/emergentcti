@@ -92,7 +92,7 @@ Existing installations must apply the new schema before running the updated API:
 uv run alembic upgrade head
 ```
 
-Research exports including allowlisted indicators, STIX/TAXII/MISP, audit logging, and runtime policy configuration are not included in this slice.
+Research exports including allowlisted indicators, STIX/TAXII/MISP, and runtime policy configuration are not included in this slice (audit history is covered in [Audit history](#audit-history)).
 
 ## Tags and TLP
 
@@ -173,6 +173,52 @@ each provider key must then be re-entered. Provider usage charges and data-handl
 policies belong to the external provider. Saving a key, checking a connection, and
 listing models do not send CTI instance data; only the separately confirmed
 inference test makes a potentially billable request, using one fixed tiny prompt.
+
+## Audit history
+
+EmergentCTI keeps an admin-only history of sensitive changes and disclosures in the
+`audit_events` table: allowlist, export-profile, report, tag/TLP, feed, API-key,
+user, settings, and AI-provider changes; export and attachment downloads; outbound
+AI requests; and one aggregated event per scheduled retention run. Admin users read
+it in **Settings → Audit** or at `GET /api/v1/audit/events`, filtered by time range,
+actor, action, resource, and outcome. API keys cannot read it (403), so a leaked key
+cannot inspect the trail of its own use; `GET /api/v1/audit/meta` lists the action catalog. There are
+no routes to edit or delete events.
+
+Each event records the UTC time, the actor (a user, an API key by its **record id**
+and name, never the key itself, or a system job), the action, the resource with a
+label snapshot, the outcome, and a small sanitized summary. Events have no foreign
+keys, so deleting a user, key, report, or feed keeps its history. Summaries never
+contain keys, passwords, authorization headers, report bodies, AI prompts or
+responses, or provider error bodies; report edits record changed field names only.
+
+**What a write failure means.** A successful change and its event commit in the same
+transaction: if the event cannot be written, the change rolls back and the request
+fails. Denied and failed attempts are recorded best-effort; if that write fails it is
+logged and the response is unchanged. Downloads and AI requests fail closed: if the
+`initiated` event cannot be written, the request returns `503 Audit log unavailable`
+and nothing is disclosed. A download is then marked `completed` once the whole body
+has been handed to the server, or `interrupted` if sending fails or the client
+disconnects. `completed` does not prove the client received the file; an
+`initiated` event without a `completed` one means delivery was not proven.
+
+**Retention.** A daily job at 03:30 UTC deletes events older than
+`AUDIT_RETENTION_DAYS` (default 365, allowed 30–3650; it cannot be disabled) in
+batches of 5,000 and records one `audit.retention_cleanup` event. This is
+independent of `OBSERVABLE_RETENTION_DAYS`; snapshot labels such as observable
+values and report titles remain for the audit retention period even after the
+underlying item is removed by observable retention.
+
+**Storage and backup.** Expect roughly 0.5–1 KB per event. Most volume comes from
+automated downloads: a firewall pulling a blocklist every 5 minutes adds about
+105,000 events (roughly 50–100 MB) a year. Back up `audit_events` with the rest of the
+database (`pg_dump` includes it).
+
+**What is not claimed.** History is append-only *through the application*. A
+database administrator can still change or delete rows; there is no cryptographic
+integrity or external copy. SIEM forwarding and tamper-evident storage are possible
+follow-ups. Requests rejected before reaching a handler (unauthenticated `401`s and
+malformed request bodies) are not recorded.
 
 ## Development
 

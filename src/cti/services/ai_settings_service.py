@@ -26,7 +26,14 @@ from cti.services.ai.catalog import fallback_models
 from cti.services.ai.registry import get_adapter
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    #: Awaited immediately before the provider is contacted (never on a cache
+    #: hit or when the provider is not configured). Routes use it to write the
+    #: ``ai.request`` initiated audit event; if it raises, nothing is sent.
+    BeforeProviderCall = Callable[[], Awaitable[None]]
 
 MODEL_CACHE_TTL = timedelta(hours=1)
 
@@ -188,8 +195,15 @@ async def delete_provider(db: AsyncSession, provider: AiProvider) -> None:
     await _flush_with_orphan_cleanup(db)
 
 
-async def check_provider(db: AsyncSession, provider: AiProvider) -> AiCheckResult:
+async def check_provider(
+    db: AsyncSession,
+    provider: AiProvider,
+    *,
+    before_provider_call: BeforeProviderCall | None = None,
+) -> AiCheckResult:
     config = await _require_provider_config(db, provider)
+    if before_provider_call is not None:
+        await before_provider_call()
     checked_at = _now()
     try:
         api_key = _decrypt_api_key(config)
@@ -213,6 +227,7 @@ async def list_models(
     provider: AiProvider,
     *,
     refresh: bool,
+    before_provider_call: BeforeProviderCall | None = None,
 ) -> AiModelList:
     config = await _require_provider_config(db, provider)
     cached = _cached_models(config)
@@ -231,6 +246,8 @@ async def list_models(
             error=None,
         )
 
+    if before_provider_call is not None:
+        await before_provider_call()
     try:
         api_key = _decrypt_api_key(config)
         models = await get_adapter(provider).list_models(api_key)
@@ -314,8 +331,12 @@ async def inference_test(
     db: AsyncSession,
     provider: AiProvider,
     model: str,
+    *,
+    before_provider_call: BeforeProviderCall | None = None,
 ) -> AiInferenceResult:
     config = await _require_provider_config(db, provider)
+    if before_provider_call is not None:
+        await before_provider_call()
     started_at = perf_counter()
     try:
         api_key = _decrypt_api_key(config)

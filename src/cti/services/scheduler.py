@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import timedelta
 
 from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -18,6 +19,9 @@ from cti.services.confidence import DecaySettings, apply_confidence_decay
 logger = logging.getLogger(__name__)
 
 scheduler: AsyncIOScheduler | None = None
+
+OBSERVABLE_RETENTION_JOB_ID = "system:observable_retention"
+AUDIT_RETENTION_JOB_ID = "system:audit_retention"
 
 
 def init_scheduler(redis_url: str) -> AsyncIOScheduler:
@@ -114,12 +118,31 @@ async def add_token_cleanup_job() -> None:
     )
 
 
+async def add_audit_retention_job(sched: AsyncIOScheduler | None = None) -> None:
+    """Register daily audit-history retention (03:30 UTC; cannot be disabled).
+
+    Pass the scheduler being started; defaults to :func:`get_scheduler`.
+    """
+    (sched or get_scheduler()).add_job(
+        _run_audit_retention_job,
+        CronTrigger(hour=3, minute=30, timezone="UTC"),
+        id=AUDIT_RETENTION_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
+
 async def add_retention_job() -> None:
-    """Register daily retention enforcement (zero retention days disables deletion)."""
+    """Register daily retention enforcement (zero retention days disables deletion).
+
+    Each run writes one aggregated ``retention.observables_cleanup`` event.
+    """
     get_scheduler().add_job(
         _run_retention_job,
         CronTrigger(hour=3, minute=0, timezone="UTC"),
-        id="system:observable_retention",
+        id=OBSERVABLE_RETENTION_JOB_ID,
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -128,15 +151,65 @@ async def add_retention_job() -> None:
 
 
 async def _run_retention_job() -> None:
-    """APScheduler callback: enforce retention using a dedicated session."""
+    """APScheduler callback: enforce retention, then write one aggregated event."""
     from cti.core.database import async_session_factory
+    from cti.services import audit
     from cti.services.retention import enforce_retention
 
+    retention_days = get_settings().OBSERVABLE_RETENTION_DAYS
+    summary: dict[str, object]
     async with async_session_factory() as db:
         try:
-            await enforce_retention(db, get_settings().OBSERVABLE_RETENTION_DAYS)
-        except Exception:
+            deleted = await enforce_retention(db, retention_days)
+        except Exception as exc:
             logger.error("Observable retention job failed", exc_info=True)
+            outcome = audit.AuditOutcome.FAILED
+            summary = {"retention_days": retention_days, "error_code": type(exc).__name__}
+        else:
+            outcome = audit.AuditOutcome.SUCCEEDED
+            summary = {"deleted": deleted, "retention_days": retention_days}
+    await audit.record_independent(
+        actor=audit.system_actor(OBSERVABLE_RETENTION_JOB_ID, "Observable retention"),
+        action="retention.observables_cleanup",
+        resource_type="retention",
+        outcome=outcome,
+        summary=summary,
+        strict=False,
+    )
+
+
+async def _run_audit_retention_job() -> None:
+    """APScheduler callback: purge expired audit events, then record one event.
+
+    Never one event per removed row. The cutoff is fixed before purging so the
+    aggregated event written afterwards is never itself eligible.
+    """
+    from cti.core import database
+    from cti.services import audit
+
+    retention_days = get_settings().AUDIT_RETENTION_DAYS
+    cutoff = audit.retention_cutoff(retention_days)
+    summary: dict[str, object] = {"cutoff": cutoff.isoformat()}
+    outcome = audit.AuditOutcome.SUCCEEDED
+    try:
+        async with database.async_session_factory() as db:
+            summary["deleted"] = await audit.purge_expired_events(
+                db, retention_days, now=cutoff + timedelta(days=retention_days)
+            )
+    except Exception as exc:
+        outcome = audit.AuditOutcome.FAILED
+        cause = exc.__cause__ if isinstance(exc, audit.AuditRetentionError) else exc
+        summary["deleted"] = exc.deleted if isinstance(exc, audit.AuditRetentionError) else 0
+        summary["error_code"] = type(cause or exc).__name__
+        logger.error("Audit retention job failed (%s)", summary["error_code"])
+    await audit.record_independent(
+        actor=audit.system_actor(AUDIT_RETENTION_JOB_ID, "Audit retention"),
+        action="audit.retention_cleanup",
+        resource_type="audit",
+        outcome=outcome,
+        summary=summary,
+        strict=False,
+    )
 
 
 async def _run_feed_job(feed_id: uuid.UUID) -> None:

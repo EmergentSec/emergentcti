@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from cti.api.v1.ai_settings import router as ai_settings_router
 from cti.api.v1.allowlist import router as allowlist_router
+from cti.api.v1.audit import router as audit_router
 from cti.api.v1.auth import router as auth_router
 from cti.api.v1.export import router as export_router
 from cti.api.v1.feeds import router as feeds_router
@@ -27,3 +28,4 @@ api_router.include_router(settings_router, prefix="/settings", tags=["settings"]
 api_router.include_router(ai_settings_router, prefix="/settings/ai", tags=["settings", "ai"])
 api_router.include_router(stats_router, prefix="/stats", tags=["stats"])
 api_router.include_router(tags_router, prefix="/tags", tags=["tags"])
+api_router.include_router(audit_router, prefix="/audit", tags=["audit"])

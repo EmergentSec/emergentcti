@@ -225,13 +225,15 @@ async def test_red_report_endpoints_404_without_change(
     kwargs: dict,
 ) -> None:
     report = await _report(db_session, "Named recipients", "red")
-    response = await client.request(method.upper(), f"{REPORTS}/{report.id}{suffix}", **kwargs)
+    # Read before the request: a failed attempt rolls back the shared test session.
+    report_id = report.id
+    response = await client.request(method.upper(), f"{REPORTS}/{report_id}{suffix}", **kwargs)
     assert response.status_code == 404
     assert "Named recipients" not in response.text
-    title = await db_session.scalar(select(Report.title).where(Report.id == report.id))
+    title = await db_session.scalar(select(Report.title).where(Report.id == report_id))
     assert title == "Named recipients"
     filename = await db_session.scalar(
-        select(ReportAttachment.original_filename).where(ReportAttachment.report_id == report.id)
+        select(ReportAttachment.original_filename).where(ReportAttachment.report_id == report_id)
     )
     assert filename == "n.txt"
 
@@ -245,6 +247,9 @@ async def test_link_or_unlink_red_observable_404(
         f"{REPORTS}/{report.id}/observables", json={"observable_id": str(red_obs.id)}
     )
     assert linked.status_code == 404
+    # The failed attempt rolled back the shared test session; reload the fixtures.
+    await db_session.refresh(report)
+    await db_session.refresh(red_obs)
     await _link(db_session, report, red_obs)
     unlinked = await client.delete(f"{REPORTS}/{report.id}/observables/{red_obs.id}")
     assert unlinked.status_code == 404

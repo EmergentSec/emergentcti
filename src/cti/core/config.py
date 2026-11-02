@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     # ── Instance / display settings (read-only, env-driven) ──────────────
     INSTANCE_NAME: str = "EmergentCTI"
     OBSERVABLE_RETENTION_DAYS: int = Field(default=180, ge=0)
+    # Audit history retention: bounded and cannot be disabled (independent of observables).
+    AUDIT_RETENTION_DAYS: int = Field(default=365, ge=30, le=3650)
     DEFAULT_EXPORT_FORMAT: str = "text"
     REPORT_MAX_UPLOAD_BYTES: int = Field(default=20 * 1024 * 1024, ge=1)
 
