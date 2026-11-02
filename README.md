@@ -92,7 +92,7 @@ Existing installations must apply the new schema before running the updated API:
 uv run alembic upgrade head
 ```
 
-Research exports including allowlisted indicators, STIX/TAXII/MISP, audit logging, and runtime policy configuration are not included in this slice.
+Research exports including allowlisted indicators, STIX/TAXII/MISP, and runtime policy configuration are not included in this slice (audit history is covered in [Audit history](#audit-history)).
 
 ## Tags and TLP
 
@@ -179,9 +179,10 @@ inference test makes a potentially billable request, using one fixed tiny prompt
 EmergentCTI keeps an admin-only history of sensitive changes and disclosures in the
 `audit_events` table: allowlist, export-profile, report, tag/TLP, feed, API-key,
 user, settings, and AI-provider changes; export and attachment downloads; outbound
-AI requests; and one aggregated event per scheduled retention run. Admins (and API
-keys) read it at `GET /api/v1/audit/events`, filtered by time range, actor, action,
-resource, and outcome; `GET /api/v1/audit/meta` lists the action catalog. There are
+AI requests; and one aggregated event per scheduled retention run. Admin users read
+it in **Settings → Audit** or at `GET /api/v1/audit/events`, filtered by time range,
+actor, action, resource, and outcome. API keys cannot read it (403), so a leaked key
+cannot inspect the trail of its own use; `GET /api/v1/audit/meta` lists the action catalog. There are
 no routes to edit or delete events.
 
 Each event records the UTC time, the actor (a user, an API key by its **record id**

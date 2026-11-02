@@ -189,8 +189,11 @@ Callers pass an explicit, minimal summary; `sanitize_summary` also enforces:
 
 ## History API (admin only)
 
-`GET /api/v1/audit/events`. Requires `require_admin` (admin users and API keys,
-matching the rest of the admin API). A non-admin user gets 403.
+`GET /api/v1/audit/events`. Interactive admin users only. A non-admin user gets
+403, and so does an API key, even though keys are admin-equivalent elsewhere for
+compatibility. This is a new endpoint, a leaked key must not be able to read the
+trail that records its own use, and event labels (report titles, observable values)
+may name TLP:RED items that API keys cannot see. (Decided during T4, 2026-11-02.)
 
 Query params, all optional and combinable: `since`, `until` (ISO 8601
 datetimes, inclusive/exclusive), `actor_type`, `actor_id`, `action`

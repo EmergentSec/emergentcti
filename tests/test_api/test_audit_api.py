@@ -61,6 +61,21 @@ async def seed(db: AsyncSession) -> list[AuditEvent]:
     return events
 
 
+@pytest.fixture
+async def admin(app: FastAPI):
+    """Interactive admin-user client: the only caller allowed to read history."""
+    async with non_admin_client(app, role=UserRole.admin) as ac:
+        yield ac
+
+
+async def test_api_keys_cannot_read_history(client: AsyncClient, db_session) -> None:
+    await seed(db_session)
+    for url in (URL, "/api/v1/audit/meta"):
+        response = await client.get(url)
+        assert response.status_code == 403
+        assert "interactive admin" in response.json()["detail"]
+
+
 def summaries(response) -> list[int]:
     assert response.status_code == 200, response.text
     return [item["summary"]["n"] for item in response.json()["items"]]
@@ -69,9 +84,9 @@ def summaries(response) -> list[int]:
 # ── listing ────────────────────────────────────────────────────────────────
 
 
-async def test_list_shape_and_newest_first(client: AsyncClient, db_session) -> None:
+async def test_list_shape_and_newest_first(admin: AsyncClient, db_session) -> None:
     events = await seed(db_session)
-    response = await client.get(URL)
+    response = await admin.get(URL)
     body = response.json()
     assert (body["total"], body["page"], body["size"], body["pages"]) == (6, 1, 50, 1)
     assert summaries(response) == [5, 4, 3, 2, 1, 0]
@@ -91,25 +106,25 @@ async def test_list_shape_and_newest_first(client: AsyncClient, db_session) -> N
     }
 
 
-async def test_ties_ordered_by_id_desc(client: AsyncClient, db_session) -> None:
+async def test_ties_ordered_by_id_desc(admin: AsyncClient, db_session) -> None:
     events = await seed(db_session)
     for event in events:
         event.occurred_at = T0
     await db_session.commit()
-    ids = [item["id"] for item in (await client.get(URL)).json()["items"]]
+    ids = [item["id"] for item in (await admin.get(URL)).json()["items"]]
     assert ids == sorted(ids, reverse=True)
 
 
-async def test_pagination(client: AsyncClient, db_session) -> None:
+async def test_pagination(admin: AsyncClient, db_session) -> None:
     await seed(db_session)
-    page1 = await client.get(URL, params={"size": 4})
-    page2 = await client.get(URL, params={"size": 4, "page": 2})
-    page3 = await client.get(URL, params={"size": 4, "page": 3})
+    page1 = await admin.get(URL, params={"size": 4})
+    page2 = await admin.get(URL, params={"size": 4, "page": 2})
+    page3 = await admin.get(URL, params={"size": 4, "page": 3})
     assert summaries(page1) == [5, 4, 3, 2]
     assert summaries(page2) == [1, 0]
     assert summaries(page3) == []
     assert page2.json()["pages"] == 2 and page2.json()["total"] == 6
-    empty = (await client.get(URL, params={"action": "tag.create"})).json()
+    empty = (await admin.get(URL, params={"action": "tag.create"})).json()
     assert (empty["total"], empty["pages"], empty["items"]) == (0, 0, [])
 
 
@@ -125,13 +140,13 @@ async def test_pagination(client: AsyncClient, db_session) -> None:
         {"actor_id": "x" * 65},
     ],
 )
-async def test_invalid_params_rejected(client: AsyncClient, params: dict) -> None:
-    assert (await client.get(URL, params=params)).status_code == 422
+async def test_invalid_params_rejected(admin: AsyncClient, params: dict) -> None:
+    assert (await admin.get(URL, params=params)).status_code == 422
 
 
-async def test_size_upper_bound_accepted(client: AsyncClient, db_session) -> None:
+async def test_size_upper_bound_accepted(admin: AsyncClient, db_session) -> None:
     await seed(db_session)
-    assert len(summaries(await client.get(URL, params={"size": 100}))) == 6
+    assert len(summaries(await admin.get(URL, params={"size": 100}))) == 6
 
 
 @pytest.mark.parametrize(
@@ -157,9 +172,9 @@ async def test_size_upper_bound_accepted(client: AsyncClient, db_session) -> Non
         ({"action": "export.download", "outcome": "completed", "actor_type": "api_key"}, [3]),
     ],
 )
-async def test_filters(client: AsyncClient, db_session, params: dict, expected: list[int]) -> None:
+async def test_filters(admin: AsyncClient, db_session, params: dict, expected: list[int]) -> None:
     await seed(db_session)
-    response = await client.get(URL, params=params)
+    response = await admin.get(URL, params=params)
     assert summaries(response) == expected
     assert response.json()["total"] == len(expected)
 
@@ -173,7 +188,7 @@ async def test_requires_authentication(app: FastAPI) -> None:
         assert (await anon.get("/api/v1/audit/meta")).status_code == 401
 
 
-async def test_non_admin_user_gets_403(client: AsyncClient, app: FastAPI, db_session) -> None:
+async def test_non_admin_user_gets_403(app: FastAPI, db_session) -> None:
     await seed(db_session)
     async with non_admin_client(app) as user:
         assert (await user.get(URL)).status_code == 403
@@ -183,17 +198,17 @@ async def test_non_admin_user_gets_403(client: AsyncClient, app: FastAPI, db_ses
 
 
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
-async def test_no_mutation_routes(client: AsyncClient, db_session, method: str) -> None:
+async def test_no_mutation_routes(admin: AsyncClient, db_session, method: str) -> None:
     [event, *_] = await seed(db_session)
-    assert (await client.request(method, URL, json={})).status_code == 405
-    item = await client.request(method, f"{URL}/{event.id}", json={})
+    assert (await admin.request(method, URL, json={})).status_code == 405
+    item = await admin.request(method, f"{URL}/{event.id}", json={})
     assert item.status_code in (404, 405)
-    assert (await client.request(method, "/api/v1/audit/meta", json={})).status_code == 405
+    assert (await admin.request(method, "/api/v1/audit/meta", json={})).status_code == 405
     assert len((await db_session.scalars(select(AuditEvent))).all()) == 6
 
 
-async def test_meta_exposes_catalog(client: AsyncClient) -> None:
-    body = (await client.get("/api/v1/audit/meta")).json()
+async def test_meta_exposes_catalog(admin: AsyncClient) -> None:
+    body = (await admin.get("/api/v1/audit/meta")).json()
     assert body["actions"] == list(audit.ACTION_CATALOG)
     assert {"report.attachment_download", "ai.request", "audit.retention_cleanup"} <= set(
         body["actions"]
@@ -297,7 +312,10 @@ async def test_api_key_attribution_uses_record_id_not_raw_key(
     assert key.key_hash not in dumped
     assert seeded_api_key[:12] not in dumped  # not even the display prefix
 
-    listed = (await client.get(URL)).json()["items"]
+    # API keys cannot read the history at all; admins see the record id only.
+    assert (await client.get(URL)).status_code == 403
+    async with non_admin_client(helper_app, role=UserRole.admin) as admin:
+        listed = (await admin.get(URL)).json()["items"]
     assert listed[0]["actor_id"] == str(key.id)
     assert seeded_api_key not in json.dumps(listed)
 
