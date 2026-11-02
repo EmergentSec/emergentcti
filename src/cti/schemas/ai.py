@@ -264,6 +264,11 @@ class AiUsageReport(BaseModel):
     totals: AiUsageTotals
     budget: AiUsageBudget
     by_provider_model: list[AiUsageByProviderModel]
+    # The breakdown holds at most ``by_provider_model_limit`` groups (most
+    # requests first); every group beyond it is summed into ``..._other``.
+    by_provider_model_limit: int
+    by_provider_model_omitted_groups: int
+    by_provider_model_other: AiUsageTotals | None
     by_day: list[AiUsageByDay]
 
 

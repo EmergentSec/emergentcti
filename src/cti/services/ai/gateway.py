@@ -39,7 +39,7 @@ from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Date, Numeric, case, cast, delete, func, or_, select, update
+from sqlalchemy import Date, Integer, Numeric, case, cast, delete, func, or_, select, update
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.functions import FunctionElement
 
@@ -72,6 +72,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.orm import InstrumentedAttribute
     from sqlalchemy.sql.elements import ColumnElement
 
     from cti.models.ai import AiProvider
@@ -281,13 +282,40 @@ def current_month(now: datetime | None = None) -> tuple[int, int]:
     return moment.year, moment.month
 
 
+_MICROS_PER_USD = 1_000_000
+
+
+def sum_usd(
+    expression: ColumnElement[Any] | InstrumentedAttribute[Any], dialect: str
+) -> ColumnElement[Any]:
+    """SQL: an exact SUM of a six-place USD expression; 0 when nothing matches.
+
+    PostgreSQL sums ``numeric`` exactly. SQLite's NUMERIC sums are binary
+    floating point, so there each value is rounded to integer micro-dollars
+    first and the integers are summed (exact up to SQLite's 64-bit integer
+    range, about 9.2 trillion USD). Read the result with :func:`usd_from_sum`.
+    """
+    if dialect == "sqlite":
+        micros = cast(func.round(expression * _MICROS_PER_USD), Integer)
+        return func.coalesce(func.sum(micros), 0)
+    return func.coalesce(func.sum(cast(expression, Numeric(14, 6))), 0)
+
+
+def usd_from_sum(value: Any, dialect: str) -> Decimal:
+    """The Decimal amount of a :func:`sum_usd` result, at six places."""
+    if dialect == "sqlite":
+        return Decimal(int(value or 0)).scaleb(-6)
+    return _usd(Decimal(str(value or 0)))
+
+
 async def committed_spend(db: AsyncSession, start: datetime, end: datetime) -> Decimal:
+    dialect = db.get_bind().dialect.name
     total = await db.scalar(
-        select(func.coalesce(func.sum(cast(committed_amount(), Numeric(14, 6))), 0)).where(
+        select(sum_usd(committed_amount(), dialect)).where(
             AiUsageRecord.started_at >= start, AiUsageRecord.started_at < end
         )
     )
-    return _usd(Decimal(str(total or 0)))
+    return _usd(usd_from_sum(total, dialect))
 
 
 # ── Policy and pricing reads ───────────────────────────────────────────────

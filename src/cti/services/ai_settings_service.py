@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Numeric, and_, case, cast, delete, func, or_, select
+from sqlalchemy import and_, case, delete, func, or_, select
 
 from cti.core.security import decrypt_config, encrypt_config
 from cti.models.ai import AiProvider, AiProviderConfig, AiSettingsRecord
@@ -471,6 +470,10 @@ class _Totals:
         for name in self.__dataclass_fields__:
             setattr(self, name, getattr(self, name) + getattr(other, name))
 
+    def subtract(self, other: _Totals) -> None:
+        for name in self.__dataclass_fields__:
+            setattr(self, name, getattr(self, name) - getattr(other, name))
+
     def fields(self) -> dict[str, object]:
         return {
             "requests": self.requests,
@@ -487,15 +490,19 @@ class _Totals:
         }
 
 
-def _usage_aggregates() -> list[ColumnElement[Any]]:
+USAGE_BREAKDOWN_LIMIT = 100
+"""Most provider/model rows the usage report lists; the rest are one "other" bucket."""
+
+
+def _usage_aggregates(dialect: str) -> list[ColumnElement[Any]]:
     """Per-group report columns, in :class:`_Totals` field order.
 
     "Unknown" counts every record whose provider usage or cost is NULL, whatever
     its billability: a missing number is never reported as zero. Committed spend
-    is the separate :func:`gateway.committed_amount` rule.
+    is the separate :func:`gateway.committed_amount` rule. Money columns are
+    exact sums (see :func:`gateway.sum_usd`).
     """
     record = AiUsageRecord
-    usd = Numeric(14, 6)
     return [
         func.count(),
         _count_where(record.status == UsageStatus.SUCCEEDED.value),
@@ -505,13 +512,13 @@ def _usage_aggregates() -> list[ColumnElement[Any]]:
         func.coalesce(func.sum(record.input_tokens), 0),
         func.coalesce(func.sum(record.output_tokens), 0),
         _count_where(or_(record.input_tokens.is_(None), record.output_tokens.is_(None))),
-        func.coalesce(func.sum(cast(record.cost_usd, usd)), 0),
+        gateway.sum_usd(record.cost_usd, dialect),
         _count_where(record.cost_usd.is_(None)),
-        func.coalesce(func.sum(cast(gateway.committed_amount(), usd)), 0),
+        gateway.sum_usd(gateway.committed_amount(), dialect),
     ]
 
 
-def _totals_from_row(values: Sequence[Any]) -> _Totals:
+def _totals_from_row(values: Sequence[Any], dialect: str) -> _Totals:
     (
         requests,
         succeeded,
@@ -534,33 +541,58 @@ def _totals_from_row(values: Sequence[Any]) -> _Totals:
         input_tokens=int(input_tokens),
         output_tokens=int(output_tokens),
         token_unknown_requests=int(token_unknown),
-        estimated_cost_usd=Decimal(str(cost)),
+        estimated_cost_usd=gateway.usd_from_sum(cost, dialect),
         cost_unknown_requests=int(cost_unknown),
-        committed_usd=Decimal(str(committed)),
+        committed_usd=gateway.usd_from_sum(committed, dialect),
     )
 
 
 async def usage_report(db: AsyncSession, year: int, month: int) -> AiUsageReport:
-    """Month totals and breakdowns from one SQL ``GROUP BY``; no record is loaded.
+    """Month totals and breakdowns, each from its own bounded SQL aggregate.
 
-    Rows are grouped by (provider, model, UTC day): at most pairs x 31 groups,
-    rolled up here into totals, per-pair and per-day figures.
+    No record is loaded and every result is bounded whatever the month holds:
+    one totals row, at most 31 day rows, at most :data:`USAGE_BREAKDOWN_LIMIT`
+    provider/model rows (most requests first), and a count of the groups beyond
+    that limit. Those groups are reported as one "other" bucket: the totals
+    minus the listed rows, exact because every sum is exact.
     """
+    dialect = db.get_bind().dialect.name
     start, end = gateway.month_bounds(year, month)
+    in_month = (AiUsageRecord.started_at >= start, AiUsageRecord.started_at < end)
+    aggregates = _usage_aggregates(dialect)
+
+    totals_row = (await db.execute(select(*aggregates).where(*in_month))).one()
+    totals = _totals_from_row(totals_row, dialect)
+
     day = gateway.utc_day(AiUsageRecord.started_at)
-    groups = await db.execute(
-        select(AiUsageRecord.provider, AiUsageRecord.model, day, *_usage_aggregates())
-        .where(AiUsageRecord.started_at >= start, AiUsageRecord.started_at < end)
-        .group_by(AiUsageRecord.provider, AiUsageRecord.model, day)
+    day_rows = await db.execute(
+        select(day, *aggregates).where(*in_month).group_by(day).order_by(day)
     )
-    totals = _Totals()
-    by_pair: dict[tuple[str, str], _Totals] = defaultdict(_Totals)
-    by_day: dict[date, _Totals] = defaultdict(_Totals)
-    for provider, model, group_day, *values in groups.all():
-        group = _totals_from_row(values)
-        totals.add(group)
-        by_pair[(provider, model)].add(group)
-        by_day[group_day].add(group)
+    by_day = [(group_day, _totals_from_row(values, dialect)) for group_day, *values in day_rows]
+
+    pair = (AiUsageRecord.provider, AiUsageRecord.model)
+    pair_rows = await db.execute(
+        select(*pair, *aggregates)
+        .where(*in_month)
+        .group_by(*pair)
+        .order_by(func.count().desc(), *pair)
+        .limit(USAGE_BREAKDOWN_LIMIT)
+    )
+    by_pair = [
+        (provider, model, _totals_from_row(values, dialect))
+        for provider, model, *values in pair_rows
+    ]
+    other: _Totals | None = None
+    omitted_groups = 0
+    if len(by_pair) == USAGE_BREAKDOWN_LIMIT:
+        groups = select(*pair).where(*in_month).group_by(*pair).subquery()
+        group_count = int(await db.scalar(select(func.count()).select_from(groups)) or 0)
+        omitted_groups = group_count - len(by_pair)
+    if omitted_groups > 0:
+        other = _Totals()
+        other.add(totals)
+        for _provider, _model, listed in by_pair:
+            other.subtract(listed)
 
     policy = await gateway.read_policy(db)
     budget = policy.monthly_budget_usd
@@ -583,13 +615,18 @@ async def usage_report(db: AsyncSession, year: int, month: int) -> AiUsageReport
             ),
             "by_provider_model": [
                 AiUsageByProviderModel.model_validate(
-                    {"provider": provider, "model": model, **pair.fields()}
+                    {"provider": provider, "model": model, **pair_totals.fields()}
                 )
-                for (provider, model), pair in sorted(by_pair.items())
+                for provider, model, pair_totals in by_pair
             ],
+            "by_provider_model_limit": USAGE_BREAKDOWN_LIMIT,
+            "by_provider_model_omitted_groups": omitted_groups,
+            "by_provider_model_other": (
+                None if other is None else AiUsageTotals.model_validate(other.fields())
+            ),
             "by_day": [
-                AiUsageByDay.model_validate({"date": day, **day_totals.fields()})
-                for day, day_totals in sorted(by_day.items())
+                AiUsageByDay.model_validate({"date": group_day, **day_totals.fields()})
+                for group_day, day_totals in by_day
             ],
         }
     )

@@ -123,10 +123,25 @@ New `AiErrorCategory` values: `budget_exceeded`, `concurrency_limit`, `local_rat
    "totals": UsageTotals,
    "budget":{"monthly_budget_usd":"10.0000"|null,"committed_usd":"…","remaining_usd":"…"|null},
    "by_provider_model":[{"provider","model", ...UsageTotals}],
+   "by_provider_model_limit":100,
+   "by_provider_model_omitted_groups":0,
+   "by_provider_model_other": UsageTotals | null,
    "by_day":[{"date":"2026-11-02", ...UsageTotals}]}
   ```
   `UsageTotals = {requests, succeeded, failed, cancelled, reserved, input_tokens, output_tokens, token_unknown_requests, estimated_cost_usd, cost_unknown_requests, committed_usd}`.
   Money is decimal strings. Token sums are ints over known values only.
+  The response is bounded whatever the month holds. Totals, `by_day` (at most 31 rows) and
+  `by_provider_model` are separate SQL aggregates; no record is loaded. `by_provider_model`
+  lists at most `by_provider_model_limit` (`USAGE_BREAKDOWN_LIMIT` = 100) groups, ordered by
+  `requests` descending, then `provider`, then `model`. The groups beyond the limit are never
+  dropped silently: `by_provider_model_omitted_groups` counts them and
+  `by_provider_model_other` is their exact aggregate (`totals` minus the listed rows), or
+  `null` when nothing is omitted. So every `UsageTotals` field of `totals` equals the sum of
+  the listed rows plus `other`. The UI renders the remainder as an "Other models (N more)" row
+  with the same unknown-count treatment as the other rows.
+  Money sums are exact: PostgreSQL sums `numeric`; SQLite, whose `NUMERIC` sums are binary
+  floating point, sums each value as integer micro-dollars and converts back to a six-place
+  decimal. The gateway's committed-spend read for budget admission uses the same sum.
 - `GET /usage/records?month=&limit=50&before=<record_id>` → `{items:[record without actor_user_id, with actor_label, stale flag], next_before}`.
 - `GET /usage-policy` and `PUT /usage-policy` (full body, validated ranges; budget is a decimal
   string or null). Audit it as `ai_usage_policy.update`.

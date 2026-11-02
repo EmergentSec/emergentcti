@@ -336,3 +336,50 @@ async def test_usage_report_buckets_utc_days_whatever_the_session_time_zone(
     assert (totals.input_tokens, totals.output_tokens) == (10, 2)
     assert (totals.token_unknown_requests, totals.cost_unknown_requests) == (1, 1)
     assert (totals.estimated_cost_usd, totals.committed_usd) == ("0.250000", "0.250000")
+
+
+async def test_usage_report_bounds_breakdown_and_sums_exactly_on_postgresql(
+    pg_factory: Any,
+) -> None:
+    """The top-N breakdown, its exact remainder and exact numeric sums on PostgreSQL."""
+    from datetime import UTC, datetime
+
+    from cti.services.ai_settings_service import USAGE_BREAKDOWN_LIMIT, usage_report
+
+    large = Decimal("99999999.999999")
+    small = Decimal("0.000001")
+    started = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
+    models = USAGE_BREAKDOWN_LIMIT + 5
+    costs = [large] * 1000 + [small]
+    async with pg_factory() as db:
+        for index, cost in enumerate(costs):
+            db.add(
+                AiUsageRecord(
+                    action="inference_test",
+                    provider="openai",
+                    # Model 0 gets the bulk; the rest one or two records each.
+                    model=f"model-{max(0, index - len(costs) + models):03d}",
+                    status="succeeded",
+                    billable="yes",
+                    started_at=started,
+                    usage_source="unknown",
+                    cost_usd=cost,
+                    cost_source="estimated",
+                )
+            )
+        await db.commit()
+
+        report = await usage_report(db, 2026, 11)
+
+    expected = f"{large * 1000 + small:.6f}"
+    assert report.totals.requests == len(costs)
+    assert (report.totals.estimated_cost_usd, report.totals.committed_usd) == (expected, expected)
+    assert len(report.by_provider_model) == USAGE_BREAKDOWN_LIMIT
+    assert report.by_provider_model[0].model == "model-000"
+    assert report.by_provider_model_omitted_groups == models - USAGE_BREAKDOWN_LIMIT
+    other = report.by_provider_model_other
+    assert other is not None
+    listed = [*report.by_provider_model, other]
+    assert sum(row.requests for row in listed) == report.totals.requests
+    assert f"{sum(Decimal(row.estimated_cost_usd) for row in listed):.6f}" == expected
+    assert f"{sum(Decimal(row.committed_usd) for row in listed):.6f}" == expected

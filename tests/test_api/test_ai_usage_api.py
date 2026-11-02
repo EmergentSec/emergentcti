@@ -565,7 +565,7 @@ async def test_usage_report_counts_unknowns_regardless_of_billable(
 async def test_usage_report_aggregates_in_sql_without_loading_records(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """The report must not materialize the month's records (one GROUP BY)."""
+    """The report must not materialize the month's records (only bounded aggregates)."""
     from sqlalchemy import event
     from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -587,12 +587,177 @@ async def test_usage_report_aggregates_in_sql_without_loading_records(
     assert response.status_code == 200
     assert response.json()["totals"]["requests"] == 3
     usage_reads = [s for s in statements if "FROM ai_usage_records" in s]
-    assert len(usage_reads) == 1, usage_reads
-    [report_query] = usage_reads
-    assert "GROUP BY" in report_query
-    # An entity load would select per-record columns such as the id or actor.
-    assert "ai_usage_records.id" not in report_query
-    assert "ai_usage_records.actor_label" not in report_query
+    # Totals, days and the provider/model breakdown; the group count is only
+    # needed once the breakdown is full.
+    assert len(usage_reads) == 3, usage_reads
+    totals_query, day_query, pair_query = usage_reads
+    assert "GROUP BY" not in totals_query
+    assert "GROUP BY" in day_query
+    assert "GROUP BY" in pair_query
+    assert "LIMIT" in pair_query
+    for query in usage_reads:
+        # An entity load would select per-record columns such as the id or actor.
+        assert "ai_usage_records.id" not in query
+        assert "ai_usage_records.actor_label" not in query
+
+
+TOTAL_FIELDS = (
+    "requests",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "reserved",
+    "input_tokens",
+    "output_tokens",
+    "token_unknown_requests",
+    "estimated_cost_usd",
+    "cost_unknown_requests",
+    "committed_usd",
+)
+
+
+def _field_sum(rows: list[dict[str, Any]], name: str) -> Any:
+    if name.endswith("_usd"):
+        return f"{sum((Decimal(row[name]) for row in rows), Decimal(0)):.6f}"
+    return sum(row[name] for row in rows)
+
+
+async def test_usage_breakdown_is_bounded_with_exact_other_bucket(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """More than 100 models: the top 100 are listed and the rest summed, never dropped."""
+    from cti.services.ai_settings_service import USAGE_BREAKDOWN_LIMIT
+
+    started = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
+    models = USAGE_BREAKDOWN_LIMIT + 37
+    records = []
+    for index in range(models):
+        # Model i gets 1 + i % 4 requests, so the ordering has ties to break.
+        for repeat in range(1 + index % 4):
+            records.append(
+                AiUsageRecord(
+                    action="inference_test",
+                    provider="openai" if index % 2 else "anthropic",
+                    model=f"model-{index:03d}",
+                    status="failed" if repeat == 2 else "succeeded",
+                    billable="yes",
+                    started_at=started + timedelta(days=index % 3),
+                    input_tokens=None if repeat == 1 else index,
+                    output_tokens=3,
+                    usage_source="provider_reported",
+                    reserved_usd=Decimal("0.5"),
+                    cost_usd=None if repeat == 3 else Decimal(index) / 1000,
+                    cost_source="estimated",
+                    actor_label="alice",
+                )
+            )
+    db_session.add_all(records)
+    await db_session.commit()
+
+    body = (await client.get(f"{BASE}/usage?month=2026-11")).json()
+
+    rows = body["by_provider_model"]
+    assert body["by_provider_model_limit"] == USAGE_BREAKDOWN_LIMIT
+    assert len(rows) == USAGE_BREAKDOWN_LIMIT
+    assert body["by_provider_model_omitted_groups"] == models - USAGE_BREAKDOWN_LIMIT
+    # Most requests first, then provider and model.
+    keys = [(-row["requests"], row["provider"], row["model"]) for row in rows]
+    assert keys == sorted(keys)
+    listed = {row["model"] for row in rows}
+    omitted = [1 + i % 4 for i in range(models) if f"model-{i:03d}" not in listed]
+    assert min(row["requests"] for row in rows) >= max(omitted)
+    other = body["by_provider_model_other"]
+    assert other is not None
+    assert other["requests"] >= 1
+    for name in TOTAL_FIELDS:
+        assert body["totals"][name] == _field_sum([*rows, other], name), name
+    assert body["totals"]["requests"] == len(records)
+    assert len(body["by_day"]) == 3
+
+
+async def test_usage_breakdown_at_the_limit_has_no_other_bucket(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    from cti.services.ai_settings_service import USAGE_BREAKDOWN_LIMIT
+
+    started = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
+    db_session.add_all(
+        AiUsageRecord(
+            action="inference_test",
+            provider="openai",
+            model=f"model-{index:03d}",
+            status="succeeded",
+            billable="yes",
+            started_at=started,
+            usage_source="unknown",
+            cost_source="unknown",
+        )
+        for index in range(USAGE_BREAKDOWN_LIMIT)
+    )
+    await db_session.commit()
+
+    body = (await client.get(f"{BASE}/usage?month=2026-11")).json()
+
+    assert len(body["by_provider_model"]) == USAGE_BREAKDOWN_LIMIT
+    assert body["by_provider_model_omitted_groups"] == 0
+    assert body["by_provider_model_other"] is None
+
+
+async def test_usage_report_sums_money_exactly(db_session: AsyncSession) -> None:
+    """SQLite NUMERIC sums are floating point; the report must equal Decimal sums.
+
+    Mirrors the R4 proof: 1000 x 99999999.999999 + 0.000001 must not round, for
+    both the estimated cost and committed spend (including reservation-based,
+    stale and non-billable contributions).
+    """
+    from cti.services.ai_settings_service import usage_report
+
+    large = Decimal("99999999.999999")
+    small = Decimal("0.000001")
+    started = datetime(2026, 11, 2, tzinfo=UTC)
+    shapes: list[dict[str, Any]] = [{"cost_usd": large} for _ in range(1000)]
+    shapes.append({"cost_usd": small})
+    # Committed from the reservation: billed with unknown cost, possibly billed,
+    # a reservation (it stays committed even once stale), and a refusal that
+    # commits nothing.
+    shapes.append({"reserved_usd": large, "billable": "yes"})
+    shapes.append({"reserved_usd": small, "billable": "unknown", "status": "failed"})
+    shapes.append({"reserved_usd": large, "billable": "unknown", "status": "reserved"})
+    shapes.append({"reserved_usd": large, "billable": "no", "status": "failed"})
+    expected_cost = Decimal(0)
+    expected_committed = Decimal(0)
+    for shape in shapes:
+        values: dict[str, Any] = {
+            "action": "inference_test",
+            "provider": "openai",
+            "model": "m",
+            "status": "succeeded",
+            "billable": "yes",
+            "started_at": started,
+            "usage_source": "unknown",
+            "cost_source": "estimated" if "cost_usd" in shape else "unknown",
+            **shape,
+        }
+        db_session.add(AiUsageRecord(**values))
+        expected_cost += values.get("cost_usd") or Decimal(0)
+        expected_committed += gateway.committed_contribution(
+            status=values["status"],
+            billable=values["billable"],
+            reserved_usd=values.get("reserved_usd"),
+            cost_usd=values.get("cost_usd"),
+        )
+    await db_session.commit()
+
+    report = await usage_report(db_session, 2026, 11)
+
+    assert report.totals.estimated_cost_usd == f"{large * 1000 + small:.6f}"
+    assert report.totals.estimated_cost_usd == f"{expected_cost:.6f}"
+    assert report.totals.committed_usd == f"{expected_committed:.6f}"
+    assert report.budget.committed_usd == f"{expected_committed:.6f}"
+    [pair] = report.by_provider_model
+    assert pair.committed_usd == f"{expected_committed:.6f}"
+    start, end = gateway.month_bounds(2026, 11)
+    assert await gateway.committed_spend(db_session, start, end) == expected_committed
 
 
 async def test_usage_month_boundary_is_utc(client: AsyncClient, db_session: AsyncSession) -> None:
