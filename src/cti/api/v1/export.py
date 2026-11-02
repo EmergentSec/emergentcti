@@ -5,6 +5,7 @@ matching observables stay in the database but are never emitted. Ad-hoc
 exports use the ``internal`` destination; profiles use their own. TLP:RED
 never leaves through any export.
 """
+# ruff: noqa: B008, TC001, TC002, TC003
 
 from __future__ import annotations
 
@@ -12,13 +13,16 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from cti.api.v1.filters import parse_tag_names
 from cti.core.database import get_db
-from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
+from cti.core.dependencies import AuthSubject, get_current_auth
 from cti.core.redis import cache_get, cache_set
 from cti.models.export_profile import ExportDestination, ExportFormat, ExportProfile
 from cti.models.observable import Observable, ObservableType
@@ -34,6 +38,7 @@ from cti.schemas.export import (
 )
 from cti.services import (
     allowlist_service,
+    audit,
     export_profile_service,
     observable_service,
     tag_service,
@@ -45,6 +50,75 @@ router = APIRouter()
 # Ad-hoc exports go to this organization's own controls (firewalls, SIEM).
 _AD_HOC_DESTINATION = "internal"
 _TAG_QUERY = Query(default=None, description="Match ANY listed tag (repeatable)")
+
+
+async def _rollback_for_audit(db: AsyncSession) -> None:
+    """Roll back before an independent write, preserving clean loaded identities."""
+    loaded = [
+        (
+            obj,
+            {
+                attr.key: state.dict[attr.key]
+                for attr in state.mapper.column_attrs
+                if attr.key in state.dict
+            },
+        )
+        for obj in list(db.sync_session.identity_map.values())
+        if not (state := inspect(obj)).modified
+    ]
+    await db.rollback()
+    for obj, values in loaded:
+        if inspect(obj).persistent:
+            for key, value in values.items():
+                set_committed_value(obj, key, value)
+
+
+async def _record_profile_failure(
+    db: AsyncSession,
+    *,
+    actor: audit.Actor,
+    action: str,
+    status: int,
+    reason: str,
+    resource_id: object = None,
+    resource_label: object = None,
+) -> None:
+    await _rollback_for_audit(db)
+    await audit.record_independent(
+        actor=actor,
+        action=action,
+        resource_type="export_profile",
+        resource_id=resource_id,
+        resource_label=resource_label,
+        outcome=audit.AuditOutcome.FAILED,
+        summary={"reason": reason, "status": status},
+        strict=False,
+    )
+
+
+async def _record_download_failure(
+    db: AsyncSession,
+    *,
+    actor: audit.Actor,
+    resource_id: object,
+    status: int,
+    reason: str,
+) -> None:
+    await _rollback_for_audit(db)
+    await audit.record_independent(
+        actor=actor,
+        action="export.download",
+        resource_type="export",
+        resource_id=resource_id,
+        outcome=audit.AuditOutcome.FAILED,
+        summary={"reason": reason, "status": status},
+        strict=False,
+    )
+
+
+def _json_bytes(payload: JsonExportResponse) -> bytes:
+    """Render exactly as FastAPI's JSON response path does."""
+    return JSONResponse(content=jsonable_encoder(payload)).body
 
 
 async def _json_export_response(
@@ -74,7 +148,7 @@ async def _json_export_response(
 async def get_blocklist(
     obs_type: ObservableType,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(get_current_auth),
+    auth: AuthSubject = Depends(get_current_auth),
     confidence_min: int = Query(default=70, ge=0, le=100),
     max_age_days: int | None = Query(default=None, ge=1, le=MAX_AGE_DAYS_LIMIT),
     feed_id: uuid.UUID | None = None,
@@ -118,8 +192,17 @@ async def get_blocklist(
         destination=_AD_HOC_DESTINATION,
     )
 
-    return PlainTextResponse(
-        content="\n".join(values),
+    summary = {"format": "blocklist", "count": len(values), "tlp_excluded": tlp_excluded}
+    disclosure = await audit.begin_disclosure(
+        actor=audit.actor_from_auth(auth),
+        action="export.download",
+        resource_type="export",
+        resource_id=f"blocklist:{obs_type.value}",
+        summary=summary,
+    )
+    return audit.AuditedDownload(
+        "\n".join(values),
+        disclosure=disclosure,
         media_type="text/plain",
         headers={
             "X-Observable-Count": str(len(values)),
@@ -129,18 +212,17 @@ async def get_blocklist(
     )
 
 
-@router.get("/json")
+@router.get("/json", response_model=None)
 async def export_json(
-    response: Response,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(get_current_auth),
+    auth: AuthSubject = Depends(get_current_auth),
     type: ObservableType | None = None,
     confidence_min: int = Query(default=0, ge=0, le=100),
     max_age_days: int | None = Query(default=None, ge=1, le=MAX_AGE_DAYS_LIMIT),
     feed_id: uuid.UUID | None = None,
     limit: int = Query(default=10000, ge=1, le=100000),
     tag: list[str] | None = _TAG_QUERY,
-) -> JsonExportResponse:
+) -> audit.AuditedDownload:
     """JSON export with filters."""
     tags = parse_tag_names(tag)
     allowlist = await allowlist_service.load_matcher(db)
@@ -165,7 +247,7 @@ async def export_json(
         destination=_AD_HOC_DESTINATION,
         allowlist=allowlist,
     )
-    response.headers["X-TLP-Excluded"] = str(sum(excluded.values()))
+    tlp_excluded = sum(excluded.values())
 
     filters: dict = {}
     if type:
@@ -177,13 +259,26 @@ async def export_json(
     if tags:
         filters["tags"] = tags
 
-    return await _json_export_response(db, observables, filters)
+    disclosure = await audit.begin_disclosure(
+        actor=audit.actor_from_auth(auth),
+        action="export.download",
+        resource_type="export",
+        resource_id="json",
+        summary={"format": "json", "count": len(observables), "tlp_excluded": tlp_excluded},
+    )
+    payload = await _json_export_response(db, observables, filters)
+    return audit.AuditedDownload(
+        _json_bytes(payload),
+        disclosure=disclosure,
+        media_type="application/json",
+        headers={"X-TLP-Excluded": str(tlp_excluded)},
+    )
 
 
 @router.get("/text", response_class=PlainTextResponse)
 async def export_text(
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(get_current_auth),
+    auth: AuthSubject = Depends(get_current_auth),
     confidence_min: int = Query(default=0, ge=0, le=100),
     max_age_days: int | None = Query(default=None, ge=1, le=MAX_AGE_DAYS_LIMIT),
     tag: list[str] | None = _TAG_QUERY,
@@ -197,12 +292,21 @@ async def export_text(
         destination=_AD_HOC_DESTINATION,
         line_safe=True,
     )
-    return PlainTextResponse(
-        content="\n".join(values),
+    excluded_count = sum(tlp_excluded.values())
+    disclosure = await audit.begin_disclosure(
+        actor=audit.actor_from_auth(auth),
+        action="export.download",
+        resource_type="export",
+        resource_id="text",
+        summary={"format": "text", "count": len(values), "tlp_excluded": excluded_count},
+    )
+    return audit.AuditedDownload(
+        "\n".join(values),
+        disclosure=disclosure,
         media_type="text/plain",
         headers={
             "X-Observable-Count": str(len(values)),
-            "X-TLP-Excluded": str(sum(tlp_excluded.values())),
+            "X-TLP-Excluded": str(excluded_count),
         },
     )
 
@@ -249,16 +353,52 @@ async def list_export_profiles(
 async def create_export_profile(
     data: ExportProfileCreate,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(
+        audit.audited_admin("export_profile.create", "export_profile")
+    ),
 ) -> ExportProfileResponse:
+    actor = audit.actor_from_auth(auth)
     try:
         profile = await export_profile_service.create_profile(db, data.model_dump())
     except export_profile_service.DuplicateProfileNameError:
+        await _record_profile_failure(
+            db,
+            actor=actor,
+            action="export_profile.create",
+            status=409,
+            reason="duplicate_name",
+            resource_label=data.name,
+        )
         raise _duplicate_name() from None
     except export_profile_service.ProfileFeedNotFoundError:
+        await _record_profile_failure(
+            db,
+            actor=actor,
+            action="export_profile.create",
+            status=422,
+            reason="feed_not_found",
+            resource_label=data.name,
+        )
         raise _unknown_feed() from None
     except (tag_service.TagValidationError, tag_service.TagNotFoundError) as exc:
+        await _record_profile_failure(
+            db,
+            actor=actor,
+            action="export_profile.create",
+            status=422,
+            reason="invalid_tags",
+            resource_label=data.name,
+        )
         raise _bad_tags(exc) from None
+    audit.record(
+        db,
+        actor=actor,
+        action="export_profile.create",
+        resource_type="export_profile",
+        resource_id=profile.id,
+        resource_label=profile.name,
+        summary={"changed_fields": sorted(data.model_fields_set)},
+    )
     await db.commit()
     return ExportProfileResponse.model_validate(profile)
 
@@ -277,19 +417,71 @@ async def update_export_profile(
     profile_id: uuid.UUID,
     data: ExportProfileUpdate,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(
+        audit.audited_admin(
+            "export_profile.update", "export_profile", resource_id_param="profile_id"
+        )
+    ),
 ) -> ExportProfileResponse:
-    profile = await _get_profile_or_404(db, profile_id)
+    actor = audit.actor_from_auth(auth)
+    profile = await export_profile_service.get_profile(db, profile_id)
+    if profile is None:
+        await _record_profile_failure(
+            db,
+            actor=actor,
+            action="export_profile.update",
+            status=404,
+            reason="not_found",
+            resource_id=profile_id,
+        )
+        raise HTTPException(status_code=404, detail="Export profile not found")
+    original_label = profile.name
     try:
         profile = await export_profile_service.update_profile(
             db, profile, data.model_dump(exclude_unset=True)
         )
     except export_profile_service.DuplicateProfileNameError:
+        await _record_profile_failure(
+            db,
+            actor=actor,
+            action="export_profile.update",
+            status=409,
+            reason="duplicate_name",
+            resource_id=profile_id,
+            resource_label=original_label,
+        )
         raise _duplicate_name() from None
     except export_profile_service.ProfileFeedNotFoundError:
+        await _record_profile_failure(
+            db,
+            actor=actor,
+            action="export_profile.update",
+            status=422,
+            reason="feed_not_found",
+            resource_id=profile_id,
+            resource_label=original_label,
+        )
         raise _unknown_feed() from None
     except (tag_service.TagValidationError, tag_service.TagNotFoundError) as exc:
+        await _record_profile_failure(
+            db,
+            actor=actor,
+            action="export_profile.update",
+            status=422,
+            reason="invalid_tags",
+            resource_id=profile_id,
+            resource_label=original_label,
+        )
         raise _bad_tags(exc) from None
+    audit.record(
+        db,
+        actor=actor,
+        action="export_profile.update",
+        resource_type="export_profile",
+        resource_id=profile.id,
+        resource_label=profile.name,
+        summary={"changed_fields": sorted(data.model_fields_set)},
+    )
     await db.commit()
     return ExportProfileResponse.model_validate(profile)
 
@@ -298,10 +490,34 @@ async def update_export_profile(
 async def delete_export_profile(
     profile_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(
+        audit.audited_admin(
+            "export_profile.delete", "export_profile", resource_id_param="profile_id"
+        )
+    ),
 ) -> None:
-    profile = await _get_profile_or_404(db, profile_id)
+    actor = audit.actor_from_auth(auth)
+    profile = await export_profile_service.get_profile(db, profile_id)
+    if profile is None:
+        await _record_profile_failure(
+            db,
+            actor=actor,
+            action="export_profile.delete",
+            status=404,
+            reason="not_found",
+            resource_id=profile_id,
+        )
+        raise HTTPException(status_code=404, detail="Export profile not found")
+    label = profile.name
     await export_profile_service.delete_profile(db, profile)
+    audit.record(
+        db,
+        actor=actor,
+        action="export_profile.delete",
+        resource_type="export_profile",
+        resource_id=profile_id,
+        resource_label=label,
+    )
     await db.commit()
 
 
@@ -325,26 +541,49 @@ async def preview_export_profile(
 @router.get("/profiles/{profile_id}/download", response_model=None)
 async def download_export_profile(
     profile_id: uuid.UUID,
-    response: Response,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(get_current_auth),
-) -> PlainTextResponse | JsonExportResponse:
+    auth: AuthSubject = Depends(get_current_auth),
+) -> audit.AuditedDownload:
     """Evaluate the saved filters against current data and the current allowlist.
 
     Both formats return every eligible observable — there is no row cap, so
     the download always agrees with the preview count.
     """
-    profile = await _get_profile_or_404(db, profile_id)
+    actor = audit.actor_from_auth(auth)
+    profile = await export_profile_service.get_profile(db, profile_id)
+    if profile is None:
+        await _record_download_failure(
+            db,
+            actor=actor,
+            resource_id=profile_id,
+            status=404,
+            reason="not_found",
+        )
+        raise HTTPException(status_code=404, detail="Export profile not found")
 
     tags = export_profile_service.profile_tag_names(profile)
     if profile.format is ExportFormat.TEXT:
         values, _excluded, by_tlp = await export_profile_service.get_profile_values(db, profile)
-        return PlainTextResponse(
-            content="\n".join(values),
+        tlp_excluded = sum(by_tlp.values())
+        disclosure = await audit.begin_disclosure(
+            actor=actor,
+            action="export.download",
+            resource_type="export",
+            resource_id=profile.id,
+            resource_label=profile.name,
+            summary={
+                "format": profile.format.value,
+                "count": len(values),
+                "tlp_excluded": tlp_excluded,
+            },
+        )
+        return audit.AuditedDownload(
+            "\n".join(values),
+            disclosure=disclosure,
             media_type="text/plain",
             headers={
                 "X-Observable-Count": str(len(values)),
-                "X-TLP-Excluded": str(sum(by_tlp.values())),
+                "X-TLP-Excluded": str(tlp_excluded),
                 "Content-Disposition": f'attachment; filename="{_profile_filename(profile)}"',
             },
         )
@@ -363,7 +602,7 @@ async def download_export_profile(
         destination=profile.destination.value,
         allowlist=allowlist,
     )
-    response.headers["X-TLP-Excluded"] = str(sum(by_tlp.values()))
+    tlp_excluded = sum(by_tlp.values())
     observables = await observable_service.get_export_json(
         db,
         obs_type=profile.type,
@@ -387,4 +626,22 @@ async def download_export_profile(
         filters["feed_id"] = str(profile.feed_id)
     if tags:
         filters["tags"] = tags
-    return await _json_export_response(db, observables, filters)
+    disclosure = await audit.begin_disclosure(
+        actor=actor,
+        action="export.download",
+        resource_type="export",
+        resource_id=profile.id,
+        resource_label=profile.name,
+        summary={
+            "format": profile.format.value,
+            "count": len(observables),
+            "tlp_excluded": tlp_excluded,
+        },
+    )
+    payload = await _json_export_response(db, observables, filters)
+    return audit.AuditedDownload(
+        _json_bytes(payload),
+        disclosure=disclosure,
+        media_type="application/json",
+        headers={"X-TLP-Excluded": str(tlp_excluded)},
+    )

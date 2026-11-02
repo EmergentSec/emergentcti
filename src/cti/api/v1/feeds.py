@@ -8,17 +8,19 @@ import logging
 import uuid  # noqa: TC003 - FastAPI resolves endpoint annotations at runtime.
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import (  # noqa: TC002 - FastAPI resolves this annotation.
     AsyncSession,
 )
+from sqlalchemy.orm.attributes import set_committed_value
 
 from cti.core.database import get_db
-from cti.core.dependencies import AuthSubject, get_current_auth, require_admin
+from cti.core.dependencies import AuthSubject, get_current_auth
 from cti.core.redis import invalidate_observable_caches
 from cti.feeds.defaults import DEFAULT_FEEDS
 from cti.models.tlp import Tlp
 from cti.schemas.feed import FeedCreate, FeedResponse, FeedRunResponse, FeedUpdate
-from cti.services import feed_service
+from cti.services import audit, feed_service
 from cti.services.feed_auth import (
     AuthConfigValidationError,
     stored_auth_needs_repair,
@@ -32,6 +34,56 @@ router = APIRouter()
 
 # Preconfigured feeds that expect an API key (from defaults.py `requires_api_key`).
 _AUTH_FEED_NAMES = {d["name"] for d in DEFAULT_FEEDS if d.get("requires_api_key")}
+_SENSITIVE_CHANGE_FIELDS = frozenset({"auth_config", "tlp_change_reason"})
+
+
+async def _rollback_for_audit(db: AsyncSession) -> None:
+    """Roll back before an independent write, preserving clean loaded identities."""
+    loaded = [
+        (
+            obj,
+            {
+                attr.key: state.dict[attr.key]
+                for attr in state.mapper.column_attrs
+                if attr.key in state.dict
+            },
+        )
+        for obj in list(db.sync_session.identity_map.values())
+        if not (state := inspect(obj)).modified
+    ]
+    await db.rollback()
+    for obj, values in loaded:
+        if inspect(obj).persistent:
+            for key, value in values.items():
+                set_committed_value(obj, key, value)
+
+
+def _changed_fields(data: FeedCreate | FeedUpdate) -> list[str]:
+    return sorted(data.model_fields_set - _SENSITIVE_CHANGE_FIELDS)
+
+
+async def _record_failure(
+    db: AsyncSession,
+    *,
+    actor: audit.Actor,
+    action: str,
+    status: int,
+    reason: str,
+    resource_id: object = None,
+    resource_label: object = None,
+    outcome: audit.AuditOutcome = audit.AuditOutcome.FAILED,
+) -> None:
+    await _rollback_for_audit(db)
+    await audit.record_independent(
+        actor=actor,
+        action=action,
+        resource_type="feed",
+        resource_id=resource_id,
+        resource_label=resource_label,
+        outcome=outcome,
+        summary={"reason": reason, "status": status},
+        strict=False,
+    )
 
 
 def _feed_auth_needs_repair(feed) -> bool:
@@ -101,12 +153,30 @@ async def list_feeds(
 async def create_feed(
     data: FeedCreate,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(audit.audited_admin("feed.create", "feed")),
 ) -> FeedResponse:
+    actor = audit.actor_from_auth(auth)
     try:
         feed = await feed_service.create_feed(db, data.model_dump())
     except AuthConfigValidationError as e:
+        await _record_failure(
+            db,
+            actor=actor,
+            action="feed.create",
+            status=422,
+            reason="invalid_configuration",
+            resource_label=data.name,
+        )
         raise HTTPException(status_code=422, detail=e.message) from None
+    audit.record(
+        db,
+        actor=actor,
+        action="feed.create",
+        resource_type="feed",
+        resource_id=feed.id,
+        resource_label=feed.name,
+        summary={"changed_fields": _changed_fields(data)},
+    )
     await db.commit()
 
     # Sync scheduler if feed is enabled with a schedule
@@ -136,11 +206,24 @@ async def update_feed(
     feed_id: uuid.UUID,
     data: FeedUpdate,
     db: AsyncSession = Depends(get_db),
-    auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(
+        audit.audited_admin("feed.update", "feed", resource_id_param="feed_id")
+    ),
 ) -> FeedResponse:
+    actor = audit.actor_from_auth(auth)
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
+        await _record_failure(
+            db,
+            actor=actor,
+            action="feed.update",
+            status=404,
+            reason="not_found",
+            resource_id=feed_id,
+        )
         raise HTTPException(status_code=404, detail="Feed not found")
+    label = feed.name
+    tlp_before = feed.tlp
     if (
         hide_red_for(auth)
         and feed.tlp == Tlp.RED.value
@@ -148,6 +231,16 @@ async def update_feed(
         and data.tlp is not Tlp.RED
     ):
         # Declassifying a RED feed would make its observables exportable.
+        await _record_failure(
+            db,
+            actor=actor,
+            action="feed.update",
+            status=403,
+            reason="interactive_admin_required",
+            resource_id=feed_id,
+            resource_label=label,
+            outcome=audit.AuditOutcome.DENIED,
+        )
         raise HTTPException(
             status_code=403,
             detail="Declassifying a TLP:RED feed requires an interactive admin session",
@@ -156,10 +249,39 @@ async def update_feed(
     try:
         feed = await feed_service.update_feed(db, feed, data.model_dump(exclude_unset=True))
     except AuthConfigValidationError as e:
+        await _record_failure(
+            db,
+            actor=actor,
+            action="feed.update",
+            status=422,
+            reason="invalid_configuration",
+            resource_id=feed_id,
+            resource_label=label,
+        )
         raise HTTPException(status_code=422, detail=e.message) from None
     except TlpDowngradeReasonRequiredError as e:
-        # Raised before any field is applied, so nothing needs rolling back.
+        await _record_failure(
+            db,
+            actor=actor,
+            action="feed.update",
+            status=422,
+            reason="tlp_reason_required",
+            resource_id=feed_id,
+            resource_label=label,
+        )
         raise HTTPException(status_code=422, detail=str(e)) from None
+    summary: dict[str, object] = {"changed_fields": _changed_fields(data)}
+    if "tlp" in data.model_fields_set:
+        summary.update({"before": tlp_before, "after": feed.tlp})
+    audit.record(
+        db,
+        actor=actor,
+        action="feed.update",
+        resource_type="feed",
+        resource_id=feed.id,
+        resource_label=feed.name,
+        summary=summary,
+    )
     await db.commit()
     await db.refresh(feed)
     if "tlp" in data.model_fields_set:
@@ -179,13 +301,35 @@ async def update_feed(
 async def delete_feed(
     feed_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(
+        audit.audited_admin("feed.delete", "feed", resource_id_param="feed_id")
+    ),
 ) -> None:
+    actor = audit.actor_from_auth(auth)
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
+        await _record_failure(
+            db,
+            actor=actor,
+            action="feed.delete",
+            status=404,
+            reason="not_found",
+            resource_id=feed_id,
+        )
         raise HTTPException(status_code=404, detail="Feed not found")
+    label = feed.name
     if hide_red_for(auth) and feed.tlp == Tlp.RED.value:
         # Removing the feed drops its RED marking from every contributed observable.
+        await _record_failure(
+            db,
+            actor=actor,
+            action="feed.delete",
+            status=403,
+            reason="interactive_admin_required",
+            resource_id=feed_id,
+            resource_label=label,
+            outcome=audit.AuditOutcome.DENIED,
+        )
         raise HTTPException(
             status_code=403,
             detail="Deleting a TLP:RED feed requires an interactive admin session",
@@ -199,6 +343,15 @@ async def delete_feed(
             if exc.profile_names
             else "an export profile"
         )
+        await _record_failure(
+            db,
+            actor=actor,
+            action="feed.delete",
+            status=409,
+            reason="in_use",
+            resource_id=feed_id,
+            resource_label=label,
+        )
         raise HTTPException(
             status_code=409,
             detail=(
@@ -207,9 +360,26 @@ async def delete_feed(
             ),
         ) from None
     if not deleted:
+        await _record_failure(
+            db,
+            actor=actor,
+            action="feed.delete",
+            status=400,
+            reason="preconfigured",
+            resource_id=feed_id,
+            resource_label=label,
+        )
         raise HTTPException(
             status_code=400, detail="Cannot delete pre-configured feeds. Disable them instead."
         )
+    audit.record(
+        db,
+        actor=actor,
+        action="feed.delete",
+        resource_type="feed",
+        resource_id=feed_id,
+        resource_label=label,
+    )
     await db.commit()
     await invalidate_observable_caches()
 
@@ -223,15 +393,44 @@ async def trigger_feed(
     feed_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(require_admin),
+    auth: AuthSubject = Depends(
+        audit.audited_admin("feed.trigger", "feed", resource_id_param="feed_id")
+    ),
 ) -> FeedRunResponse:
+    actor = audit.actor_from_auth(auth)
     feed = await feed_service.get_feed(db, feed_id)
     if not feed:
+        await _record_failure(
+            db,
+            actor=actor,
+            action="feed.trigger",
+            status=404,
+            reason="not_found",
+            resource_id=feed_id,
+        )
         raise HTTPException(status_code=404, detail="Feed not found")
     if not feed.enabled:
+        await _record_failure(
+            db,
+            actor=actor,
+            action="feed.trigger",
+            status=400,
+            reason="disabled",
+            resource_id=feed_id,
+            resource_label=feed.name,
+        )
         raise HTTPException(status_code=400, detail="Feed is not enabled")
 
     run = await feed_service.create_feed_run(db, feed.id)
+    audit.record(
+        db,
+        actor=actor,
+        action="feed.trigger",
+        resource_type="feed",
+        resource_id=feed.id,
+        resource_label=feed.name,
+        summary={"run_id": str(run.id)},
+    )
     await db.commit()
 
     # Run in background so API responds immediately
