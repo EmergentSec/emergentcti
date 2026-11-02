@@ -6,7 +6,9 @@ import json
 import uuid
 from typing import TYPE_CHECKING
 
+import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from cti.models.audit import AuditEvent
 from cti.models.observable import Observable, ObservableType
@@ -15,7 +17,6 @@ from cti.services import audit
 from tests.policy_helpers import non_admin_client
 
 if TYPE_CHECKING:
-    import pytest
     from fastapi import FastAPI
     from httpx import AsyncClient
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -432,3 +433,21 @@ async def test_import_non_candidate_records_failed(client: AsyncClient, db_sessi
         ("failed", {"requested": 1, "reason": "invalid", "status": 422})
     ]
     assert "absent.example" not in await rows_json(db_session)
+
+
+async def test_failing_audit_insert_rolls_back_report_create(
+    client: AsyncClient, db_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    build = audit._build_event
+
+    def unstorable(**kwargs: object) -> AuditEvent:
+        event = build(**kwargs)
+        event.action = None  # violates NOT NULL, so the shared commit fails
+        return event
+
+    monkeypatch.setattr(audit, "_build_event", unstorable)
+    with pytest.raises(IntegrityError):
+        await client.post(REPORTS, json={"title": "Never stored", "origin": "internal"})
+    await db_session.rollback()
+    assert await db_session.scalar(select(Report.id)) is None
+    assert await events(db_session) == []
