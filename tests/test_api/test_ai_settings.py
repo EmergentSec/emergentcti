@@ -174,6 +174,7 @@ async def test_non_ascii_and_control_keys_are_rejected_without_echo(
 async def test_raw_key_absent_from_every_endpoint_response(
     client: AsyncClient,
     httpx_mock: HTTPXMock,
+    priced_gpt_test: None,
 ) -> None:
     responses = []
     responses.append(
@@ -509,6 +510,7 @@ async def test_inference_requires_literal_confirmation(
 async def test_confirmed_inference_uses_fixed_prompt(
     client: AsyncClient,
     httpx_mock: HTTPXMock,
+    priced_gpt_test: None,
 ) -> None:
     await _configure(client, "openai")
     httpx_mock.add_response(

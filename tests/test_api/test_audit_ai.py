@@ -276,6 +276,7 @@ async def test_initiated_write_failure_returns_503_and_skips_provider(
     suffix: str,
     body: dict | None,
     adapter_method: str,
+    priced_gpt_test: None,
 ) -> None:
     await configure(client)
     monkeypatch.setattr(audit, "_session_factory", BrokenAuditSession)
@@ -317,7 +318,10 @@ async def test_model_listing_provider_error_records_failed(
 
 
 async def test_inference_test_never_stores_prompt_or_output(
-    client: AsyncClient, db_session, httpx_mock: HTTPXMock
+    client: AsyncClient,
+    db_session,
+    httpx_mock: HTTPXMock,
+    priced_gpt_test: None,
 ) -> None:
     await configure(client)
     httpx_mock.add_response(
@@ -345,7 +349,10 @@ async def test_inference_test_never_stores_prompt_or_output(
 
 
 async def test_inference_test_provider_error_body_is_not_stored(
-    client: AsyncClient, db_session, httpx_mock: HTTPXMock
+    client: AsyncClient,
+    db_session,
+    httpx_mock: HTTPXMock,
+    priced_gpt_test: None,
 ) -> None:
     await configure(client)
     httpx_mock.add_response(

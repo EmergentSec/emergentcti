@@ -8,6 +8,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { useToast } from '@/contexts/ToastContext'
+import { useAiInferenceTestPreview } from '@/hooks/useAiUsage'
 import {
   useAiInferenceTest,
   useAiModels,
@@ -20,12 +21,13 @@ import {
   useSetAiDefault,
 } from '@/hooks/useAiSettings'
 import { aiRequestErrorMessage, describeAiCategory } from '@/lib/aiErrors'
+import { displayTokenCount, displayUsdEstimate, inferenceTestBlockReason } from '@/lib/aiDisplay'
 import { formatRelativeTime } from '@/lib/utils'
 import type { AiProvider, AiProviderStatus, AiSettings as AiSettingsData } from '@/types/ai'
+import { AiGuardrailsForm } from './AiGuardrails'
+import { AiPricingTable } from './AiPricing'
+import { AiUsagePanel } from './AiUsage'
 import { ModelPicker, ModelSourceLabel } from './ModelPicker'
-
-/** Fixed prompt the backend sends for the inference test (shown verbatim in the confirm dialog). */
-export const INFERENCE_TEST_PROMPT = 'Reply with the single word: OK'
 
 export function AiSettings() {
   const { data, isLoading, error } = useAiSettings()
@@ -40,6 +42,10 @@ export function AiSettings() {
       </div>
 
       <Disclosure />
+
+      <AiGuardrailsForm />
+      <AiUsagePanel />
+      <AiPricingTable />
 
       {isLoading ? (
         <div className="flex justify-center py-8">
@@ -320,6 +326,7 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
   const setDefault = useSetAiDefault()
   const clearDefault = useClearAiDefault()
   const inference = useAiInferenceTest()
+  const preview = useAiInferenceTestPreview(draftProvider, draftModel, testOpen)
 
   // Save and clear write the same setting; only one may be in flight at a time.
   const defaultBusy = setDefault.isPending || clearDefault.isPending
@@ -409,11 +416,20 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
   if (inference.isPending) {
     testResult = <p className="text-sm text-muted-foreground">Sending test prompt…</p>
   } else if (inference.data && tested) {
+    const usage = inference.data.usage
     testResult = inference.data.ok ? (
-      <StatusLine ok>
-        <code className="font-mono text-xs">{tested.model}</code> replied
-        {inference.data.latency_ms != null ? ` in ${inference.data.latency_ms} ms` : ''}.
-      </StatusLine>
+      <div className="space-y-1">
+        <StatusLine ok>
+          <code className="font-mono text-xs">{tested.model}</code> replied
+          {inference.data.latency_ms != null ? ` in ${inference.data.latency_ms} ms` : ''}.
+        </StatusLine>
+        {usage && (
+          <p className="text-xs text-muted-foreground">
+            Usage: {displayTokenCount(usage.input_tokens)} in / {displayTokenCount(usage.output_tokens)} out, cost{' '}
+            {displayUsdEstimate(usage.cost_usd)}
+          </p>
+        )}
+      </div>
     ) : (
       <StatusLine ok={false}>{describeAiCategory(inference.data.error?.category)}</StatusLine>
     )
@@ -501,21 +517,75 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
 
       <Dialog open={testOpen} onClose={() => setTestOpen(false)} title="Send a test prompt?">
         <div className="space-y-4 text-sm">
-          <p className="text-muted-foreground">
-            This sends one tiny fixed prompt, <q className="text-foreground">{INFERENCE_TEST_PROMPT}</q>, to{' '}
-            {draftProvider ? nameOf(draftProvider) : 'the provider'} using{' '}
-            <code className="break-all font-mono text-xs text-foreground">{draftModel}</code>. No indicators,
-            reports, or other instance data are included.
-          </p>
+          {preview.isLoading || (preview.isFetching && !preview.data) ? (
+            <div className="flex justify-center py-4">
+              <LoadingSpinner />
+            </div>
+          ) : preview.error ? (
+            <p className="text-destructive">{aiRequestErrorMessage(preview.error, "Couldn't load preview.")}</p>
+          ) : preview.data ? (
+            <>
+              <p className="text-muted-foreground">{preview.data.destination_note}</p>
+              <p>
+                Provider: <span className="font-medium text-foreground">{nameOf(preview.data.provider)}</span>
+              </p>
+              <p>
+                Model: <code className="break-all font-mono text-xs text-foreground">{preview.data.model}</code>
+              </p>
+              <p>
+                Exact prompt:{' '}
+                <code className="break-all font-mono text-xs text-foreground">{preview.data.content}</code>
+              </p>
+              <p>Max output tokens: {preview.data.max_output_tokens}</p>
+              <p>
+                Estimated max cost:{' '}
+                {preview.data.pricing_known
+                  ? displayUsdEstimate(preview.data.estimated_max_cost_usd)
+                  : 'Unknown, unpriced'}
+              </p>
+            </>
+          ) : (
+            <p className="text-muted-foreground">
+              This sends one tiny fixed prompt to {draftProvider ? nameOf(draftProvider) : 'the provider'} using{' '}
+              <code className="break-all font-mono text-xs text-foreground">{draftModel}</code>.
+            </p>
+          )}
           <p className="flex items-start gap-2 rounded-lg border border-warning bg-warning-soft px-3 py-2 text-warning-ink">
             <Warning size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
             The provider may charge for this request.
           </p>
+          {preview.isFetching && preview.data && (
+            <p role="status" className="text-muted-foreground">
+              Rechecking budget and policy…
+            </p>
+          )}
+          {preview.data && !preview.isFetching && preview.data.policy_decision !== 'allowed' && (
+            <p role="status" className="text-destructive">
+              {inferenceTestBlockReason(preview.data.policy_decision)}
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => setTestOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={confirmTest}>Send test prompt</Button>
+            <Button
+              onClick={confirmTest}
+              disabled={
+                preview.isLoading ||
+                // A cached preview may be stale (budget/policy changed): wait for the refetch.
+                preview.isFetching ||
+                !!preview.error ||
+                !preview.data ||
+                preview.data.policy_decision !== 'allowed'
+              }
+              title={
+                preview.data && preview.data.policy_decision !== 'allowed'
+                  ? inferenceTestBlockReason(preview.data.policy_decision) ?? undefined
+                  : undefined
+              }
+            >
+              Send test prompt
+            </Button>
           </div>
         </div>
       </Dialog>

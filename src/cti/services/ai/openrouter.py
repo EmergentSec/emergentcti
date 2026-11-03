@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from cti.schemas.ai import AiErrorCategory, AiModel
 from cti.services.ai.base import (
-    INFERENCE_PROMPT,
+    AdapterUsage,
     AiAdapterError,
     AiProviderAdapter,
     make_ai_error,
@@ -13,6 +13,8 @@ from cti.services.ai.base import (
 
 class OpenRouterAdapter(AiProviderAdapter):
     _BASE_URL = "https://openrouter.ai/api/v1"
+    # OpenRouter deprecates ``max_tokens`` in favour of ``max_completion_tokens``.
+    _MAX_TOKENS_FIELD = "max_completion_tokens"
 
     @staticmethod
     def _headers(api_key: str) -> dict[str, str]:
@@ -58,16 +60,19 @@ class OpenRouterAdapter(AiProviderAdapter):
         if not isinstance(parse_json(response), dict):
             raise AiAdapterError(make_ai_error(AiErrorCategory.PROVIDER_ERROR))
 
-    async def inference_test(self, api_key: str, model: str) -> None:
-        response = await self._request(
-            "POST",
+    async def complete(
+        self,
+        api_key: str,
+        model: str,
+        prompt: str,
+        max_output_tokens: int,
+    ) -> AdapterUsage:
+        return await self._post_message(
             f"{self._BASE_URL}/chat/completions",
             headers=self._headers(api_key),
-            json={
-                "model": model,
-                "max_tokens": 16,
-                "messages": [{"role": "user", "content": INFERENCE_PROMPT}],
-            },
+            model=model,
+            prompt=prompt,
+            max_output_tokens=max_output_tokens,
+            input_field="prompt_tokens",
+            output_field="completion_tokens",
         )
-        if not isinstance(parse_json(response), dict):
-            raise AiAdapterError(make_ai_error(AiErrorCategory.PROVIDER_ERROR))

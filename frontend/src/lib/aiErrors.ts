@@ -18,6 +18,15 @@ export const AI_ERROR_MESSAGES: Record<AiErrorCategory, string> = {
   network_error: "Couldn't reach the provider from this server. Check its outbound network access.",
   provider_error: 'The provider returned an error. Try again later.',
   not_configured: 'No API key is saved for this provider.',
+  budget_exceeded:
+    'This request would exceed the configured monthly budget estimate. Raise the budget or wait for the next UTC month.',
+  concurrency_limit: 'Too many AI requests are in flight. Wait for one to finish and try again.',
+  local_rate_limited: 'Too many AI requests in the last minute. Wait briefly and try again.',
+  model_blocked_unpriced:
+    'This model has no local pricing row and your policy blocks unpriced models. Add pricing or change the policy.',
+  sharing_forbidden: 'This content cannot be shared with an external AI provider under current policy.',
+  sharing_not_approved:
+    'The outbound preview changed or expired. Review the content again before sending.',
 }
 
 const GENERIC = 'Something went wrong talking to the provider.'

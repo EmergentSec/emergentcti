@@ -236,6 +236,6 @@ async def test_inference_uses_only_fixed_bounded_prompt(httpx_mock: HTTPXMock) -
     payload = __import__("json").loads(request.content)
     assert payload == {
         "model": "gpt-test",
-        "max_tokens": 16,
+        "max_completion_tokens": 16,
         "messages": [{"role": "user", "content": INFERENCE_PROMPT}],
     }

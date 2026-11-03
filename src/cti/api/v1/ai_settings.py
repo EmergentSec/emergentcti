@@ -1,9 +1,11 @@
 """Admin-only AI provider configuration endpoints."""
-# ruff: noqa: B008, TC002
+# ruff: noqa: B008, TC002, TC003
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Response
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,14 +17,25 @@ from cti.schemas.ai import (
     AiDefault,
     AiDefaultUpdate,
     AiError,
+    AiInferencePreview,
     AiInferenceResult,
     AiInferenceTestRequest,
     AiModelList,
+    AiModelPricingList,
+    AiModelPricingOut,
+    AiModelPricingUpdate,
     AiProviderKeyUpdate,
     AiProviderStatus,
     AiSettings,
+    AiUsagePolicyOut,
+    AiUsagePolicyUpdate,
+    AiUsageRecordPage,
+    AiUsageReport,
+    parse_month,
+    validate_model_id,
 )
 from cti.services import ai_settings_service, audit
+from cti.services.ai import gateway
 
 router = APIRouter()
 
@@ -266,7 +279,12 @@ async def inference_test(
     request = _AiRequestAudit(audit.actor_from_auth(_auth), "inference_test", provider, data.model)
     try:
         result = await ai_settings_service.inference_test(
-            db, provider, data.model, before_provider_call=request.begin
+            db,
+            provider,
+            data.model,
+            actor=request.actor,
+            retry_of=data.retry_of,
+            before_provider_call=request.begin,
         )
         await db.commit()
     except ai_settings_service.AiSettingsServiceError as exc:
@@ -277,6 +295,17 @@ async def inference_test(
         raise
     await request.finish(result.error)
     return result
+
+
+@router.get("/providers/{provider}/inference-test/preview", response_model=AiInferencePreview)
+async def inference_test_preview(
+    provider: AiProvider,
+    model: str = Query(min_length=1, max_length=255),
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(require_admin),
+) -> AiInferencePreview:
+    """The exact prompt, limits and estimated maximum cost. No provider call."""
+    return await ai_settings_service.inference_preview(db, provider, _model_param(model))
 
 
 @router.put("/default", response_model=AiDefault)
@@ -331,6 +360,179 @@ async def clear_default(
         resource_type="ai_default",
         resource_id="default",
         summary={"before": before, "after": {"provider": None, "model": None}},
+    )
+    await db.commit()
+    return Response(status_code=204)
+
+
+# ── Usage accounting and guardrails (#17) ────────────────────────────
+
+
+def _model_param(model: str) -> str:
+    try:
+        return validate_model_id(model)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+def _month_param(month: str | None) -> tuple[int, int]:
+    if month is None:
+        return gateway.current_month()
+    try:
+        return parse_month(month)
+    except ValueError:
+        raise HTTPException(
+            status_code=422, detail="month must be YYYY-MM, 2000-01 to 9999-11"
+        ) from None
+
+
+def _policy_summary(policy: AiUsagePolicyOut) -> dict[str, object]:
+    # "max_output", not "max_output_tokens": audit summaries drop keys containing "token".
+    return {
+        "monthly_budget_usd": policy.monthly_budget_usd,
+        "max_output": policy.max_output_tokens,
+        "max_concurrent_requests": policy.max_concurrent_requests,
+        "max_requests_per_minute": policy.max_requests_per_minute,
+        "unpriced_model_policy": policy.unpriced_model_policy,
+    }
+
+
+def _price_summary(price: AiModelPricingOut | None) -> dict[str, object] | None:
+    if price is None:
+        return None
+    return {
+        "input_usd_per_mtok": price.input_usd_per_mtok,
+        "output_usd_per_mtok": price.output_usd_per_mtok,
+    }
+
+
+@router.get("/usage", response_model=AiUsageReport)
+async def get_usage(
+    month: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(require_admin),
+) -> AiUsageReport:
+    year, month_number = _month_param(month)
+    return await ai_settings_service.usage_report(db, year, month_number)
+
+
+@router.get("/usage/records", response_model=AiUsageRecordPage)
+async def get_usage_records(
+    month: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    before: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(require_admin),
+) -> AiUsageRecordPage:
+    year, month_number = _month_param(month)
+    try:
+        return await ai_settings_service.usage_records(
+            db, year, month_number, limit=limit, before=before
+        )
+    except ai_settings_service.UsageCursorError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.get("/usage-policy", response_model=AiUsagePolicyOut)
+async def get_usage_policy(
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(require_admin),
+) -> AiUsagePolicyOut:
+    return await ai_settings_service.get_usage_policy(db)
+
+
+@router.put("/usage-policy", response_model=AiUsagePolicyOut)
+async def update_usage_policy(
+    data: AiUsagePolicyUpdate,
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(audit.audited_admin("ai_usage_policy.update", "ai_usage_policy")),
+) -> AiUsagePolicyOut:
+    before = await ai_settings_service.get_usage_policy(db)
+    result = await ai_settings_service.update_usage_policy(db, data)
+    audit.record(
+        db,
+        actor=audit.actor_from_auth(_auth),
+        action="ai_usage_policy.update",
+        resource_type="ai_usage_policy",
+        resource_id="policy",
+        summary={"before": _policy_summary(before), "after": _policy_summary(result)},
+    )
+    await db.commit()
+    return result
+
+
+@router.get("/pricing", response_model=AiModelPricingList)
+async def list_pricing(
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(require_admin),
+) -> AiModelPricingList:
+    return await ai_settings_service.list_pricing(db)
+
+
+@router.put("/pricing/{provider}/{model:path}", response_model=AiModelPricingOut)
+async def set_pricing(
+    provider: AiProvider,
+    data: AiModelPricingUpdate,
+    model: str = Path(),
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(
+        audit.audited_admin("ai_pricing.update", "ai_pricing", resource_id_param="provider")
+    ),
+) -> AiModelPricingOut:
+    model = _model_param(model)
+    before = await ai_settings_service.get_pricing(db, provider, model)
+    result = await ai_settings_service.set_pricing(db, provider, model, data)
+    audit.record(
+        db,
+        actor=audit.actor_from_auth(_auth),
+        action="ai_pricing.update",
+        resource_type="ai_pricing",
+        resource_id=provider.value,
+        resource_label=model,
+        summary={
+            "provider": provider.value,
+            "model": model,
+            "before": _price_summary(before),
+            "after": _price_summary(result),
+        },
+    )
+    await db.commit()
+    return result
+
+
+@router.delete("/pricing/{provider}/{model:path}", status_code=204)
+async def delete_pricing(
+    provider: AiProvider,
+    model: str = Path(),
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(
+        audit.audited_admin("ai_pricing.delete", "ai_pricing", resource_id_param="provider")
+    ),
+) -> Response:
+    actor = audit.actor_from_auth(_auth)
+    model = _model_param(model)
+    before = await ai_settings_service.get_pricing(db, provider, model)
+    if before is None:
+        await _record_failure(
+            db,
+            actor,
+            "ai_pricing.delete",
+            "ai_pricing",
+            resource_id=provider.value,
+            status=404,
+            error_code="not_found",
+            extra={"provider": provider.value, "model": model},
+        )
+        raise HTTPException(status_code=404, detail="No pricing for that model")
+    await ai_settings_service.delete_pricing(db, provider, model)
+    audit.record(
+        db,
+        actor=actor,
+        action="ai_pricing.delete",
+        resource_type="ai_pricing",
+        resource_id=provider.value,
+        resource_label=model,
+        summary={"provider": provider.value, "model": model, "before": _price_summary(before)},
     )
     await db.commit()
     return Response(status_code=204)

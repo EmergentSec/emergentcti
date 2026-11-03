@@ -1,34 +1,63 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from time import perf_counter
-from typing import TYPE_CHECKING
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, delete, func, or_, select
 
 from cti.core.security import decrypt_config, encrypt_config
 from cti.models.ai import AiProvider, AiProviderConfig, AiSettingsRecord
+from cti.models.ai_usage import (
+    AiAction,
+    AiModelPricing,
+    AiUsagePolicy,
+    AiUsageRecord,
+    UnpricedModelPolicy,
+    UsageStatus,
+)
 from cti.schemas.ai import (
     AiCheckResult,
     AiDefault,
     AiDefaultUpdate,
     AiError,
     AiErrorCategory,
+    AiInferencePreview,
     AiInferenceResult,
     AiModel,
     AiModelList,
+    AiModelPricingList,
+    AiModelPricingOut,
+    AiModelPricingUpdate,
     AiProviderStatus,
     AiSettings,
+    AiUsageBudget,
+    AiUsageByDay,
+    AiUsageByProviderModel,
+    AiUsagePeriod,
+    AiUsagePolicyOut,
+    AiUsagePolicyUpdate,
+    AiUsageRecordItem,
+    AiUsageRecordPage,
+    AiUsageReport,
+    AiUsageSummary,
+    AiUsageTotals,
     ModelSource,
 )
-from cti.services.ai.base import AiAdapterError, make_ai_error, sorted_models
+from cti.services.ai import gateway
+from cti.services.ai.base import INFERENCE_PROMPT, AiAdapterError, make_ai_error, sorted_models
 from cti.services.ai.catalog import fallback_models
 from cti.services.ai.registry import get_adapter
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    import uuid
+    from collections.abc import Awaitable, Callable, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.elements import ColumnElement
+
+    from cti.services.audit import Actor
 
     #: Awaited immediately before the provider is contacted (never on a cache
     #: hit or when the provider is not configured). Routes use it to write the
@@ -82,9 +111,7 @@ async def _get_provider_config(
     db: AsyncSession,
     provider: AiProvider,
 ) -> AiProviderConfig | None:
-    return await db.scalar(
-        select(AiProviderConfig).where(AiProviderConfig.provider == provider)
-    )
+    return await db.scalar(select(AiProviderConfig).where(AiProviderConfig.provider == provider))
 
 
 async def _require_provider_config(
@@ -332,16 +359,440 @@ async def inference_test(
     provider: AiProvider,
     model: str,
     *,
+    actor: Actor,
+    retry_of: uuid.UUID | None = None,
     before_provider_call: BeforeProviderCall | None = None,
+    db_factory: gateway.SessionContextFactory | None = None,
 ) -> AiInferenceResult:
-    config = await _require_provider_config(db, provider)
-    if before_provider_call is not None:
-        await before_provider_call()
-    started_at = perf_counter()
+    """Send the fixed inference prompt through the accounting gateway.
+
+    Guardrail rejections raise :class:`AiSettingsServiceError` (402/409/429)
+    before anything is sent; they write no usage record.
+    """
+    await _require_provider_config(db, provider)
     try:
-        api_key = _decrypt_api_key(config)
-        await get_adapter(provider).inference_test(api_key, model)
-    except AiAdapterError as exc:
-        return AiInferenceResult(ok=False, error=exc.error, latency_ms=None)
-    latency_ms = round((perf_counter() - started_at) * 1000)
-    return AiInferenceResult(ok=True, error=None, latency_ms=latency_ms)
+        outcome = await gateway.run_inference(
+            db_factory or gateway.independent_session,
+            actor=actor,
+            action=AiAction.INFERENCE_TEST,
+            provider=provider,
+            model=model,
+            prompt=INFERENCE_PROMPT,
+            approved=None,
+            retry_of=retry_of,
+            adapter=get_adapter(provider),
+            before_dispatch=before_provider_call,
+        )
+    except gateway.GatewayRejectionError as exc:
+        raise AiSettingsServiceError(exc.status_code, exc.error) from None
+    usage = None
+    if outcome.record_id is not None:
+        usage = AiUsageSummary(
+            record_id=outcome.record_id,
+            input_tokens=outcome.input_tokens,
+            output_tokens=outcome.output_tokens,
+            usage_source=outcome.usage_source.value,
+            cost_usd=gateway.format_usd(outcome.cost_usd),
+            cost_source=outcome.cost_source.value,
+        )
+    return AiInferenceResult(
+        ok=outcome.ok, error=outcome.error, latency_ms=outcome.latency_ms, usage=usage
+    )
+
+
+async def inference_preview(
+    db: AsyncSession,
+    provider: AiProvider,
+    model: str,
+) -> AiInferencePreview:
+    """What a confirmed inference test would send, and whether policy allows it.
+
+    Makes no provider call. Concurrency and rate limits are checked only at
+    send time, so ``allowed`` is not a promise.
+    """
+    policy = await gateway.read_policy(db)
+    pricing = await gateway.read_pricing(db, provider, model)
+    reserved = gateway.reservation_upper_bound(INFERENCE_PROMPT, policy.max_output_tokens, pricing)
+    decision: str = "allowed"
+    if pricing is None and policy.unpriced_model_policy != UnpricedModelPolicy.PERMIT:
+        decision = "blocked_unpriced"
+    elif policy.monthly_budget_usd is not None:
+        start, end = gateway.month_bounds(*gateway.current_month())
+        committed = await gateway.committed_spend(db, start, end)
+        if committed + (reserved or Decimal(0)) > Decimal(policy.monthly_budget_usd):
+            decision = "over_budget"
+    display_name, _setup_url = _PROVIDER_METADATA[provider]
+    return AiInferencePreview.model_validate(
+        {
+            "provider": provider,
+            "model": model,
+            "action": AiAction.INFERENCE_TEST.value,
+            "content": INFERENCE_PROMPT,
+            "max_output_tokens": policy.max_output_tokens,
+            "pricing_known": pricing is not None,
+            "estimated_max_cost_usd": gateway.format_usd(reserved),
+            "policy_decision": decision,
+            "destination_note": f"Sent to {display_name} ({get_adapter(provider).host})",
+        }
+    )
+
+
+# ── Usage report (#17) ─────────────────────────────────────────────────
+
+
+def _budget_str(value: Decimal | None) -> str | None:
+    return None if value is None else str(Decimal(value).quantize(Decimal("0.0001")))
+
+
+def _price_str(value: Decimal) -> str:
+    return str(Decimal(value).quantize(Decimal("0.000001")))
+
+
+def _count_where(condition: ColumnElement[bool]) -> ColumnElement[int]:
+    return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)
+
+
+@dataclass
+class _Totals:
+    requests: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    cancelled: int = 0
+    reserved: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    token_unknown_requests: int = 0
+    estimated_cost_usd: Decimal = field(default_factory=Decimal)
+    cost_unknown_requests: int = 0
+    committed_usd: Decimal = field(default_factory=Decimal)
+
+    def add(self, other: _Totals) -> None:
+        for name in self.__dataclass_fields__:
+            setattr(self, name, getattr(self, name) + getattr(other, name))
+
+    def subtract(self, other: _Totals) -> None:
+        for name in self.__dataclass_fields__:
+            setattr(self, name, getattr(self, name) - getattr(other, name))
+
+    def fields(self) -> dict[str, object]:
+        return {
+            "requests": self.requests,
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "cancelled": self.cancelled,
+            "reserved": self.reserved,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "token_unknown_requests": self.token_unknown_requests,
+            "estimated_cost_usd": gateway.format_usd(self.estimated_cost_usd),
+            "cost_unknown_requests": self.cost_unknown_requests,
+            "committed_usd": gateway.format_usd(self.committed_usd),
+        }
+
+
+USAGE_BREAKDOWN_LIMIT = 100
+"""Most provider/model rows the usage report lists; the rest are one "other" bucket."""
+
+
+def _usage_aggregates(dialect: str) -> list[ColumnElement[Any]]:
+    """Per-group report columns, in :class:`_Totals` field order.
+
+    "Unknown" counts every record whose provider usage or cost is NULL, whatever
+    its billability: a missing number is never reported as zero. Committed spend
+    is the separate :func:`gateway.committed_amount` rule. Money columns are
+    exact sums (see :func:`gateway.sum_usd`).
+    """
+    record = AiUsageRecord
+    return [
+        func.count(),
+        _count_where(record.status == UsageStatus.SUCCEEDED.value),
+        _count_where(record.status == UsageStatus.FAILED.value),
+        _count_where(record.status == UsageStatus.CANCELLED.value),
+        _count_where(record.status == UsageStatus.RESERVED.value),
+        func.coalesce(func.sum(record.input_tokens), 0),
+        func.coalesce(func.sum(record.output_tokens), 0),
+        _count_where(or_(record.input_tokens.is_(None), record.output_tokens.is_(None))),
+        gateway.sum_usd(record.cost_usd, dialect),
+        _count_where(record.cost_usd.is_(None)),
+        gateway.sum_usd(gateway.committed_amount(), dialect),
+    ]
+
+
+def _totals_from_row(values: Sequence[Any], dialect: str) -> _Totals:
+    (
+        requests,
+        succeeded,
+        failed,
+        cancelled,
+        reserved,
+        input_tokens,
+        output_tokens,
+        token_unknown,
+        cost,
+        cost_unknown,
+        committed,
+    ) = values
+    return _Totals(
+        requests=int(requests),
+        succeeded=int(succeeded),
+        failed=int(failed),
+        cancelled=int(cancelled),
+        reserved=int(reserved),
+        input_tokens=int(input_tokens),
+        output_tokens=int(output_tokens),
+        token_unknown_requests=int(token_unknown),
+        estimated_cost_usd=gateway.usd_from_sum(cost, dialect),
+        cost_unknown_requests=int(cost_unknown),
+        committed_usd=gateway.usd_from_sum(committed, dialect),
+    )
+
+
+async def usage_report(db: AsyncSession, year: int, month: int) -> AiUsageReport:
+    """Month totals and breakdowns, each from its own bounded SQL aggregate.
+
+    No record is loaded and every result is bounded whatever the month holds:
+    one totals row, at most 31 day rows, at most :data:`USAGE_BREAKDOWN_LIMIT`
+    provider/model rows (most requests first), and a count of the groups beyond
+    that limit. Those groups are reported as one "other" bucket: the totals
+    minus the listed rows, exact because every sum is exact.
+    """
+    dialect = db.get_bind().dialect.name
+    start, end = gateway.month_bounds(year, month)
+    in_month = (AiUsageRecord.started_at >= start, AiUsageRecord.started_at < end)
+    aggregates = _usage_aggregates(dialect)
+
+    totals_row = (await db.execute(select(*aggregates).where(*in_month))).one()
+    totals = _totals_from_row(totals_row, dialect)
+
+    day = gateway.utc_day(AiUsageRecord.started_at)
+    day_rows = await db.execute(
+        select(day, *aggregates).where(*in_month).group_by(day).order_by(day)
+    )
+    by_day = [(group_day, _totals_from_row(values, dialect)) for group_day, *values in day_rows]
+
+    pair = (AiUsageRecord.provider, AiUsageRecord.model)
+    pair_rows = await db.execute(
+        select(*pair, *aggregates)
+        .where(*in_month)
+        .group_by(*pair)
+        .order_by(func.count().desc(), *pair)
+        .limit(USAGE_BREAKDOWN_LIMIT)
+    )
+    by_pair = [
+        (provider, model, _totals_from_row(values, dialect))
+        for provider, model, *values in pair_rows
+    ]
+    other: _Totals | None = None
+    omitted_groups = 0
+    if len(by_pair) == USAGE_BREAKDOWN_LIMIT:
+        groups = select(*pair).where(*in_month).group_by(*pair).subquery()
+        group_count = int(await db.scalar(select(func.count()).select_from(groups)) or 0)
+        omitted_groups = group_count - len(by_pair)
+    if omitted_groups > 0:
+        other = _Totals()
+        other.add(totals)
+        for _provider, _model, listed in by_pair:
+            other.subtract(listed)
+
+    policy = await gateway.read_policy(db)
+    budget = policy.monthly_budget_usd
+    committed = gateway.format_usd(totals.committed_usd)
+    remaining = None
+    if budget is not None:
+        remaining = gateway.format_usd(Decimal(budget) - totals.committed_usd)
+    return AiUsageReport.model_validate(
+        {
+            "period": AiUsagePeriod(
+                month=f"{year:04d}-{month:02d}", start=start, end=end, timezone="UTC"
+            ),
+            "actions_in_scope": [action.value for action in gateway.ACTIONS_IN_SCOPE],
+            "guarantee": "local_estimate_only",
+            "totals": AiUsageTotals.model_validate(totals.fields()),
+            "budget": AiUsageBudget(
+                monthly_budget_usd=_budget_str(budget),
+                committed_usd=committed or "0.000000",
+                remaining_usd=remaining,
+            ),
+            "by_provider_model": [
+                AiUsageByProviderModel.model_validate(
+                    {"provider": provider, "model": model, **pair_totals.fields()}
+                )
+                for provider, model, pair_totals in by_pair
+            ],
+            "by_provider_model_limit": USAGE_BREAKDOWN_LIMIT,
+            "by_provider_model_omitted_groups": omitted_groups,
+            "by_provider_model_other": (
+                None if other is None else AiUsageTotals.model_validate(other.fields())
+            ),
+            "by_day": [
+                AiUsageByDay.model_validate({"date": group_day, **day_totals.fields()})
+                for group_day, day_totals in by_day
+            ],
+        }
+    )
+
+
+class UsageCursorError(ValueError):
+    """``before`` names no record in the requested month."""
+
+
+def _record_item(row: AiUsageRecord, now: datetime) -> AiUsageRecordItem:
+    started_at = gateway.as_utc(row.started_at)
+    stale = (
+        row.status == UsageStatus.RESERVED.value
+        and started_at <= now - gateway.STALE_RESERVATION_AFTER
+    )
+    return AiUsageRecordItem.model_validate(
+        {
+            "id": row.id,
+            "actor_label": row.actor_label,
+            "action": row.action,
+            "provider": row.provider,
+            "model": row.model,
+            "status": row.status,
+            "stale": stale,
+            "billable": row.billable,
+            "started_at": started_at,
+            "completed_at": gateway.as_utc(row.completed_at) if row.completed_at else None,
+            "latency_ms": row.latency_ms,
+            "input_tokens": row.input_tokens,
+            "output_tokens": row.output_tokens,
+            "usage_source": row.usage_source,
+            "reserved_usd": gateway.format_usd(row.reserved_usd),
+            "cost_usd": gateway.format_usd(row.cost_usd),
+            "cost_source": row.cost_source,
+            "error_category": row.error_category,
+            "retry_of": row.retry_of,
+        }
+    )
+
+
+async def usage_records(
+    db: AsyncSession,
+    year: int,
+    month: int,
+    *,
+    limit: int,
+    before: uuid.UUID | None,
+) -> AiUsageRecordPage:
+    """Newest first, keyset-paginated on (started_at, id)."""
+    start, end = gateway.month_bounds(year, month)
+    query = select(AiUsageRecord).where(
+        AiUsageRecord.started_at >= start, AiUsageRecord.started_at < end
+    )
+    if before is not None:
+        cursor = await db.get(AiUsageRecord, before)
+        if cursor is None or not start <= gateway.as_utc(cursor.started_at) < end:
+            raise UsageCursorError("before must name a record in the requested month")
+        query = query.where(
+            or_(
+                AiUsageRecord.started_at < cursor.started_at,
+                and_(
+                    AiUsageRecord.started_at == cursor.started_at,
+                    AiUsageRecord.id < cursor.id,
+                ),
+            )
+        )
+    rows = (
+        await db.scalars(
+            query.order_by(AiUsageRecord.started_at.desc(), AiUsageRecord.id.desc()).limit(
+                limit + 1
+            )
+        )
+    ).all()
+    now = datetime.now(UTC)
+    page = rows[:limit]
+    return AiUsageRecordPage(
+        items=[_record_item(row, now) for row in page],
+        next_before=page[-1].id if len(rows) > limit else None,
+    )
+
+
+# ── Usage policy and pricing (#17) ─────────────────────────────────────
+
+
+def policy_out(policy: AiUsagePolicy) -> AiUsagePolicyOut:
+    return AiUsagePolicyOut.model_validate(
+        {
+            "monthly_budget_usd": _budget_str(policy.monthly_budget_usd),
+            "max_output_tokens": policy.max_output_tokens,
+            "max_concurrent_requests": policy.max_concurrent_requests,
+            "max_requests_per_minute": policy.max_requests_per_minute,
+            "unpriced_model_policy": policy.unpriced_model_policy,
+            "guarantee": "local_estimate_only",
+            "updated_at": gateway.as_utc(policy.updated_at) if policy.updated_at else None,
+        }
+    )
+
+
+async def get_usage_policy(db: AsyncSession) -> AiUsagePolicyOut:
+    return policy_out(await gateway.read_policy(db))
+
+
+async def update_usage_policy(db: AsyncSession, update: AiUsagePolicyUpdate) -> AiUsagePolicyOut:
+    policy = await db.get(AiUsagePolicy, 1)
+    if policy is None:
+        policy = gateway.default_policy()
+        db.add(policy)
+    policy.monthly_budget_usd = (
+        Decimal(update.monthly_budget_usd) if update.monthly_budget_usd is not None else None
+    )
+    policy.max_output_tokens = update.max_output_tokens
+    policy.max_concurrent_requests = update.max_concurrent_requests
+    policy.max_requests_per_minute = update.max_requests_per_minute
+    policy.unpriced_model_policy = update.unpriced_model_policy
+    policy.updated_at = datetime.now(UTC)
+    await db.flush()
+    return policy_out(policy)
+
+
+def pricing_out(row: AiModelPricing) -> AiModelPricingOut:
+    return AiModelPricingOut.model_validate(
+        {
+            "provider": row.provider,
+            "model": row.model,
+            "input_usd_per_mtok": _price_str(row.input_usd_per_mtok),
+            "output_usd_per_mtok": _price_str(row.output_usd_per_mtok),
+            "updated_at": gateway.as_utc(row.updated_at) if row.updated_at else None,
+        }
+    )
+
+
+async def list_pricing(db: AsyncSession) -> AiModelPricingList:
+    rows = (
+        await db.scalars(
+            select(AiModelPricing).order_by(AiModelPricing.provider, AiModelPricing.model)
+        )
+    ).all()
+    return AiModelPricingList(items=[pricing_out(row) for row in rows])
+
+
+async def get_pricing(
+    db: AsyncSession, provider: AiProvider, model: str
+) -> AiModelPricingOut | None:
+    row = await db.get(AiModelPricing, (provider.value, model))
+    return pricing_out(row) if row is not None else None
+
+
+async def set_pricing(
+    db: AsyncSession, provider: AiProvider, model: str, update: AiModelPricingUpdate
+) -> AiModelPricingOut:
+    row = await db.get(AiModelPricing, (provider.value, model))
+    if row is None:
+        row = AiModelPricing(provider=provider.value, model=model)
+        db.add(row)
+    row.input_usd_per_mtok = Decimal(update.input_usd_per_mtok)
+    row.output_usd_per_mtok = Decimal(update.output_usd_per_mtok)
+    row.updated_at = datetime.now(UTC)
+    await db.flush()
+    return pricing_out(row)
+
+
+async def delete_pricing(db: AsyncSession, provider: AiProvider, model: str) -> bool:
+    result = await db.execute(
+        delete(AiModelPricing).where(
+            AiModelPricing.provider == provider.value, AiModelPricing.model == model
+        )
+    )
+    await db.flush()
+    return getattr(result, "rowcount", 0) == 1
