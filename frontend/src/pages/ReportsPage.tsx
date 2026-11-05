@@ -33,6 +33,7 @@ import { TagMultiFilter } from '@/components/common/TagMultiFilter'
 import { TlpMultiFilter } from '@/components/common/TlpMultiFilter'
 import { formatDate } from '@/lib/utils'
 import { apiErrorMessage } from '@/lib/apiError'
+import { entityDetailPath } from '@/lib/safeAppPath'
 import { ReportTagsSaveError } from '@/api/reports'
 import type { ReportCreate, ReportFilters, ReportOrigin } from '@/types/report'
 
@@ -107,7 +108,7 @@ export default function ReportsPage() {
       onError: (err) => {
         if (err instanceof ReportTagsSaveError) {
           closeCreateDialog()
-          navigate(`/reports/${err.report.id}`)
+          navigate(entityDetailPath('/reports', err.report.id) ?? '/reports')
           toast(`Report created, but tags couldn't be saved: ${err.message}`, 'error')
           return
         }
@@ -240,7 +241,7 @@ export default function ReportsPage() {
                     <TableRow key={report.id}>
                       <TableCell>
                         <Link
-                          to={`/reports/${report.id}`}
+                          to={entityDetailPath('/reports', report.id) ?? '/reports'}
                           className="font-medium text-foreground hover:text-primary"
                         >
                           {report.title}
