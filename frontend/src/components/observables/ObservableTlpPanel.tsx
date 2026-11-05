@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { entityDetailPath, feedsHighlightPath } from '@/lib/safeAppPath'
 import {
   useSetTlpOverride,
   useClearTlpOverride,
@@ -127,11 +128,11 @@ export function ObservableTlpPanel({ observable, observableId }: ObservableTlpPa
                   <li key={`${source.kind}-${source.id ?? idx}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                     <span>
                       {source.kind === 'feed' && source.id ? (
-                        <Link to={`/feeds?feed=${source.id}`} className="font-medium hover:text-primary">
+                        <Link to={feedsHighlightPath(source.id) ?? '/feeds'} className="font-medium hover:text-primary">
                           {tlpSourceLabel(source.kind, source.name)}
                         </Link>
                       ) : source.kind === 'report' && source.id ? (
-                        <Link to={`/reports/${source.id}`} className="font-medium hover:text-primary">
+                        <Link to={entityDetailPath('/reports', source.id) ?? '/reports'} className="font-medium hover:text-primary">
                           {source.name}
                         </Link>
                       ) : (

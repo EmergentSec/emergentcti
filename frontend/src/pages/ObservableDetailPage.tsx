@@ -42,6 +42,7 @@ import {
 } from '@/lib/confidenceOverrideValidation'
 import { REASON_MAX_LENGTH } from '@/lib/policyValidation'
 import { formatDate, formatRelativeTime, typeColors, typeLabels } from '@/lib/utils'
+import { entityDetailPath } from '@/lib/safeAppPath'
 import type { ObservableType } from '@/types/observable'
 
 // ── Type helpers ──────────────────────────────────────────────────────────────
@@ -451,7 +452,7 @@ export default function ObservableDetailPage() {
             {linkedReports.map((report) => (
               <li key={report.id} className="px-3 py-2.5">
                 <Link
-                  to={`/reports/${report.id}`}
+                  to={entityDetailPath('/reports', report.id) ?? '/reports'}
                   className="font-medium text-foreground hover:text-primary"
                 >
                   {report.title}
