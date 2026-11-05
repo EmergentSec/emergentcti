@@ -27,8 +27,8 @@ All **runtime high** findings were resolved. Remaining items are moderate (runti
 | `axios` | runtime | high (+ nested moderate/low) | GHSA-pmwg-cvhr-8vh7, GHSA-3p68-rc4w-qgx5, GHSA-w9j2-pvgh-6h63, GHSA-3w6x-2g7m-8v23, GHSA-xhjh-pmcv-23jw, GHSA-445q-vr5w-6q77, … (see before JSON) | 1.13.4 → **1.21.0** | axios ≥1.20.0 | **Browser bundle:** `frontend/src/api/client.ts` uses `axios.create` with JSON + cookies; Vite resolves the **XHR adapter**, not the Node HTTP adapter. Node-only paths (NO_PROXY/SSRF, `formDataToStream`, redirect agent, etc.) are **not shipped** in the production static bundle but were still upgraded because the package is a direct runtime dependency. |
 | `form-data` | runtime (transitive) | high | GHSA-hmw2-7cc7-3qxx | 4.0.5 → **4.0.6** | form-data ≥4.0.6 | Transitive via axios; **not used** in browser builds (Node multipart stack). Fixed by axios 1.21.0 lock resolution. |
 | `follow-redirects` | runtime (transitive) | moderate | GHSA-r4q5-vmmm-2653 | 1.15.11 → **1.16.2** | follow-redirects ≥1.16.0 | Transitive via axios Node adapter only; **not in browser bundle**. Fixed via axios upgrade. |
-| `@remix-run/router` | runtime (transitive) | moderate | GHSA-2j2x-hqr9-3h42 | 1.23.2 → **1.23.4** | @remix-run/router ≥1.23.3 | **Reachable:** SPA uses `BrowserRouter`, `Link`, `useNavigate`, deep links (`/reports/:id`, etc.). Same-origin open-redirect class; app uses app-controlled path templates, not raw user URLs in `to=`. |
-| `react-router` / `react-router-dom` | runtime | moderate | GHSA-2j2x-hqr9-3h42 (router), plus react-router-dom chain | 6.30.3 → **6.30.6** | react-router-dom 6.30.6 | **Reachable** for client-side routing across the app (`App.tsx`, layout, entity pages). |
+| `@remix-run/router` | runtime (transitive) | moderate | GHSA-2j2x-hqr9-3h42 | 1.23.2 → **1.23.4** | @remix-run/router ≥1.23.3 | **Reachable:** client-side routing (`BrowserRouter`, `Link`, `useNavigate`). Fixed same-origin `//` open-redirect class in router; see navigation audit below for GHSA-wrjc backslash class. |
+| `react-router` / `react-router-dom` | runtime | moderate | GHSA-wrjc-x8rr-h8h6 (open redirect / backslash in `Link` / `useNavigate`); GHSA-337j-9hxr-rhxg (**SSR `deserializeErrors` only — not used**) | 6.30.3 → **6.30.6** | react-router-dom 6.30.6 (partial; v7 for full fix) | Client-only SPA — **GHSA-337j not reachable** (no SSR hydration). **GHSA-wrjc** applies to `Link` / `navigate` targets; see audit below. |
 | `happy-dom` | tooling | high | GHSA-834v-8h66-3h79, GHSA-c8p4-j97h-3vg8, GHSA-5fpq-26gf-qwcr | 20.10.2 → **21.0.4** | happy-dom ≥21.0.4 | Test environment only (`vitest`); not in production image runtime. |
 | `postcss` | tooling | high | GHSA-fxqj-rqcc-2cmp, GHSA-r28c-9q8g-f849 | 8.4.49 → **8.5.32** | postcss ≥8.5.23 | Build-time CSS pipeline only. |
 | `vite` | tooling | high (aggregate) | GHSA-4w7w-66w2-5vf9, GHSA-v6wh-96g9-6wx3, GHSA-698v-4r3x-3vcv, GHSA-r825-w8mm-5pxw, GHSA-587h-7wmj-h5pm, … | 5.4.11 → **5.4.21** | Partial; see remaining | **Dev/preview server only** in this repo; production Docker stage serves static `dist/` via nginx. |
@@ -62,17 +62,40 @@ Reviewed lockfile diff: patch/minor bumps only for Babel, browserslist, baseline
 
 | Component | Scope | Severity | Advisory IDs | Rationale | Mitigation | Follow-up |
 | --- | --- | --- | --- | --- | --- | --- |
-| `react-router` / `react-router-dom` | runtime | moderate | GHSA-wrjc-x8rr-h8h6, GHSA-337j-9hxr-rhxg | npm reports fix only on **React Router v7**; issue scope forbids v7 migration here. | Client-only SPA (no SSR hydration); navigation uses internal path templates; validate IDs from API. Monitor React Router 6.x security releases. | Dedicated issue: evaluate React Router 7 migration or upstream 6.x backports. |
+| `react-router` / `react-router-dom` | runtime | moderate | GHSA-wrjc-x8rr-h8h6 | npm reports fix only on **React Router v7**; #18 stays on v6. | **GHSA-337j:** not applicable (no SSR). **GHSA-wrjc:** API-sourced ids now passed through `entityDetailPath` / `feedsHighlightPath` (`frontend/src/lib/safeAppPath.ts`); no `?next=` / post-login redirect params. | Track v7 migration or 6.x backports (review by 2027-02-03). |
 | `vite` | tooling | high (scanner aggregate) | GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv, GHSA-r825-w8mm-5pxw, GHSA-rq7h-c2jc-7f22, GHSA-fx2h-pf6j-xcff, … | Patched floor is **>6.4.3** / Vite 8; staying on **Vite 5.4.x** per issue boundary. | Production deploy serves static assets; do not expose Vite dev server to untrusted networks; use `npm run build` in CI/Docker only. | Plan Vite 6+ upgrade track (separate from #18). |
 | `esbuild` (via Vite 5) | tooling | moderate | GHSA-67mh-4wv8-2f99 | Bundled with Vite 5 (`esbuild@0.21.5`); fix requires newer Vite major. | Dev-server exposure control; no esbuild in nginx runtime image. | Same Vite upgrade track. |
 
-## Proposed time-bounded exceptions (≤90 days)
+## Tracked follow-ups (no exception needed under policy)
 
-| id | package | scope | severity | reason | mitigation | owner | expires |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| EX-2026-11-FE-001 | react-router / react-router-dom | runtime | moderate | Fix requires React Router v7; out of scope for #18 | SPA-only; controlled routes; no SSR `deserializeErrors` path | frontend | 2026-02-03 |
-| EX-2026-11-FE-002 | vite | tooling | high | Vite 5.x line capped; advisories require ≥6.4.4 | Static nginx deploy; restrict dev/preview servers | frontend | 2026-02-03 |
-| EX-2026-11-FE-003 | esbuild | tooling | moderate | Transitive of pinned Vite 5 | Dev network isolation; not in production runtime | frontend | 2026-02-03 |
+**Audit policy:** runtime scans **fail** on high/critical only; tooling scans **fail** on critical only—moderate and high tooling findings are reported but do not fail the check, so none of the remaining items belong in `security/audit-exceptions.json`.
+
+| Package / topic | Scope | Severity (scanner) | Owner | Review by | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `react-router` / `react-router-dom` (GHSA-wrjc-x8rr-h8h6) | runtime | moderate | frontend | 2027-02-03 | Fix requires v7; mitigated for API-built paths via `safeAppPath` helpers. GHSA-337j (SSR) N/A. |
+| `vite` dev-server advisories | tooling | high (aggregate) | frontend | 2027-02-03 | Stay on Vite 5.x for #18; production serves static `dist/` via nginx. |
+| `esbuild` via Vite 5 (GHSA-67mh-4wv8-2f99) | tooling | moderate | frontend | 2027-02-03 | Dev-server exposure only; bundle with planned Vite major upgrade. |
+
+## Client navigation audit (GHSA-wrjc-x8rr-h8h6)
+
+No code passes URL search params (e.g. `?next=`) or raw user text as a full `Link` / `navigate` target. Login success uses fixed `navigate('/')` / `navigate('/login')` (`AuthContext.tsx`). Header search uses `navigate(\`/observables?q=${encodeURIComponent(...)}\`)` — path prefix is literal `/observables`; query is encoded, not a path open redirect.
+
+| Location | API | Target source | Can `to` / `navigate` start with `//` or `/\`? |
+| --- | --- | --- | --- |
+| `App.tsx` | `<Navigate>` | literal `/login` | No |
+| `AuthContext.tsx` | `navigate` | literals `/`, `/login` | No |
+| `AppLayout.tsx` | `navigate` | literals `/observables?create=1`, `/reports?create=1` | No |
+| `Header.tsx` | `navigate`, `<Link>` | literal `/`, fixed `/observables?q=` + encoded input | No (path fixed) |
+| `Sidebar.tsx` / `navigation.ts` | `<NavLink>` | static `NAV_ITEMS` paths | No |
+| `FeedStatusTable.tsx` | `<Link>` | literal `/feeds` | No |
+| `ReportsPage.tsx` | `navigate`, `<Link>` | API `report.id` / `err.report.id` | Only if id contained `\` or `/`; **guarded** via `entityDetailPath` → fallback `/reports` |
+| `ReportDetailPage.tsx` | `<Link>` | API `obs.id` | **Guarded** → `/observables` |
+| `ObservableDetailPage.tsx` | `<Link>` | API `report.id` | **Guarded** → `/reports` |
+| `ObservableTable.tsx` | `navigate` | API `obs.id` | **Guarded** → `/observables` |
+| `ObservableTlpPanel.tsx` | `<Link>` | API `source.id` | **Guarded** (`feedsHighlightPath` / `entityDetailPath`) |
+| `SettingsPage`, `FeedsPage`, `ObservablesPage`, `ObservableDetailPage` | `useSearchParams` | `tab`, `create`, `q`, `feed` — filter UI only, not passed to `Link`/`navigate` as paths | No |
+
+**GHSA-337j-9hxr-rhxg** (`deserializeErrors` constructor injection on SSR hydration): this app is a **client-rendered SPA** (`main.tsx` + `BrowserRouter`); no SSR loader/hydration path — **not reachable**.
 
 ## Verification (2026-11-05)
 
@@ -81,7 +104,7 @@ Commands run from `frontend/` after final lockfile (regenerated with **npm 10** 
 | Command | Result |
 | --- | --- |
 | `rm -rf node_modules && npm ci` | exit 0 |
-| `npm test` | exit 0 — 75 files, 683 tests passed |
+| `npm test` | exit 0 — 76 files, 687 tests passed (includes `safeAppPath` tests) |
 | `npm run build` | exit 0 — `tsc -b && vite build` |
 | `npm audit --omit=dev` | exit 1 (moderate only) — **0 high**, 2 moderate (`react-router` chain) |
 | `docker build -t emergentcti-frontend:a18 frontend` | exit 0 (via `newgrp docker`) |
