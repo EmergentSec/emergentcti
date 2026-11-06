@@ -320,36 +320,14 @@ async def test_password_change_with_wrong_current_password_records_failed(
 # ── settings ───────────────────────────────────────────────────────────────
 
 
-async def test_settings_update_records_names_not_values(client: AsyncClient, db_session) -> None:
-    # PUT /settings/config never applies changes (501): every attempt is a failure.
-    response = await client.put(
-        f"{SETTINGS}/config",
-        json={"instance_name": "VALUE-SENTINEL", "confidence_decay_days": 9, "bogus": "x"},
-    )
-    assert response.status_code == 501
-    found = await events(db_session, "settings.update")
-    assert_not_succeeded(found)
-    assert [(e.outcome, e.resource_type, e.summary) for e in found] == [
-        (
-            "failed",
-            "settings",
-            {
-                "settings": ["confidence_decay_days", "instance_name"],
-                "unknown_settings": 1,
-                "reason": "not_supported",
-                "status": 501,
-            },
-        )
-    ]
-    assert "VALUE-SENTINEL" not in await rows_json(db_session)
-
-
-async def test_settings_update_by_non_admin_is_denied(
-    app: FastAPI, client: AsyncClient, db_session
-) -> None:
+async def test_settings_config_is_read_only(app: FastAPI, client: AsyncClient, db_session) -> None:
+    # Config comes from the environment (.env + restart); there is no write route,
+    # so a PUT is a 405 for anyone and nothing is audited.
+    response = await client.put(f"{SETTINGS}/config", json={"instance_name": "x"})
+    assert response.status_code == 405
     async with non_admin_client(app) as user:
-        response = await user.put(f"{SETTINGS}/config", json={"instance_name": "x"})
-    assert response.status_code == 403
-    found = await events(db_session, "settings.update")
-    assert_not_succeeded(found)
-    assert found[0].outcome == "denied"
+        assert (
+            await user.put(f"{SETTINGS}/config", json={"instance_name": "x"})
+        ).status_code == 405
+    assert (await client.get(f"{SETTINGS}/config")).status_code == 200
+    assert await events(db_session) == []

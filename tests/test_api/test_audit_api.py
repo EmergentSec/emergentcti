@@ -224,6 +224,39 @@ async def test_meta_exposes_catalog(admin: AsyncClient) -> None:
     ]
     assert body["resource_types"] == sorted(set(audit.ACTION_CATALOG.values()))
     assert body["retention_days"] == 365
+    # Retired with PUT /settings/config (#36).
+    assert "settings.update" not in body["actions"]
+    assert "settings" not in body["resource_types"]
+
+
+async def test_retired_actions_stay_listable(admin: AsyncClient, db_session) -> None:
+    # settings.update is no longer in the catalog (so it can't be recorded), but
+    # rows written before #36 must remain readable until retention removes them.
+    await seed(db_session)
+    db_session.add(
+        AuditEvent(
+            occurred_at=T0 + timedelta(minutes=10),
+            actor_type="user",
+            actor_id=ALICE.id,
+            actor_label="alice",
+            action="settings.update",
+            resource_type="settings",
+            outcome="failed",
+            summary={"n": 99},
+        )
+    )
+    await db_session.commit()
+    assert summaries(await admin.get(URL))[0] == 99
+    assert summaries(await admin.get(URL, params={"action": "settings.update"})) == [99]
+    assert summaries(await admin.get(URL, params={"resource_type": "settings"})) == [99]
+    with pytest.raises(ValueError, match="Unknown audit action"):
+        audit.record(
+            db_session,
+            actor=ALICE,
+            action="settings.update",
+            resource_type="settings",
+            outcome=AuditOutcome.FAILED,
+        )
 
 
 # ── helpers through real requests ──────────────────────────────────────────

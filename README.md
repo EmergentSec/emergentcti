@@ -71,6 +71,8 @@ Endpoints authenticate with an `X-API-Key` header (programmatic access) **or** a
 | `GET /api/v1/stats` | Dashboard stats |
 | `GET /api/v1/settings/api-keys` · `/users` · `/config` | API keys, users, read-only config (admin) |
 
+Configuration is read-only through the API: `GET /api/v1/settings/config` shows the current values, and there is no write route (`PUT` returns 405). To change a setting, edit `.env` and restart the stack.
+
 ## Safe exports and retention
 
 Use **Settings → Allowlist** to protect known-good values without losing feed provenance. Exact entries are type-specific; CIDRs match IP indicators only; domain suffixes match the domain itself and subdomains at label boundaries (not URLs or email addresses). Domain matching is case-insensitive; other non-IP types match literally, including case and whitespace. Admins can also allowlist an exact value (or an IP range) from its observable detail page. A reason is required for every rule.
@@ -224,12 +226,13 @@ provider's console: those are the real safeguard.
 
 EmergentCTI keeps an admin-only history of sensitive changes and disclosures in the
 `audit_events` table: allowlist, export-profile, report, tag/TLP, feed, API-key,
-user, settings, and AI-provider changes; export and attachment downloads; outbound
+user, and AI-provider changes; export and attachment downloads; outbound
 AI requests; and one aggregated event per scheduled retention run. Admin users read
 it in **Settings → Audit** or at `GET /api/v1/audit/events`, filtered by time range,
 actor, action, resource, and outcome. API keys cannot read it (403), so a leaked key
 cannot inspect the trail of its own use; `GET /api/v1/audit/meta` lists the action catalog. There are
-no routes to edit or delete events.
+no routes to edit or delete events. Events for retired actions (such as `settings.update`, from the
+removed `PUT /settings/config`) remain listable and filterable until retention removes them.
 
 Each event records the UTC time, the actor (a user, an API key by its **record id**
 and name, never the key itself, or a system job), the action, the resource with a

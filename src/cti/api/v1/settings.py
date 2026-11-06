@@ -200,6 +200,8 @@ async def revoke_api_key(
 # ── Global Config ─────────────────────────────────────────────────────
 
 
+# Read-only: config comes from environment variables. To change it, edit .env
+# and restart. There is deliberately no PUT route (#36), so writes get a 405.
 @router.get("/config")
 async def get_config(
     _auth: AuthSubject = Depends(get_current_auth),
@@ -215,53 +217,6 @@ async def get_config(
         "observable_retention_days": settings.OBSERVABLE_RETENTION_DAYS,
         "default_export_format": settings.DEFAULT_EXPORT_FORMAT,
     }
-
-
-# Names returned by GET /config; settings.update records only these names.
-_CONFIG_NAMES = frozenset(
-    {
-        "confidence_decay_enabled",
-        "confidence_decay_days",
-        "confidence_decay_rate",
-        "confidence_decay_floor",
-        "confidence_decay_interval_hours",
-        "instance_name",
-        "observable_retention_days",
-        "default_export_format",
-    }
-)
-
-
-@router.put("/config")
-async def update_config(
-    data: dict,
-    db: AsyncSession = Depends(get_db),
-    _auth: AuthSubject = Depends(audit.audited_admin("settings.update", "settings")),
-) -> dict:
-    # Config is environment-driven; this endpoint is a read-only view for now.
-    # To update, modify .env and restart. This returns current values.
-    exc = HTTPException(
-        status_code=501,
-        detail="Config updates require modifying environment variables and restarting. Use GET to view current config.",
-    )
-    # Every attempt fails (501), so it is audited as failed. Setting names only,
-    # never values; names outside the known config are only counted.
-    actor = audit.actor_from_auth(_auth)
-    await db.rollback()
-    await audit.record_independent(
-        actor=actor,
-        action="settings.update",
-        resource_type="settings",
-        outcome=audit.AuditOutcome.FAILED,
-        summary={
-            "settings": sorted(name for name in data if name in _CONFIG_NAMES),
-            "unknown_settings": len([name for name in data if name not in _CONFIG_NAMES]),
-            "reason": "not_supported",
-            "status": exc.status_code,
-        },
-        strict=False,
-    )
-    raise exc
 
 
 # ── User Management ───────────────────────────────────────────────────

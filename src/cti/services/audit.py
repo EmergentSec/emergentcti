@@ -177,7 +177,6 @@ ACTION_CATALOG: Mapping[str, str] = MappingProxyType(
         "user.update": "user",
         "user.delete": "user",
         "user.password_change": "user",
-        "settings.update": "settings",
         "ai_provider.key_save": "ai_provider",
         "ai_provider.delete": "ai_provider",
         "ai_default.set": "ai_default",

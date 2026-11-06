@@ -184,7 +184,7 @@ Callers pass an explicit, minimal summary; `sanitize_summary` also enforces:
 | `feed.create` / `.update` / `.delete` / `.trigger` | `feed` | `/feeds` (summary: changed field names; never credentials or auth config values) |
 | `api_key.create` / `api_key.revoke` | `api_key` | `/settings/api-keys` (resource_id = key record id) |
 | `user.create` / `.update` / `.delete` / `.password_change` | `user` | `/settings/users` (role/active changes as before/after; never the password) |
-| `settings.update` | `settings` | `PUT /settings/config` |
+| ~~`settings.update`~~ | `settings` | Retired in #36: `PUT /settings/config` was removed; old rows stay listable |
 | `ai_provider.key_save` / `ai_provider.delete` | `ai_provider` | `/settings/ai/providers/{p}` (never the key) |
 | `ai_default.set` / `ai_default.clear` | `ai_default` | `/settings/ai/default` |
 | `ai.request` | `ai_provider` | check / models / inference-test |
