@@ -169,6 +169,20 @@ def parse_npm(data: Any, rc: int, ecosystem: str, scope: str) -> list[Finding]:
                 title=str(via.get("title") or ""),
             )
             found.setdefault(f.key, f)
+
+    # Mirror parse_osv: a "vulnerable" result we could not extract anything from
+    # must not be mistaken for a clean one (e.g. only string `via` entries, or a
+    # report format we do not understand).
+    total = counts.get("total")
+    if rc == 1 and not found:
+        raise AuditError(
+            "npm audit exited 1 but no advisories could be extracted (inconsistent output)"
+        )
+    if isinstance(total, int) and total > 0 and not found:
+        raise AuditError(
+            f"npm audit metadata reports {total} vulnerable package(s) "
+            "but no advisories could be extracted"
+        )
     return list(found.values())
 
 

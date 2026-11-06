@@ -62,6 +62,16 @@ NPM_ERROR = {
     "error": {"summary": "", "detail": ""},
 }
 OSV_EMPTY = {"results": []}
+NPM_STRING_VIA_ONLY = {
+    "auditReportVersion": 2,
+    "vulnerabilities": {"react-router-dom": {"name": "react-router-dom", "via": ["react-router"]}},
+    "metadata": {"vulnerabilities": {"moderate": 1, "total": 1}},
+}
+NPM_TOTAL_WITHOUT_ADVISORIES = {
+    "auditReportVersion": 2,
+    "vulnerabilities": {},
+    "metadata": {"vulnerabilities": {"high": 2, "total": 2}},
+}
 
 
 def osv_report(pkg: str, version: str, ids: list[str], aliases: list[str], max_sev: str) -> dict:
@@ -195,6 +205,9 @@ def test_osv_cvss_severity_and_unknown_default(tmp_path):
     [
         ("npm", 1, NPM_ERROR),  # registry unreachable
         ("npm", 1, {"vulnerabilities": {}}),  # no metadata.vulnerabilities
+        ("npm", 1, npm_report()),  # exit 1 ("vulnerable") but nothing to extract
+        ("npm", 1, NPM_STRING_VIA_ONLY),  # only "because of X" entries, X missing
+        ("npm", 0, NPM_TOTAL_WITHOUT_ADVISORIES),  # metadata total > 0, nothing extracted
         ("npm", 0, "npm ERR! not json"),
         ("npm", 7, npm_report()),  # unexpected exit code
         ("osv", 127, OSV_EMPTY),  # osv.dev unreachable: valid-looking empty JSON

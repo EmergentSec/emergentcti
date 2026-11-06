@@ -50,10 +50,12 @@ run_scanner() {
   echo "$rc"
 }
 
+# --audit-level=info: npm exits 1 for any finding regardless of user/global
+# npmrc, so the evaluator's exit-code/finding consistency checks are reliable.
 echo "audit-deps: frontend runtime (npm audit --omit=dev)" >&2
-fe_rt_rc=$(cd frontend && run_scanner "$OUT/frontend-runtime.json" npm audit --omit=dev --json)
+fe_rt_rc=$(cd frontend && run_scanner "$OUT/frontend-runtime.json" npm audit --omit=dev --audit-level=info --json)
 echo "audit-deps: frontend full tree (npm audit)" >&2
-fe_all_rc=$(cd frontend && run_scanner "$OUT/frontend-all.json" npm audit --json)
+fe_all_rc=$(cd frontend && run_scanner "$OUT/frontend-all.json" npm audit --audit-level=info --json)
 
 echo "audit-deps: backend export from uv.lock" >&2
 # --frozen: audit exactly what uv.lock pins; never re-resolve here.
