@@ -1,0 +1,121 @@
+# Dependency audit + clean-install checks (issue #18).
+# Policy, scopes, exit codes and the exception process: docs/security/dependency-audit.md
+name: dependency-audit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, so new advisories against unchanged lockfiles still surface.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: "20"
+  UV_VERSION: "0.13.4"
+  PYTHON_VERSION: "3.12"
+  OSV_SCANNER_VERSION: "2.7.0"
+  OSV_SCANNER_SHA256: "160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b"
+
+jobs:
+  audit:
+    name: audit (scripts/audit-deps.sh)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: false
+
+      - name: Install osv-scanner (pinned, checksum-verified)
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL -o "$RUNNER_TEMP/bin/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  $RUNNER_TEMP/bin/osv-scanner" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/bin/osv-scanner"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # Exit 1 (policy violation) and exit 2 (scanner/network failure) both fail
+      # this step; there is deliberately no continue-on-error.
+      - name: Audit dependencies
+        shell: bash # -eo pipefail: tee must not mask the script's exit code
+        env:
+          AUDIT_OUTPUT_DIR: ${{ runner.temp }}/audit-output
+        run: |
+          mkdir -p "$AUDIT_OUTPUT_DIR"
+          scripts/audit-deps.sh | tee "$AUDIT_OUTPUT_DIR/summary.txt"
+
+      - name: Job summary
+        if: always()
+        shell: bash
+        run: |
+          f="$RUNNER_TEMP/audit-output/summary.txt"
+          { echo '```'; if [[ -f "$f" ]]; then cat "$f"; else echo "no audit summary produced"; fi; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload raw scanner output
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dependency-audit
+          path: ${{ runner.temp }}/audit-output
+          retention-days: 30
+          if-no-files-found: warn
+
+  frontend:
+    name: frontend clean install, test, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  backend:
+    name: backend locked install + tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: false
+      - name: Lockfile is consistent with pyproject.toml
+        run: uv lock --check
+      - name: Install exactly what uv.lock pins
+        run: uv sync --locked --extra dev
+      - name: Tests
+        env:
+          PYTHONPATH: src
+        run: uv run --locked --extra dev pytest -q

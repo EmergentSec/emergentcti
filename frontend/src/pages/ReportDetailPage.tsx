@@ -42,6 +42,7 @@ import { TagEditor } from '@/components/common/TagEditor'
 import { IndicatorImportReview } from '@/components/reports/IndicatorImportReview'
 import { formatDate, typeLabels } from '@/lib/utils'
 import { apiErrorMessage } from '@/lib/apiError'
+import { entityDetailPath } from '@/lib/safeAppPath'
 import type { ReportCreate } from '@/types/report'
 import type { ExtractionPreview } from '@/types/reportIocExtraction'
 
@@ -490,7 +491,7 @@ export default function ReportDetailPage() {
             {report.observables.map((obs) => (
               <li key={obs.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5">
                 <Link
-                  to={`/observables/${obs.id}`}
+                  to={entityDetailPath('/observables', obs.id) ?? '/observables'}
                   className="min-w-0 flex-1 font-mono text-sm hover:text-primary"
                 >
                   {obs.value}

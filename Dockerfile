@@ -1,17 +1,20 @@
-FROM ghcr.io/astral-sh/uv:latest AS uv
+# Pinned so builds are reproducible; bump deliberately alongside uv.lock changes.
+FROM ghcr.io/astral-sh/uv:0.13.4 AS uv
 FROM python:3.12-slim AS builder
 
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_HTTP_TIMEOUT=120
 WORKDIR /app
 
-COPY pyproject.toml uv.lock* README.md ./
-RUN uv sync --no-dev --no-install-project
+# uv.lock is required: --locked fails the build if it is missing or out of date
+# with pyproject.toml, so images install exactly the audited dependency set.
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --locked --no-dev --no-install-project
 
 COPY src/ src/
 COPY alembic/ alembic/
 COPY alembic.ini .
-RUN uv sync --no-dev
+RUN uv sync --locked --no-dev
 
 FROM python:3.12-slim AS production
 RUN groupadd -g 1001 cti && useradd -u 1001 -g cti -m -s /bin/bash cti

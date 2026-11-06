@@ -294,3 +294,7 @@ npm install
 npm run dev      # Vite dev server on :5173 (proxies /api to the backend)
 npm run test     # Vitest
 ```
+
+Dependency security — backend dependencies are pinned in `uv.lock` (the Docker build
+requires it). Run `scripts/audit-deps.sh` to audit both lockfiles against the severity
+policy; see [docs/security/dependency-audit.md](docs/security/dependency-audit.md).

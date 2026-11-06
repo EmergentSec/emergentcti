@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { entityDetailPath } from '@/lib/safeAppPath'
 import {
   At,
   CaretRight,
@@ -92,6 +93,10 @@ export function ObservableTable({ observables }: ObservableTableProps) {
   const deleteObservable = useDeleteObservable()
   const { isAdmin } = useAuth()
 
+  const goToDetail = (obsId: string) => {
+    navigate(entityDetailPath('/observables', obsId) ?? '/observables')
+  }
+
   return (
     <Table>
       <TableHeader>
@@ -116,11 +121,11 @@ export function ObservableTable({ observables }: ObservableTableProps) {
             tabIndex={0}
             role="button"
             aria-label={`View details for ${obs.value}`}
-            onClick={() => navigate(`/observables/${obs.id}`)}
+            onClick={() => goToDetail(obs.id)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault()
-                navigate(`/observables/${obs.id}`)
+                goToDetail(obs.id)
               }
             }}
           >
