@@ -52,6 +52,25 @@ describe('Dialog', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('renders the close button disabled and ignores Esc, overlay, and the button', () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog open onClose={onClose} title="Import indicators" closeDisabled>
+        <button>Save</button>
+      </Dialog>,
+    );
+    const close = screen.getByRole('button', { name: 'Close' }) as HTMLButtonElement;
+    expect(close.disabled).toBe(true);
+    expect(close.className).toContain('disabled:opacity-50');
+
+    fireEvent.click(close);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    const overlay = document.querySelector('.bg-overlay');
+    expect(overlay).toBeTruthy();
+    fireEvent.click(overlay!);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('does not steal focus back when the parent re-renders', () => {
     // Controlled field: every keystroke re-renders the parent, which passes a
     // fresh inline onClose to Dialog each time.

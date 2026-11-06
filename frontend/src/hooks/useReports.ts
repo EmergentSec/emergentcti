@@ -1,4 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useToast } from '@/contexts/ToastContext'
+import {
+  importFailureMessage,
+  importFailureShownInline,
+  importSuccessMessage,
+} from '@/lib/importRequest'
 import {
   getReports,
   getReportSources,
@@ -138,14 +144,24 @@ export function useExtractReportIndicators() {
 
 export function useImportReportIndicators() {
   const queryClient = useQueryClient()
+  const { toast } = useToast()
   return useMutation({
     mutationFn: ({ reportId, payload }: { reportId: string; payload: ImportRequest }) =>
       importReportIndicators(reportId, payload),
-    onSuccess: (_data, { reportId }) => {
+    onSuccess: (result, { reportId }) => {
       queryClient.invalidateQueries({ queryKey: ['report', reportId] })
       queryClient.invalidateQueries({ queryKey: ['observables'] })
       queryClient.invalidateQueries({ queryKey: ['observableReports'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      // Hook callbacks run even if the review dialog has unmounted.
+      toast(importSuccessMessage(result), 'success')
+    },
+    onError: (err) => {
+      // While the dialog is open it shows the failure inline (including row
+      // highlights). After dismiss, this is the only place the analyst hears
+      // the outcome — including a timeout whose commit state is unknown.
+      if (importFailureShownInline()) return
+      toast(importFailureMessage(err), 'error')
     },
   })
 }

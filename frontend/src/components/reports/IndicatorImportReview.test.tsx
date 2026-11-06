@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { IndicatorImportReview } from './IndicatorImportReview'
@@ -9,6 +9,13 @@ import {
   EXPORT_ELIGIBILITY_NOTICE,
   PDF_EXTRACTION_MESSAGE,
 } from '@/lib/extractionWarnings'
+import {
+  IMPORT_CLOSE_UNLOCK_MS,
+  IMPORT_PENDING_UNLOCKED_MESSAGE,
+  IMPORT_STILL_RUNNING_MESSAGE,
+  IMPORT_TIMEOUT_MESSAGE,
+  importPendingLockedMessage,
+} from '@/lib/importRequest'
 
 const mockImport = vi.fn()
 const mockToast = vi.fn()
@@ -188,6 +195,7 @@ afterEach(() => {
   mockImport.mockReset()
   mockToast.mockReset()
   mockIsPending = false
+  vi.useRealTimers()
 })
 
 describe('IndicatorImportReview', () => {
@@ -339,7 +347,7 @@ describe('IndicatorImportReview', () => {
     )
   })
 
-  it('toasts all three counts and closes on success', () => {
+  it('closes on success; the import hook reports the counts', () => {
     const onClose = vi.fn()
     renderReview(BASE_PREVIEW, onClose)
     invokeMutate((_args, options) => {
@@ -348,28 +356,71 @@ describe('IndicatorImportReview', () => {
 
     fireEvent.click(importButton())
 
-    expect(mockToast).toHaveBeenCalledWith(
-      'Import complete: 2 created, 0 attributed, 1 already linked',
-      'success',
-    )
     expect(onClose).toHaveBeenCalledTimes(1)
+    expect(mockToast).not.toHaveBeenCalled()
   })
 
-  it('shows pending import state', () => {
+  it('shows a retry-safe alert when the import request times out', () => {
+    renderReview()
+    invokeMutate((_args, options) => {
+      options?.onError?.(new AxiosError('timeout of 60000ms exceeded', 'ECONNABORTED'))
+    })
+
+    fireEvent.click(importButton())
+
+    expect(screen.getByRole('alert').textContent).toBe(IMPORT_TIMEOUT_MESSAGE)
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Close' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('shows pending import state and renders close disabled while blocked', () => {
     mockIsPending = true
     renderReview()
     const pendingBtn = screen.getByRole('button', { name: 'Importing…' }) as HTMLButtonElement
     expect(pendingBtn).toBeTruthy()
     expect(pendingBtn.disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true)
+    const close = screen.getByRole('button', { name: 'Close' }) as HTMLButtonElement
+    expect(close.disabled).toBe(true)
+    expect(close.className).toContain('disabled:opacity-50')
+    expect(screen.getByRole('status').textContent).toBe(importPendingLockedMessage())
   })
 
-  it('ignores Escape while import is pending', () => {
+  it('ignores Escape, overlay, and close while import is blocked', () => {
     const onClose = vi.fn()
     mockIsPending = true
     renderReview(BASE_PREVIEW, onClose)
     fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    const overlay = document.querySelector('.bg-overlay')
+    expect(overlay).toBeTruthy()
+    fireEvent.click(overlay!)
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('allows close after the lock and says the result will still be reported', () => {
+    vi.useFakeTimers()
+    const onClose = vi.fn()
+    mockIsPending = true
+    renderReview(BASE_PREVIEW, onClose)
+
+    act(() => {
+      vi.advanceTimersByTime(IMPORT_CLOSE_UNLOCK_MS - 1)
+    })
+    expect((screen.getByRole('button', { name: 'Close' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(onClose).not.toHaveBeenCalled()
+
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+
+    expect(screen.getByRole('status').textContent).toBe(IMPORT_PENDING_UNLOCKED_MESSAGE)
+    expect((screen.getByRole('button', { name: 'Close' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(mockToast).toHaveBeenCalledWith(IMPORT_STILL_RUNNING_MESSAGE, 'info')
   })
 
   it('ignores a second confirm click before the mutation settles', () => {

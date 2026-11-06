@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import api from './client'
+import { IMPORT_REQUEST_TIMEOUT_MS } from '@/lib/importRequest'
 import { createReport, extractReportIndicators, importReportIndicators, updateReport, ReportTagsSaveError } from './reports'
 import type { ExtractionPreview, ImportResult } from '@/types/reportIocExtraction'
 
@@ -31,10 +32,15 @@ describe('report indicator extraction API', () => {
       confidence: 50,
       items: [{ type: 'ip-addr', value: '1.2.3.4' }],
     })
-    expect(post).toHaveBeenNthCalledWith(2, '/reports/rep-1/import', {
-      confidence: 50,
-      items: [{ type: 'ip-addr', value: '1.2.3.4' }],
-    })
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      '/reports/rep-1/import',
+      {
+        confidence: 50,
+        items: [{ type: 'ip-addr', value: '1.2.3.4' }],
+      },
+      { timeout: IMPORT_REQUEST_TIMEOUT_MS },
+    )
   })
 })
 
