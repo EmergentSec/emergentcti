@@ -1,6 +1,7 @@
 import api from './client'
 import { buildListParams } from './listParams'
 import { apiErrorMessage } from '@/lib/apiError'
+import { IMPORT_REQUEST_TIMEOUT_MS } from '@/lib/importRequest'
 import type {
   ReportAttachment,
   ReportCreate,
@@ -117,7 +118,9 @@ export async function importReportIndicators(
   reportId: string,
   payload: ImportRequest,
 ): Promise<ImportResult> {
-  const { data } = await api.post<ImportResult>(`/reports/${reportId}/import`, payload)
+  const { data } = await api.post<ImportResult>(`/reports/${reportId}/import`, payload, {
+    timeout: IMPORT_REQUEST_TIMEOUT_MS,
+  })
   return data
 }
 

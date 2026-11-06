@@ -10,14 +10,23 @@ export interface DialogProps {
   title?: string;
   children: ReactNode;
   className?: string;
+  /** Esc, overlay, and the close button do nothing, and the button renders disabled. */
+  closeDisabled?: boolean;
 }
 
 /**
  * Modal dialog. On open, focus moves to the first focusable control in the
  * body (falling back to the close button, then the panel); Tab is trapped;
- * Esc or the overlay closes; focus returns to the opener on close.
+ * Esc or the overlay closes unless `closeDisabled` is set; focus returns to the opener on close.
  */
-export function Dialog({ open, onClose, title, children, className }: DialogProps) {
+export function Dialog({
+  open,
+  onClose,
+  title,
+  children,
+  className,
+  closeDisabled = false,
+}: DialogProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -25,6 +34,13 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
   // run only when `open` changes, not on every render.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const closeDisabledRef = useRef(closeDisabled);
+  closeDisabledRef.current = closeDisabled;
+  const requestCloseRef = useRef(() => {});
+  requestCloseRef.current = () => {
+    if (closeDisabledRef.current) return;
+    onCloseRef.current();
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -36,7 +52,7 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onCloseRef.current();
+        requestCloseRef.current();
       } else {
         trapTab(e, panelRef.current);
       }
@@ -56,7 +72,7 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
       <div
         className="fixed inset-0 bg-overlay backdrop-blur-[2px]"
         aria-hidden="true"
-        onClick={() => onCloseRef.current()}
+        onClick={() => requestCloseRef.current()}
       />
 
       {/* Panel */}
@@ -80,8 +96,9 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
             <button
               type="button"
               aria-label="Close"
-              onClick={() => onCloseRef.current()}
-              className="-mr-1.5 -mt-1 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+              disabled={closeDisabled}
+              onClick={() => requestCloseRef.current()}
+              className="disabled:pointer-events-none disabled:opacity-50 -mr-1.5 -mt-1 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
             >
               <X size={16} aria-hidden="true" />
             </button>

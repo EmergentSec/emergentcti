@@ -13,7 +13,15 @@ import {
 } from '@/components/ui/Table'
 import { useImportReportIndicators } from '@/hooks/useReports'
 import { useToast } from '@/contexts/ToastContext'
-import { apiErrorMessage, importValidationErrorDetail } from '@/lib/apiError'
+import { importValidationErrorDetail } from '@/lib/apiError'
+import {
+  IMPORT_CLOSE_UNLOCK_MS,
+  IMPORT_PENDING_UNLOCKED_MESSAGE,
+  IMPORT_STILL_RUNNING_MESSAGE,
+  importFailureMessage,
+  importPendingLockedMessage,
+  setImportFailureInline,
+} from '@/lib/importRequest'
 import {
   CONFIDENCE_HELP_TEXT,
   EXPORT_ELIGIBILITY_NOTICE,
@@ -87,6 +95,7 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
   const [confidence, setConfidence] = useState('50')
   const [importDetail, setImportDetail] = useState<string | null>(null)
   const [highlightedKeys, setHighlightedKeys] = useState<Set<string>>(() => new Set())
+  const [closeUnlocked, setCloseUnlocked] = useState(false)
 
   const clearImportFeedback = () => {
     setImportDetail(null)
@@ -108,6 +117,22 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
       clearImportFeedback()
     }
   }, [open, preview])
+
+  // Failures render in the dialog until the analyst dismisses it. The import
+  // hook toasts the outcome only after this flag drops, including after unmount.
+  useEffect(() => {
+    setImportFailureInline(true)
+    return () => setImportFailureInline(false)
+  }, [])
+
+  useEffect(() => {
+    if (!importIndicators.isPending) {
+      setCloseUnlocked(false)
+      return
+    }
+    const timer = window.setTimeout(() => setCloseUnlocked(true), IMPORT_CLOSE_UNLOCK_MS)
+    return () => window.clearTimeout(timer)
+  }, [importIndicators.isPending])
 
   const confidenceParsed = useMemo(() => parseConfidenceInput(confidence), [confidence])
   const confidenceError = confidenceParsed.valid ? undefined : 'Enter a whole number from 0 to 100'
@@ -165,11 +190,7 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
     importIndicators.mutate(
       { reportId: preview.report_id, payload: { confidence: confidenceParsed.value, items } },
       {
-        onSuccess: (result) => {
-          toast(
-            `Import complete: ${result.created} created, ${result.attributed_existing} attributed, ${result.already_attributed} already linked`,
-            'success',
-          )
+        onSuccess: () => {
           onClose()
         },
         onError: (err) => {
@@ -182,7 +203,7 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
             setHighlightedKeys(keys)
             importHadRowHighlightsRef.current = keys.size > 0
           } else {
-            setImportDetail(apiErrorMessage(err, 'Import failed'))
+            setImportDetail(importFailureMessage(err))
           }
         },
         onSettled: () => {
@@ -197,12 +218,25 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
   )
 
   const importPending = importIndicators.isPending
-  const handleDialogClose = importPending ? () => {} : onClose
+  const closeBlocked = importPending && !closeUnlocked
+
+  const handleDialogClose = () => {
+    if (closeBlocked) return
+    if (importPending) {
+      // Drop the inline-error flag before unmount so a late timeout still toasts.
+      setImportFailureInline(false)
+      toast(IMPORT_STILL_RUNNING_MESSAGE, 'info')
+      onClose()
+      return
+    }
+    onClose()
+  }
 
   return (
     <Dialog
       open={open}
       onClose={handleDialogClose}
+      closeDisabled={closeBlocked}
       title="Import indicators from report"
       className="max-h-[90vh] w-full max-w-5xl overflow-hidden"
     >
@@ -366,8 +400,14 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
           </p>
         )}
 
+        {importPending && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {closeBlocked ? importPendingLockedMessage() : IMPORT_PENDING_UNLOCKED_MESSAGE}
+          </p>
+        )}
+
         <div className="flex justify-end gap-2 border-t border-border pt-3">
-          <Button type="button" variant="outline" disabled={importPending} onClick={handleDialogClose}>
+          <Button type="button" variant="outline" disabled={closeBlocked} onClick={handleDialogClose}>
             Cancel
           </Button>
           <Button
