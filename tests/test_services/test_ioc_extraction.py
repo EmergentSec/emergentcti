@@ -435,6 +435,97 @@ def test_dot_homoglyphs_and_combining_marks_never_yield_suffix_hosts(
     assert keys(text) == {expected}
 
 
+@pytest.mark.parametrize("mark", ["\uff0e", "\u3002", "\uff61"])
+@pytest.mark.parametrize(
+    ("written", "expected"),
+    [
+        ("evil{mark}[.]example.com", (DOMAIN, "evil.example.com")),
+        ("evil[.]{mark}example.com", (DOMAIN, "evil.example.com")),
+        ("evil{mark}[dot]example.com", (DOMAIN, "evil.example.com")),
+        ("http://evil{mark}[.]example.com/a", (URL, "http://evil.example.com/a")),
+        ("user@evil{mark}[.]example.com", (EMAIL, "user@evil.example.com")),
+        ("185{mark}[.]220.101.42", (IP, "185.220.101.42")),
+        ("münchen{mark}[.]example", (DOMAIN, "xn--mnchen-3ya.example")),
+    ],
+)
+def test_homoglyph_dot_adjacent_to_defang_collapses_inside_host(
+    mark: str,
+    written: str,
+    expected: tuple[ObservableType, str],
+) -> None:
+    # issue #26: a homoglyph dot beside a defanged dot used to leave an empty label.
+    found = by_key(written.format(mark=mark))
+    assert set(found) == {expected}
+    candidate = found[expected]
+    assert candidate.valid is True
+    assert candidate.defanged is True
+    assert candidate.warnings == []
+
+
+def test_collapsed_defanged_host_original_keeps_the_defang_marker() -> None:
+    candidate = by_key("Indicator: evil\uff0e[.]example.com seen.")[(DOMAIN, "evil.example.com")]
+    assert candidate.original == "evil.[.]example.com"
+    assert candidate.defanged is True
+    assert "evil.[.]example.com" in candidate.context
+    assert "\uff0e" not in candidate.original
+
+
+def test_defang_only_dot_run_collapses() -> None:
+    candidate = by_key("evil[.][.]example.com")[(DOMAIN, "evil.example.com")]
+    assert candidate.valid is True
+    assert candidate.defanged is True
+    assert candidate.original == "evil[.][.]example.com"
+
+
+def test_homoglyph_only_dot_run_collapses_without_defang_flag() -> None:
+    candidate = by_key("evil\uff0e\uff0eexample.com")[(DOMAIN, "evil.example.com")]
+    assert candidate.valid is True
+    assert candidate.defanged is False
+    assert candidate.warnings == []
+
+
+def test_literal_double_dot_in_host_is_not_collapsed() -> None:
+    candidate = by_key("evil..example.com")[(DOMAIN, "evil..example.com")]
+    assert candidate.valid is False
+    assert candidate.defanged is False
+    assert candidate.warnings == ["invalid_domain"]
+
+
+def test_literal_dot_run_stays_when_another_run_is_obfuscated() -> None:
+    candidate = by_key("evil..example\uff0e[.]com")[(DOMAIN, "evil..example.com")]
+    assert candidate.valid is False
+    assert candidate.warnings == ["invalid_domain"]
+    assert candidate.defanged is True
+
+
+def test_scheme_defang_and_homoglyph_host_dots_collapse_together() -> None:
+    found = by_key("hxxp://evil\uff0e[.]example[.]com/x")
+    assert set(found) == {(URL, "http://evil.example.com/x")}
+    assert found[(URL, "http://evil.example.com/x")].defanged is True
+
+
+def test_obfuscated_dot_run_in_a_url_path_is_left_in_place() -> None:
+    found = by_key("http://evil.example/a\uff0e[.]b")
+    assert set(found) == {(URL, "http://evil.example/a..b")}
+    assert found[(URL, "http://evil.example/a..b")].defanged is True
+
+
+def test_obfuscated_dots_in_url_userinfo_are_left_in_place() -> None:
+    found = by_key("http://us\uff0e[.]er@evil.example/x")
+    assert set(found) == {(URL, "http://us..er@evil.example/x")}
+
+
+def test_homoglyph_double_dot_filename_is_still_suppressed() -> None:
+    assert keys("see invoice\uff0e\uff0epdf later") == set()
+
+
+def test_defanged_homoglyph_filename_keeps_filename_warning() -> None:
+    candidate = by_key("dropper loader\uff0e[.]exe")[(DOMAIN, "loader.exe")]
+    assert candidate.valid is True
+    assert candidate.defanged is True
+    assert candidate.warnings == ["looks_like_filename"]
+
+
 @pytest.mark.parametrize(
     "text",
     [

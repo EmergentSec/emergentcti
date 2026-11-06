@@ -8,12 +8,14 @@ from one start position only).
 
 Pipeline: remove Unicode format characters (category Cf), compose to NFC and
 map IDNA dot homoglyphs to ".", refang the text
-once (recording where substitutions happened), then
+once (recording where substitutions happened), collapse runs of "." inside
+host tokens when at least one dot came from a homoglyph or a defang, then
 run the type phases in order — URLs, emails, IPv6, IPv4, hashes, domains —
 masking what an earlier phase emitted so a URL's host or an email's domain is
 not emitted again. A host (domain, URL host, email domain) never starts or
 ends next to a non-ASCII letter or digit: such hosts are taken whole and
-IDNA-encoded, or dropped when they do not encode.
+IDNA-encoded, or dropped when they do not encode. Literal ".." is left alone,
+so a typo is not repaired into a different indicator.
 """
 
 from __future__ import annotations
@@ -112,20 +114,8 @@ def _format_char_re() -> re.Pattern[str]:
 #: Characters IDNA treats as label separators: fullwidth full stop,
 #: ideographic full stop, halfwidth ideographic full stop.
 _DOT_HOMOGLYPHS = str.maketrans({"\uff0e": ".", "\u3002": ".", "\uff61": "."})
-
-
-def normalize_scan_text(text: str) -> str:
-    """Prepare text for matching so no host can be split into a shorter suffix.
-
-    Removes Unicode format characters (zero-width, bidi controls, BOM, ...),
-    composes to NFC so combining marks join their base letter, and maps the
-    IDNA dot homoglyphs to ``.``.
-    """
-    if text.isascii():
-        return text  # All three steps only affect non-ASCII code points.
-    text = _format_char_re().sub("", text)
-    text = unicodedata.normalize("NFC", text)
-    return text.translate(_DOT_HOMOGLYPHS)
+# Positions are recorded before translation, so this class must be those same characters.
+_HOMOGLYPH_DOT_RE = re.compile("[" + re.escape("".join(map(chr, _DOT_HOMOGLYPHS))) + "]")
 
 
 # ── Refanging ────────────────────────────────────────────────────────────
@@ -154,12 +144,27 @@ def _refang_replacement(token: str) -> str:
 
 
 class _OffsetMap:
-    """Maps positions in refanged text back to the original text."""
+    """Maps positions in refanged text back to the original text.
 
-    def __init__(self, substitutions: list[tuple[int, int, int, int]]) -> None:
+    ``defang_subs`` is the subset of substitutions produced by refanging.
+    Dot-run collapsing adds mapping entries that are not defangs, and those
+    must not flip ``defanged`` on their own.
+    """
+
+    def __init__(
+        self,
+        substitutions: list[tuple[int, int, int, int]],
+        defang_subs: list[tuple[int, int, int, int]] | None = None,
+        defang_dots: frozenset[int] | None = None,
+    ) -> None:
         # Each entry: (new_start, new_end, orig_start, orig_end), sorted, disjoint.
         self._subs = substitutions
         self._starts = [sub[0] for sub in substitutions]
+        if defang_subs is None:
+            defang_subs = substitutions
+        self._defangs = defang_subs
+        self._defang_starts = [sub[0] for sub in defang_subs]
+        self.defang_dots = frozenset() if defang_dots is None else defang_dots
 
     def start(self, pos: int) -> int:
         index = bisect.bisect_right(self._starts, pos) - 1
@@ -182,13 +187,14 @@ class _OffsetMap:
         return orig_end + (pos - new_end)
 
     def defanged(self, start: int, end: int) -> bool:
-        index = bisect.bisect_left(self._starts, end) - 1
-        return index >= 0 and self._subs[index][1] > start
+        index = bisect.bisect_left(self._defang_starts, end) - 1
+        return index >= 0 and self._defangs[index][1] > start
 
 
 def refang(text: str) -> tuple[str, _OffsetMap]:
     parts: list[str] = []
     substitutions: list[tuple[int, int, int, int]] = []
+    defang_dots: list[int] = []
     last = 0
     new_length = 0
     for match in _REFANG_RE.finditer(text):
@@ -196,6 +202,8 @@ def refang(text: str) -> tuple[str, _OffsetMap]:
         parts.append(text[last:start])
         new_length += start - last
         replacement = _refang_replacement(match.group())
+        if replacement == ".":
+            defang_dots.append(new_length)
         substitutions.append((new_length, new_length + len(replacement), start, end))
         parts.append(replacement)
         new_length += len(replacement)
@@ -203,7 +211,235 @@ def refang(text: str) -> tuple[str, _OffsetMap]:
     if not substitutions:
         return text, _OffsetMap([])
     parts.append(text[last:])
-    return "".join(parts), _OffsetMap(substitutions)
+    return "".join(parts), _OffsetMap(substitutions, defang_dots=frozenset(defang_dots))
+
+
+def _prepare_scan_text(text: str) -> tuple[str, frozenset[int]]:
+    """Return normalized scan text and indexes of dots that were homoglyphs.
+
+    Indexes refer to the normalized text (after format-character removal and
+    NFC), which is also the coordinate space ``refang`` maps back to.
+    """
+    if text.isascii():
+        return text, frozenset()
+    text = _format_char_re().sub("", text)
+    text = unicodedata.normalize("NFC", text)
+    homoglyphs = frozenset(match.start() for match in _HOMOGLYPH_DOT_RE.finditer(text))
+    if not homoglyphs:
+        return text, homoglyphs
+    return text.translate(_DOT_HOMOGLYPHS), homoglyphs
+
+
+def normalize_scan_text(text: str) -> str:
+    """Prepare text for matching so no host can be split into a shorter suffix.
+
+    Removes Unicode format characters (zero-width, bidi controls, BOM, ...),
+    composes to NFC so combining marks join their base letter, and maps the
+    IDNA dot homoglyphs to ``.``.
+    """
+    prepared, _homoglyphs = _prepare_scan_text(text)
+    return prepared
+
+
+def _url_host_span(text: str, start: int, end: int) -> tuple[int, int] | None:
+    """Host slice of a URL match, excluding userinfo, port, path, and brackets."""
+    separator = text.find("://", start, end)
+    if separator == -1:
+        return None
+    auth_start = separator + 3
+    auth_end = auth_start
+    while auth_end < end and text[auth_end] not in "/?#":
+        auth_end += 1
+    if auth_start >= auth_end:
+        return None
+    at = text.rfind("@", auth_start, auth_end)
+    host_start = at + 1 if at != -1 else auth_start
+    if host_start >= auth_end:
+        return None
+    if text[host_start] == "[":
+        close = text.find("]", host_start, auth_end)
+        host_end = close if close != -1 else auth_end
+        host_start += 1
+    else:
+        colon = text.find(":", host_start, auth_end)
+        host_end = colon if colon != -1 else auth_end
+    if host_start >= host_end:
+        return None
+    return host_start, host_end
+
+
+def _overlaps(
+    start: int, end: int, blocked: list[tuple[int, int]], index: int
+) -> tuple[bool, int]:
+    while index < len(blocked) and blocked[index][1] <= start:
+        index += 1
+    hit = index < len(blocked) and blocked[index][0] < end
+    return hit, index
+
+
+def _merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    if not spans:
+        return []
+    ordered = sorted(spans)
+    merged: list[tuple[int, int]] = [ordered[0]]
+    for start, end in ordered[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _collapsible_host_spans(text: str) -> list[tuple[int, int]]:
+    """Hostname slices: URL hosts, email domains, and bare domain or IP runs.
+
+    Path, query, fragment, and URL userinfo are excluded, as is an email
+    local part. A dotted path segment is not a host token.
+    """
+    urls = [(match.start(), match.end()) for match in _URL_RE.finditer(text)]
+    spans: list[tuple[int, int]] = []
+    for start, end in urls:
+        host = _url_host_span(text, start, end)
+        if host is not None:
+            spans.append(host)
+
+    blocked = list(urls)
+    index = 0
+    for match in _email_re().finditer(text):
+        start, end = match.span()
+        overlaps, index = _overlaps(start, end, urls, index)
+        if overlaps:
+            continue
+        at = match.group().rfind("@")
+        domain_start = start + at + 1
+        if domain_start < end:
+            spans.append((domain_start, end))
+        blocked.append((start, end))
+
+    blocked = _merge_spans(blocked)
+    index = 0
+    for match in _domain_run_re().finditer(text):
+        start, end = match.span()
+        overlaps, index = _overlaps(start, end, blocked, index)
+        if overlaps:
+            continue
+        spans.append((start, end))
+    return spans
+
+
+def _classify_dot_run(
+    start: int,
+    end: int,
+    offsets: _OffsetMap,
+    homoglyphs: frozenset[int],
+) -> tuple[bool, bool]:
+    """Return (should_collapse, run_contains_a_defang_dot)."""
+    obfuscated = False
+    for pos in range(start, end):
+        if pos in offsets.defang_dots:
+            return True, True
+        if offsets.start(pos) in homoglyphs:
+            obfuscated = True
+    return obfuscated, False
+
+
+def _obfuscated_dot_runs(
+    text: str,
+    offsets: _OffsetMap,
+    homoglyphs: frozenset[int],
+) -> list[tuple[int, int, bool]]:
+    found: list[tuple[int, int, bool]] = []
+    for span_start, span_end in _collapsible_host_spans(text):
+        dot = text.find(".", span_start, span_end)
+        while dot != -1:
+            run_end = dot + 1
+            while run_end < span_end and text[run_end] == ".":
+                run_end += 1
+            if run_end - dot >= 2:
+                obfuscated, is_defang = _classify_dot_run(dot, run_end, offsets, homoglyphs)
+                if obfuscated:
+                    found.append((dot, run_end, is_defang))
+            dot = text.find(".", run_end, span_end)
+    found.sort()
+    deduped: list[tuple[int, int, bool]] = []
+    last_end = -1
+    for start, end, is_defang in found:
+        if start < last_end:
+            continue
+        deduped.append((start, end, is_defang))
+        last_end = end
+    return deduped
+
+
+def _apply_dot_collapses(
+    text: str,
+    offsets: _OffsetMap,
+    runs: list[tuple[int, int, bool]],
+) -> tuple[str, _OffsetMap]:
+    """Replace each run with one '.' and keep original-text coordinates.
+
+    A collapsed dot maps back to the whole run, so ``original`` still shows
+    the defang marker. The dot counts as a defang only when the run contained
+    one.
+    """
+    parts: list[str] = []
+    mapping: list[tuple[int, int, int, int]] = []
+    defangs: list[tuple[int, int, int, int]] = []
+    old_subs = offsets._subs
+    sub_index = 0
+    cursor_old = 0
+    cursor_new = 0
+
+    def copy_until(old_end: int) -> None:
+        nonlocal cursor_old, cursor_new, sub_index
+        if old_end > cursor_old:
+            parts.append(text[cursor_old:old_end])
+        shift = cursor_new - cursor_old
+        while sub_index < len(old_subs) and old_subs[sub_index][0] < old_end:
+            new_start, new_end, orig_start, orig_end = old_subs[sub_index]
+            if new_start >= cursor_old:
+                shifted = (new_start + shift, new_end + shift, orig_start, orig_end)
+                mapping.append(shifted)
+                defangs.append(shifted)
+            sub_index += 1
+        cursor_new += old_end - cursor_old
+        cursor_old = old_end
+
+    for run_start, run_end, is_defang in runs:
+        copy_until(run_start)
+        while sub_index < len(old_subs) and old_subs[sub_index][0] < run_end:
+            sub_index += 1
+        collapsed = (cursor_new, cursor_new + 1, offsets.start(run_start), offsets.end(run_end))
+        mapping.append(collapsed)
+        if is_defang:
+            defangs.append(collapsed)
+        parts.append(".")
+        cursor_new += 1
+        cursor_old = run_end
+    copy_until(len(text))
+    return "".join(parts), _OffsetMap(mapping, defang_subs=defangs)
+
+
+def _collapse_obfuscated_host_dots(
+    text: str,
+    offsets: _OffsetMap,
+    homoglyphs: frozenset[int],
+) -> tuple[str, _OffsetMap]:
+    """Collapse ``..`` inside hosts when a homoglyph or defang produced a dot.
+
+    A fullwidth dot beside ``[.]`` normalizes to ``evil..example.com`` and
+    would otherwise fail as an empty label. A literal ``evil..example.com``
+    is not rewritten.
+    """
+    if not homoglyphs and not offsets.defang_dots:
+        return text, offsets
+    if ".." not in text:
+        return text, offsets
+    runs = _obfuscated_dot_runs(text, offsets, homoglyphs)
+    if not runs:
+        return text, offsets
+    return _apply_dot_collapses(text, offsets, runs)
 
 
 # ── Validation helpers ───────────────────────────────────────────────────
@@ -396,7 +632,7 @@ def _mask(text: str, spans: list[tuple[int, int]]) -> str:
     return "".join(parts)
 
 
-# ── Phases (all run on refanged text) ────────────────────────────────────
+# ── Phases (all run on refanged, dot-collapsed text) ─────────────────────
 
 # Zero-width, bidi-control and other invisible characters end a URL run, so a
 # value can never carry hidden or direction-flipping characters.
@@ -611,8 +847,9 @@ def _phase_domains(text: str, offsets: _OffsetMap) -> list[_Hit]:
     return hits
 
 
-def _scan(text: str) -> tuple[list[_Hit], _OffsetMap]:
+def _scan(text: str, homoglyphs: frozenset[int]) -> tuple[list[_Hit], _OffsetMap]:
     refanged, offsets = refang(text)
+    refanged, offsets = _collapse_obfuscated_host_dots(refanged, offsets, homoglyphs)
     hits: list[_Hit] = []
     for phase in (_phase_urls, _phase_emails, _phase_ipv6, _phase_ipv4, _phase_hashes):
         phase_hits, spans = phase(refanged)
@@ -649,14 +886,15 @@ def extract(texts: Sequence[str]) -> ExtractionResult:
             truncated = True
         # NFC can expand text (up to 3x per code point), so the budget is
         # enforced again on the normalized text that is actually scanned.
-        text = normalize_scan_text(text)
+        text, homoglyphs = _prepare_scan_text(text)
         if len(text) > remaining:
             text = text[:remaining]
             truncated = True
+            homoglyphs = frozenset(pos for pos in homoglyphs if pos < len(text))
         remaining -= len(text)
         scanned.append(text)
 
-        hits, offsets = _scan(text)
+        hits, offsets = _scan(text, homoglyphs)
         for hit in hits:
             orig_start = offsets.start(hit.start)
             orig_end = offsets.end(hit.end)
