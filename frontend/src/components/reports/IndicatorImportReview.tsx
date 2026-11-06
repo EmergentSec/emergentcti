@@ -25,11 +25,12 @@ import {
 import {
   CONFIDENCE_HELP_TEXT,
   EXPORT_ELIGIBILITY_NOTICE,
-  PDF_EXTRACTION_MESSAGE,
   candidateKey,
   formatExtractionWarning,
+  formatSourceReason,
   isDefaultSelectedCandidate,
   isSelectableCandidate,
+  pdfSourceNotice,
 } from '@/lib/extractionWarnings'
 import { cn, typeLabels } from '@/lib/utils'
 import type { ExtractionCandidate, ExtractionPreview, ExtractionSource } from '@/types/reportIocExtraction'
@@ -49,8 +50,7 @@ function sourceLabel(source: ExtractionSource): string {
 function sourceStatusText(source: ExtractionSource): string {
   if (source.status === 'extracted') return 'Text extracted'
   if (source.status === 'empty') return 'Empty'
-  if (source.reason === 'pdf_text_extraction_unavailable') return 'Unsupported (PDF)'
-  if (source.reason) return source.reason.replace(/_/g, ' ')
+  if (source.reason) return formatSourceReason(source.reason)
   return 'Unsupported'
 }
 
@@ -213,9 +213,9 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
     )
   }
 
-  const showPdfNotice = preview.sources.some(
-    (s) => s.status === 'unsupported' && s.reason === 'pdf_text_extraction_unavailable',
-  )
+  const pdfNotices = [
+    ...new Set(preview.sources.map(pdfSourceNotice).filter((n): n is string => n !== null)),
+  ]
 
   const importPending = importIndicators.isPending
   const closeBlocked = importPending && !closeUnlocked
@@ -252,11 +252,14 @@ export function IndicatorImportReview({ open, onClose, preview }: IndicatorImpor
               </li>
             ))}
           </ul>
-          {showPdfNotice && (
-            <p className="mt-2 rounded-lg border border-warning bg-warning-soft px-3 py-2 text-sm text-warning-ink">
-              {PDF_EXTRACTION_MESSAGE}
+          {pdfNotices.map((notice) => (
+            <p
+              key={notice}
+              className="mt-2 rounded-lg border border-warning bg-warning-soft px-3 py-2 text-sm text-warning-ink"
+            >
+              {notice}
             </p>
-          )}
+          ))}
           {preview.truncated && (
             <p className="text-xs text-muted-foreground">
               Results were truncated (document size or candidate limit).

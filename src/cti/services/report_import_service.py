@@ -32,7 +32,7 @@ from cti.schemas.report import (
     ImportResult,
     SkippedImportItem,
 )
-from cti.services import allowlist_service, ioc_extraction
+from cti.services import allowlist_service, ioc_extraction, pdf_text
 from cti.services.confidence import recompute_effective_confidence
 from cti.services.tlp import red_observable_ids
 
@@ -46,7 +46,6 @@ if TYPE_CHECKING:
 
 TEXT_CONTENT_TYPES = frozenset({"text/markdown", "text/plain"})
 PDF_CONTENT_TYPE = "application/pdf"
-REASON_PDF_UNAVAILABLE = "pdf_text_extraction_unavailable"
 REASON_UNSUPPORTED_TYPE = "unsupported_content_type"
 NOT_A_CANDIDATE = "not_a_candidate"
 # Generic on purpose: it must not say why (TLP) an item was not imported.
@@ -131,7 +130,17 @@ async def _extract_report(db: AsyncSession, report: Report) -> _Extraction:
             else:
                 status = "empty"
         elif attachment.content_type == PDF_CONTENT_TYPE:
-            status, reason = "unsupported", REASON_PDF_UNAVAILABLE
+            data = await db.scalar(
+                select(ReportAttachment.content).where(ReportAttachment.id == attachment.id)
+            )
+            pdf = await pdf_text.extract_text(data or b"")
+            if pdf.text is None:
+                status, reason = "unsupported", pdf.reason
+            elif pdf.text.strip():
+                status = "extracted"
+                texts.append(pdf.text)
+            else:
+                status = "empty"
         else:
             status, reason = "unsupported", REASON_UNSUPPORTED_TYPE
         sources.append(

@@ -18,7 +18,8 @@ from cti.models.observable import Observable, ObservableType
 from cti.models.observable_source import ObservableSource
 from cti.models.report import Report, ReportAttachment, report_observables
 from cti.models.user import User, UserRole
-from cti.services import report_import_service, retention
+from cti.services import pdf_text, report_import_service, retention
+from tests.pdf_samples import MALFORMED_PDF, encrypted_pdf, image_only_pdf, text_pdf
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -236,7 +237,7 @@ async def test_extract_flags_candidates_and_performs_no_writes(
     assert order == sorted(order)
 
 
-async def test_extract_reads_text_attachment_and_reports_pdf_unsupported(
+async def test_extract_reads_text_attachment(
     client: AsyncClient,
 ) -> None:
     report = await create_report(client, content=None)
@@ -248,17 +249,68 @@ async def test_extract_reads_text_attachment_and_reports_pdf_unsupported(
     assert preview["sources"][1]["content_type"] == "text/markdown"
     assert [c["value"] for c in preview["candidates"]] == ["drop.example"]
 
-    await client.put(attachment, files={"file": ("report.pdf", b"%PDF-1.7 evil.example")})
+
+async def test_extract_reads_text_pdf_attachment_with_context(
+    client: AsyncClient,
+) -> None:
+    report = await create_report(client, content=None)
+    pdf = text_pdf("Beacon to hxxps[://]pdf-c2[.]example/gate seen.", "Scanner 185.220.101.42.")
+    await client.put(f"{REPORTS}/{report['id']}/attachment", files={"file": ("report.pdf", pdf)})
     preview = (await client.post(f"{REPORTS}/{report['id']}/extract")).json()
     assert preview["sources"][1] == {
         "kind": "attachment",
         "filename": "report.pdf",
         "content_type": "application/pdf",
-        "status": "unsupported",
-        "reason": "pdf_text_extraction_unavailable",
+        "status": "extracted",
+        "reason": None,
     }
+    by_value = {c["value"]: c for c in preview["candidates"]}
+    assert set(by_value) == {"https://pdf-c2.example/gate", "185.220.101.42"}
+    url = by_value["https://pdf-c2.example/gate"]
+    assert url["defanged"] is True
+    assert "Beacon to" in url["context"]
+    assert all(c["status"] == "new" for c in by_value.values())
+
+
+@pytest.mark.parametrize(
+    ("pdf", "reason"),
+    [
+        (image_only_pdf(3, footer="Page {} of 3"), "pdf_no_text_layer"),
+        (encrypted_pdf("Encrypted evil.example body text"), "pdf_encrypted"),
+        (MALFORMED_PDF, "pdf_malformed"),
+        (b"%PDF-1.7 evil.example", "pdf_malformed"),
+    ],
+)
+async def test_extract_reports_unreadable_pdf_with_specific_reason(
+    client: AsyncClient,
+    pdf: bytes,
+    reason: str,
+) -> None:
+    report = await create_report(client, content="Seen evil-content.example")
+    response = await client.put(
+        f"{REPORTS}/{report['id']}/attachment", files={"file": ("scan.pdf", pdf)}
+    )
+    assert response.status_code == 200, response.text
+    response = await client.post(f"{REPORTS}/{report['id']}/extract")
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    assert preview["sources"][1]["status"] == "unsupported"
+    assert preview["sources"][1]["reason"] == reason
+    # The report content is still extracted.
+    assert [c["value"] for c in preview["candidates"]] == ["evil-content.example"]
+
+
+async def test_extract_reports_oversized_pdf(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report = await create_report(client, content=None)
+    pdf = text_pdf("Seen evil.example in a long report")
+    await client.put(f"{REPORTS}/{report['id']}/attachment", files={"file": ("big.pdf", pdf)})
+    monkeypatch.setattr(pdf_text, "MAX_PDF_BYTES", len(pdf) - 1)
+    preview = (await client.post(f"{REPORTS}/{report['id']}/extract")).json()
+    assert preview["sources"][1]["reason"] == "pdf_too_large"
     assert preview["candidates"] == []
-    assert preview["counts"] == {"total": 0, "new": 0, "existing": 0, "invalid": 0}
 
 
 async def test_extract_reports_other_attachment_types_unsupported(
@@ -689,6 +741,28 @@ async def test_import_rejects_non_candidates_without_writing(
     assert await snapshot(db_session) == before
 
 
+async def test_import_from_text_pdf_attachment_records_pdf_context(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    report = await create_report(client, content=None)
+    pdf = text_pdf("Operators staged payloads on pdf-drop[.]example last week.")
+    await client.put(f"{REPORTS}/{report['id']}/attachment", files={"file": ("r.pdf", pdf)})
+
+    response = await client.post(
+        f"{REPORTS}/{report['id']}/import",
+        json={"confidence": 55, "items": [{"type": "domain-name", "value": "pdf-drop.example"}]},
+    )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["created"] == 1
+    observable_id = result["observables"][0]["id"]
+    row = await link_row(db_session, report["id"], uuid.UUID(observable_id))
+    assert "Operators staged payloads" in row.source_excerpt
+    assert row.analyst_confidence == 55
+
+
 async def test_import_against_unsupported_pdf_only_report_is_rejected(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -696,7 +770,7 @@ async def test_import_against_unsupported_pdf_only_report_is_rejected(
     report = await create_report(client, content=None)
     await client.put(
         f"{REPORTS}/{report['id']}/attachment",
-        files={"file": ("scan.pdf", b"%PDF-1.4 evil.example 185.220.101.42")},
+        files={"file": ("scan.pdf", image_only_pdf(2, footer="evil.example {}"))},
     )
     before = await snapshot(db_session)
 
