@@ -325,6 +325,14 @@ def test_invalid_threshold_exits_2(tmp_path):
     assert ap.main(["--source", f"frontend:runtime:npm:0:{src}", "--exceptions", exc], env=env) == 2
 
 
+@pytest.mark.parametrize("value", ["0", "-5", "ninety", "1.5", ""])
+def test_invalid_exception_max_days_exits_2(tmp_path, value):
+    src = write(tmp_path, "npm.json", npm_report())
+    exc = write(tmp_path, "exc.json", [])
+    env = {"AUDIT_TODAY": TODAY, "AUDIT_EXCEPTION_MAX_DAYS": value}
+    assert ap.main(["--source", f"frontend:runtime:npm:0:{src}", "--exceptions", exc], env=env) == 2
+
+
 def test_repo_exceptions_file_is_valid():
     ap.load_exceptions(str(ROOT / "security" / "audit-exceptions.json"))
 

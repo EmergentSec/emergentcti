@@ -454,6 +454,8 @@ def policy_from_env(env: dict[str, str]) -> Policy:
         )
     except ValueError as exc:
         raise AuditError(f"invalid AUDIT_EXCEPTION_MAX_DAYS / AUDIT_TODAY: {exc}") from exc
+    if max_days < 1:
+        raise AuditError(f"AUDIT_EXCEPTION_MAX_DAYS must be a positive integer, got {max_days}")
     return Policy(
         fail_level={
             "runtime": parse_level(
