@@ -254,6 +254,15 @@ def test_exception_suppresses_exact_match_only(tmp_path):
     assert run(tmp_path, src, [exception(id="GHSA-zzzz-zzzz-zzzz")])[0] == 1
 
 
+def test_exception_must_match_severity(tmp_path):
+    src = [("frontend", "runtime", "npm", 1, HIGH_AXIOS)]
+    rc, out = run(tmp_path, src, [exception(severity="low")])
+    assert rc == 1
+    assert "[FAIL" in out and "EXCEPTED" not in out
+    assert "is for severity 'low' but the finding is 'high'; not applied" in out
+    assert run(tmp_path, src, [exception(severity="HIGH")])[0] == 0  # case-insensitive
+
+
 def test_exception_matches_osv_alias(tmp_path):
     vuln = osv_report(
         "jinja2", "2.10", ["PYSEC-2019-217", "GHSA-462w-v97r-4m45"], ["CVE-2019-10906"], "8.6"

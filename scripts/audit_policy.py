@@ -291,22 +291,38 @@ def check_exceptions(exceptions: list[dict[str, Any]], policy: Policy) -> list[s
 
 def apply_exceptions(
     findings: list[Finding], exceptions: list[dict[str, Any]], policy: Policy
-) -> set[int]:
-    """Mark findings covered by a *valid* exception; return indices of exceptions used."""
+) -> tuple[set[int], list[str]]:
+    """Mark findings covered by a *valid* exception.
+
+    An exception matches only the exact advisory id (or alias), package, scope
+    *and* severity, so an exception filed as "low" can never hide a finding
+    that is (or was re-scored as) "high".
+
+    Returns the indices of exceptions used and notes about near-misses whose
+    severity differed.
+    """
     used: set[int] = set()
+    mismatches: list[str] = []
     for f in findings:
         for n, exc in enumerate(exceptions):
             if exc["_expires"] < policy.today:
                 continue  # expired exceptions never suppress anything
-            if (
+            if not (
                 exc["scope"] == f.scope
                 and norm_package(exc["package"]) == norm_package(f.package)
                 and f.matches_id(str(exc["id"]))
             ):
-                f.excepted_by = exc
-                used.add(n)
-                break
-    return used
+                continue
+            if str(exc["severity"]).lower() != f.severity:
+                mismatches.append(
+                    f"exception {exc['id']} / {exc['package']} / {exc['scope']} is for severity "
+                    f"{exc['severity']!r} but the finding is {f.severity!r}; not applied"
+                )
+                continue
+            f.excepted_by = exc
+            used.add(n)
+            break
+    return used, mismatches
 
 
 # --------------------------------------------------------------------------- evaluation
@@ -348,7 +364,7 @@ def evaluate(
 
     all_findings = [f for s in sources for f in s.findings]
     exception_problems = check_exceptions(exceptions, policy)
-    used = apply_exceptions(all_findings, exceptions, policy)
+    used, mismatches = apply_exceptions(all_findings, exceptions, policy)
 
     w = out.write
     w("\nDependency audit summary\n")
@@ -396,6 +412,8 @@ def evaluate(
         w(f"\nSCANNER FAILURE ({s.scope}/{s.ecosystem}, {s.path}): {s.error}\n")
     for problem in exception_problems:
         w(f"\nPOLICY: {problem}\n")
+    for note in mismatches:
+        w(f"\nnote: {note}\n")
     for n, exc in enumerate(exceptions):
         if n not in used and exc["_expires"] >= policy.today:
             label = f"{exc['id']} / {exc['package']} / {exc['scope']}"
