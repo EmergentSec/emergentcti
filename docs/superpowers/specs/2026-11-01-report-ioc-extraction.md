@@ -34,10 +34,47 @@ Extraction reads, in order:
 2. The attachment, when its `content_type` is `text/markdown` or `text/plain`
    (decoded as UTF-8; it was validated on upload).
 
-A PDF attachment is reported as `unsupported` with reason
-`pdf_text_extraction_unavailable`. No PDF library is added in this issue;
-text-based PDF support and OCR are follow-ups. Any other attachment type is
-reported as `unsupported` with reason `unsupported_content_type`.
+3. The attachment, when its `content_type` is `application/pdf` and it has a
+   text layer (added in #24; see "PDF attachments" below).
+
+Any other attachment type is reported as `unsupported` with reason
+`unsupported_content_type`.
+
+### PDF attachments (#24)
+
+`services/pdf_text.py` extracts text with **pypdf** (pinned `==6.21.4`, pure
+Python, no runtime dependencies). pypdf does not execute JavaScript, render
+pages or resolve external references. Parsing runs in a short-lived child
+process (`services/_pdf_text_worker.py`, started as `python -I`):
+
+- **Isolation.** The child gets an empty environment (no database URL or
+  keys), imports only the stdlib and pypdf, and installs an audit hook that
+  refuses sockets, process creation and write-mode opens.
+- **Limits.** Address space 768 MiB, CPU 20 s, no file writes, no core dumps
+  (rlimits in the child); 30 s wall-clock timeout and at most 2 concurrent
+  children per API process (parent). The parent awaits the child
+  asynchronously, so the event loop never blocks.
+- **Bounds.** At most 20 MiB and 500 pages; text is capped at the same
+  2,000,000-character scan budget as the extractor.
+
+The extracted text is passed to `ioc_extraction.extract` like any other
+source, so the 2M-character budget and 1,000-candidate cap apply to the
+combined text. OCR is out of scope.
+
+Failures never raise. The attachment source is `unsupported` with one of:
+
+| reason | meaning |
+|---|---|
+| `pdf_no_text_layer` | Fewer than 16 non-whitespace characters per page on average: scanned or image-only. |
+| `pdf_encrypted` | Encrypted, even with an empty user password (fail closed). |
+| `pdf_malformed` | No `%PDF-` signature, or pypdf can't parse it (including zero pages). |
+| `pdf_too_large` | Over 20 MiB. |
+| `pdf_too_many_pages` | Over 500 pages. |
+| `pdf_too_complex` | The parser ran out of memory. |
+| `pdf_extraction_timeout` | Wall-clock or CPU limit reached; the child was killed. |
+| `pdf_extraction_failed` | The child crashed or returned unexpected output. |
+
+A text PDF that yields only whitespace is `empty`, like an empty text file.
 
 If no source yields text, the preview has zero candidates and lists the
 sources with their statuses. That is a 200, not an error.
@@ -190,7 +227,7 @@ interface ExtractionSource {
   filename: string | null;          // attachment only
   content_type: string | null;      // attachment only
   status: SourceStatus;
-  reason: string | null;            // e.g. 'pdf_text_extraction_unavailable'
+  reason: string | null;            // e.g. 'pdf_no_text_layer'
 }
 
 interface ExtractionCandidate {
@@ -267,9 +304,11 @@ entry's `msg` (not just the first), and may use `items` to highlight rows.
   allowlist match, and warnings rendered as readable text. All values are
   plain text and never links. Long values wrap or truncate with a full-text
   title.
-- The source list shows each source's status, with a clear message for
-  unsupported or scanned documents: "PDF text extraction is not available
-  yet; paste the report text into the report content to extract indicators."
+- The source list shows each source's status, with a readable label for each
+  `unsupported` reason. A scanned PDF (`pdf_no_text_layer`) gets a notice that
+  OCR is not supported. Any other unreadable PDF gets "Text could not be read
+  from this PDF." Both suggest pasting the report text into the report
+  content.
 - Default selection: `new` and `existing` candidates that are not
   `already_attributed` and not `allowlisted`. `invalid` rows cannot be
   selected. Select-all / select-none apply to the selectable rows; filtering

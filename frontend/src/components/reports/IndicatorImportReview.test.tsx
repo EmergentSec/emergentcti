@@ -7,7 +7,8 @@ import type { ExtractionPreview } from '@/types/reportIocExtraction'
 import {
   CONFIDENCE_HELP_TEXT,
   EXPORT_ELIGIBILITY_NOTICE,
-  PDF_EXTRACTION_MESSAGE,
+  PDF_NO_TEXT_LAYER_MESSAGE,
+  PDF_UNREADABLE_MESSAGE,
 } from '@/lib/extractionWarnings'
 
 const mockImport = vi.fn()
@@ -384,23 +385,45 @@ describe('IndicatorImportReview', () => {
     expect(mockImport).toHaveBeenCalledTimes(1)
   })
 
-  it('shows PDF notice once with unsupported status in source list', () => {
-    const preview: ExtractionPreview = {
+  function pdfPreview(status: 'extracted' | 'unsupported', reason: string | null): ExtractionPreview {
+    return {
       ...BASE_PREVIEW,
       sources: [
         {
           kind: 'attachment',
           filename: 'scan.pdf',
           content_type: 'application/pdf',
-          status: 'unsupported',
-          reason: 'pdf_text_extraction_unavailable',
+          status,
+          reason,
         },
       ],
       candidates: [],
     }
-    renderReview(preview)
-    expect(screen.getByText('Unsupported (PDF)')).toBeTruthy()
-    expect(screen.getAllByText(PDF_EXTRACTION_MESSAGE)).toHaveLength(1)
+  }
+
+  it('explains a scanned PDF once with a specific status', () => {
+    renderReview(pdfPreview('unsupported', 'pdf_no_text_layer'))
+    expect(screen.getByText('No text layer (scanned or image-only PDF)')).toBeTruthy()
+    expect(screen.getAllByText(PDF_NO_TEXT_LAYER_MESSAGE)).toHaveLength(1)
+    expect(screen.queryByText(PDF_UNREADABLE_MESSAGE)).toBeNull()
+  })
+
+  it.each([
+    ['pdf_encrypted', 'Encrypted PDF'],
+    ['pdf_malformed', 'Malformed or damaged PDF'],
+    ['pdf_too_many_pages', 'PDF has too many pages to extract'],
+    ['pdf_extraction_timeout', 'PDF extraction timed out'],
+  ])('labels an unreadable PDF (%s)', (reason, label) => {
+    renderReview(pdfPreview('unsupported', reason))
+    expect(screen.getByText(label)).toBeTruthy()
+    expect(screen.getAllByText(PDF_UNREADABLE_MESSAGE)).toHaveLength(1)
+  })
+
+  it('shows no PDF notice when PDF text was extracted', () => {
+    renderReview(pdfPreview('extracted', null))
+    expect(screen.getByText('Text extracted')).toBeTruthy()
+    expect(screen.queryByText(PDF_UNREADABLE_MESSAGE)).toBeNull()
+    expect(screen.queryByText(PDF_NO_TEXT_LAYER_MESSAGE)).toBeNull()
   })
 
   it('renders extracted URL values as plain text, not links', () => {

@@ -22,6 +22,8 @@ dependencies = [
     "pyjwt>=2.8.0",
     "bcrypt>=4.1.0",
     "python-multipart>=0.0.20",
+    # Exact pin: parses untrusted uploads (#24). Pure Python, no JS, no rendering.
+    "pypdf==6.21.4",
 ]
 
 [project.optional-dependencies]
