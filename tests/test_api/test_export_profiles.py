@@ -461,15 +461,16 @@ async def test_referenced_feed_cannot_be_deleted(
     other = await add_feed(db_session, name="Other feed")
     await add_observable(db_session, "203.0.113.5", feed=feed)
     await add_observable(db_session, "198.51.100.7", feed=other)
-    profile = await create_profile(client, name="Edge", feed_id=str(feed.id))
+    feed_id = feed.id
+    profile = await create_profile(client, name="Edge", feed_id=str(feed_id))
 
-    response = await client.delete(f"/api/v1/feeds/{feed.id}")
+    response = await client.delete(f"/api/v1/feeds/{feed_id}")
     assert response.status_code == 409
     assert "Edge" in response.json()["detail"]
 
     # Nothing changed: the feed, the reference and the scoped export all survive.
-    assert (await client.get(f"/api/v1/feeds/{feed.id}")).status_code == 200
-    assert (await client.get(f"{BASE}/{profile['id']}")).json()["feed_id"] == str(feed.id)
+    assert (await client.get(f"/api/v1/feeds/{feed_id}")).status_code == 200
+    assert (await client.get(f"{BASE}/{profile['id']}")).json()["feed_id"] == str(feed_id)
     assert (await client.get(f"{BASE}/{profile['id']}/download")).text == "203.0.113.5"
 
 

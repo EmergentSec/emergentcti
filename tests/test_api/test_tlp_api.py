@@ -35,9 +35,16 @@ async def admin_user(db_session: AsyncSession) -> User:
 
 
 @pytest.fixture
-async def admin_client(app: FastAPI, admin_user: User) -> AsyncGenerator[AsyncClient, None]:
+async def admin_client(
+    app: FastAPI, db_session: AsyncSession, admin_user: User
+) -> AsyncGenerator[AsyncClient, None]:
+    admin_id = admin_user.id
+
     async def _auth() -> User:
-        return admin_user
+        # Re-fetch per request: a failed request rolls the shared session back.
+        user = await db_session.get(User, admin_id)
+        assert user is not None
+        return user
 
     app.dependency_overrides[get_current_auth] = _auth
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
