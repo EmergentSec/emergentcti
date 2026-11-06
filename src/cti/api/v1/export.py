@@ -60,7 +60,7 @@ async def _record_profile_failure(
     resource_id: object = None,
     resource_label: object = None,
 ) -> None:
-    await audit.rollback_for_independent_audit(db, actor=actor)
+    await db.rollback()
     await audit.record_independent(
         actor=actor,
         action=action,
@@ -81,7 +81,7 @@ async def _record_download_failure(
     status: int,
     reason: str,
 ) -> None:
-    await audit.rollback_for_independent_audit(db, actor=actor)
+    await db.rollback()
     await audit.record_independent(
         actor=actor,
         action="export.download",

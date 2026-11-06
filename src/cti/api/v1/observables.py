@@ -57,7 +57,7 @@ async def _record_observable_failure(
     resource_label: object = None,
     outcome: audit.AuditOutcome = audit.AuditOutcome.FAILED,
 ) -> None:
-    await audit.rollback_for_independent_audit(db, actor=actor)
+    await db.rollback()
     await audit.record_independent(
         actor=actor,
         action=action,
@@ -342,18 +342,6 @@ async def set_tlp_override(
             outcome=audit.AuditOutcome.DENIED,
         )
         raise HTTPException(status_code=404, detail="Observable not found")
-    try:
-        await ensure_observable_visible(db, auth, observable_id)
-    except HTTPException as exc:
-        await _record_observable_failure(
-            db,
-            actor=actor,
-            action="observable.tlp_override_set",
-            resource_id=observable_id,
-            status=exc.status_code,
-            reason="not_found",
-        )
-        raise
     current = await observable_service.get_observable(db, observable_id)
     if current is None:
         await _record_observable_failure(
@@ -424,18 +412,6 @@ async def clear_tlp_override(
             outcome=audit.AuditOutcome.DENIED,
         )
         raise HTTPException(status_code=404, detail="Observable not found")
-    try:
-        await ensure_observable_visible(db, auth, observable_id)
-    except HTTPException as exc:
-        await _record_observable_failure(
-            db,
-            actor=actor,
-            action="observable.tlp_override_clear",
-            resource_id=observable_id,
-            status=exc.status_code,
-            reason="not_found",
-        )
-        raise
     current = await observable_service.get_observable(db, observable_id)
     if current is None:
         await _record_observable_failure(
@@ -497,18 +473,6 @@ async def set_observable_tags(
             outcome=audit.AuditOutcome.DENIED,
         )
         raise HTTPException(status_code=404, detail="Observable not found")
-    try:
-        await ensure_observable_visible(db, auth, observable_id)
-    except HTTPException as exc:
-        await _record_observable_failure(
-            db,
-            actor=actor,
-            action="observable.tags_update",
-            resource_id=observable_id,
-            status=exc.status_code,
-            reason="not_found",
-        )
-        raise
     current = await observable_service.get_observable(db, observable_id)
     if current is None:
         await _record_observable_failure(

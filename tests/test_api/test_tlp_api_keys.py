@@ -107,14 +107,14 @@ async def test_observable_mutations_404_without_change(
     suffix: str,
     body: dict | None,
 ) -> None:
-    obs = await _red_observable(db_session)
+    obs_id = (await _red_observable(db_session)).id
     kwargs = {"json": body} if body is not None else {}
-    response = await client.request(method.upper(), f"{OBS}/{obs.id}{suffix}", **kwargs)
+    response = await client.request(method.upper(), f"{OBS}/{obs_id}{suffix}", **kwargs)
     assert response.status_code == 404
     row = (
         await db_session.execute(
             select(Observable.tlp_override, Observable.confidence_override).where(
-                Observable.id == obs.id
+                Observable.id == obs_id
             )
         )
     ).one()
@@ -367,15 +367,14 @@ async def test_import_session_attributes_red_match(app: FastAPI, db_session: Asy
 async def test_api_key_cannot_declassify_red_feed(
     client: AsyncClient, db_session: AsyncSession, new_tlp: str | None
 ) -> None:
-    feed = await add_feed(db_session, "Red feed", tlp="red")
+    feed_id = (await add_feed(db_session, "Red feed", tlp="red")).id
     response = await client.put(
-        f"{FEEDS}/{feed.id}", json={"tlp": new_tlp, "tlp_change_reason": "declassify"}
+        f"{FEEDS}/{feed_id}", json={"tlp": new_tlp, "tlp_change_reason": "declassify"}
     )
     assert response.status_code == 403
     assert response.json()["detail"] == (
         "Declassifying a TLP:RED feed requires an interactive admin session"
     )
-    feed_id = feed.id
     db_session.expire_all()
     assert await db_session.scalar(select(Feed.tlp).where(Feed.id == feed_id)) == "red"
 
@@ -386,12 +385,12 @@ async def test_api_key_cannot_delete_red_feed(
     feed = await add_feed(db_session, "Red feed", tlp="red")
     obs = await add_observable(db_session, "203.0.113.250", feed=feed)
     obs_id = obs.id
-    response = await client.delete(f"{FEEDS}/{feed.id}")
+    feed_id = feed.id
+    response = await client.delete(f"{FEEDS}/{feed_id}")
     assert response.status_code == 403
     assert response.json()["detail"] == (
         "Deleting a TLP:RED feed requires an interactive admin session"
     )
-    feed_id = feed.id
     db_session.expire_all()
     assert await db_session.scalar(select(Feed.id).where(Feed.id == feed_id)) == feed_id
     assert (await client.get(f"{OBS}/{obs_id}")).status_code == 404

@@ -91,27 +91,27 @@ async def test_admin_guards(app: FastAPI, client: AsyncClient, db_session: Async
 async def test_observable_tags_replace_normalize_and_count(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    obs = await add_observable(db_session, "192.0.2.20")
+    obs_id = (await add_observable(db_session, "192.0.2.20")).id
     response = await client.put(
-        f"{OBS}/{obs.id}/tags", json={"tags": ["Zeta", "alpha", "ALPHA", " zeta "]}
+        f"{OBS}/{obs_id}/tags", json={"tags": ["Zeta", "alpha", "ALPHA", " zeta "]}
     )
     assert response.status_code == 200, response.text
     assert response.json()["tags"] == ["alpha", "zeta"]
 
-    replaced = await client.put(f"{OBS}/{obs.id}/tags", json={"tags": ["beta"]})
+    replaced = await client.put(f"{OBS}/{obs_id}/tags", json={"tags": ["beta"]})
     assert replaced.json()["tags"] == ["beta"]
-    assert (await client.get(f"{OBS}/{obs.id}")).json()["tags"] == ["beta"]
+    assert (await client.get(f"{OBS}/{obs_id}")).json()["tags"] == ["beta"]
 
     counts = {t["name"]: t["observable_count"] for t in (await client.get(TAGS)).json()}
     assert counts == {"alpha": 0, "beta": 1, "zeta": 0}
 
-    cleared = await client.put(f"{OBS}/{obs.id}/tags", json={"tags": []})
+    cleared = await client.put(f"{OBS}/{obs_id}/tags", json={"tags": []})
     assert cleared.json()["tags"] == []
     assert (
-        await client.put(f"{OBS}/{obs.id}/tags", json={"tags": ["bad tag!"]})
+        await client.put(f"{OBS}/{obs_id}/tags", json={"tags": ["bad tag!"]})
     ).status_code == 422
     assert (
-        await client.put(f"{OBS}/{obs.id}/tags", json={"tags": [f"t{i}" for i in range(101)]})
+        await client.put(f"{OBS}/{obs_id}/tags", json={"tags": [f"t{i}" for i in range(101)]})
     ).status_code == 422
     missing = "00000000-0000-0000-0000-000000000000"
     assert (await client.put(f"{OBS}/{missing}/tags", json={"tags": ["a"]})).status_code == 404
@@ -179,10 +179,10 @@ async def test_delete_tag_removes_assignments(
 async def test_profile_tag_filter_and_409_on_referenced_delete(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    a = await add_observable(db_session, "192.0.2.50")
+    a_id = (await add_observable(db_session, "192.0.2.50")).id
     b = await add_observable(db_session, "192.0.2.51")
     await add_observable(db_session, "192.0.2.52")
-    await client.put(f"{OBS}/{a.id}/tags", json={"tags": ["edge"]})
+    await client.put(f"{OBS}/{a_id}/tags", json={"tags": ["edge"]})
     await client.put(f"{OBS}/{b.id}/tags", json={"tags": ["siem"]})
 
     response = await client.post(
@@ -203,7 +203,7 @@ async def test_profile_tag_filter_and_409_on_referenced_delete(
     assert blocked.status_code == 409
     assert "Tagged" in blocked.json()["detail"]
     # Still assigned and still filtering.
-    assert (await client.get(f"{OBS}/{a.id}")).json()["tags"] == ["edge"]
+    assert (await client.get(f"{OBS}/{a_id}")).json()["tags"] == ["edge"]
 
     updated = await client.put(f"{PROFILES}/{profile['id']}", json={"tags": ["siem"]})
     assert updated.status_code == 200 and updated.json()["tags"] == ["siem"]

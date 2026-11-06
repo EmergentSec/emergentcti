@@ -27,7 +27,7 @@ async def _record_failure(
     resource_id: object = None,
     resource_label: object = None,
 ) -> None:
-    await audit.rollback_for_independent_audit(db, actor=actor)
+    await db.rollback()
     await audit.record_independent(
         actor=actor,
         action=action,
