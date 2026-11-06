@@ -62,6 +62,16 @@ NPM_ERROR = {
     "error": {"summary": "", "detail": ""},
 }
 OSV_EMPTY = {"results": []}
+NPM_STRING_VIA_ONLY = {
+    "auditReportVersion": 2,
+    "vulnerabilities": {"react-router-dom": {"name": "react-router-dom", "via": ["react-router"]}},
+    "metadata": {"vulnerabilities": {"moderate": 1, "total": 1}},
+}
+NPM_TOTAL_WITHOUT_ADVISORIES = {
+    "auditReportVersion": 2,
+    "vulnerabilities": {},
+    "metadata": {"vulnerabilities": {"high": 2, "total": 2}},
+}
 
 
 def osv_report(pkg: str, version: str, ids: list[str], aliases: list[str], max_sev: str) -> dict:
@@ -195,6 +205,9 @@ def test_osv_cvss_severity_and_unknown_default(tmp_path):
     [
         ("npm", 1, NPM_ERROR),  # registry unreachable
         ("npm", 1, {"vulnerabilities": {}}),  # no metadata.vulnerabilities
+        ("npm", 1, npm_report()),  # exit 1 ("vulnerable") but nothing to extract
+        ("npm", 1, NPM_STRING_VIA_ONLY),  # only "because of X" entries, X missing
+        ("npm", 0, NPM_TOTAL_WITHOUT_ADVISORIES),  # metadata total > 0, nothing extracted
         ("npm", 0, "npm ERR! not json"),
         ("npm", 7, npm_report()),  # unexpected exit code
         ("osv", 127, OSV_EMPTY),  # osv.dev unreachable: valid-looking empty JSON
@@ -239,6 +252,15 @@ def test_exception_suppresses_exact_match_only(tmp_path):
     assert run(tmp_path, src, [exception(package="form-data")])[0] == 1
     assert run(tmp_path, src, [exception(scope="tooling")])[0] == 1
     assert run(tmp_path, src, [exception(id="GHSA-zzzz-zzzz-zzzz")])[0] == 1
+
+
+def test_exception_must_match_severity(tmp_path):
+    src = [("frontend", "runtime", "npm", 1, HIGH_AXIOS)]
+    rc, out = run(tmp_path, src, [exception(severity="low")])
+    assert rc == 1
+    assert "[FAIL" in out and "EXCEPTED" not in out
+    assert "is for severity 'low' but the finding is 'high'; not applied" in out
+    assert run(tmp_path, src, [exception(severity="HIGH")])[0] == 0  # case-insensitive
 
 
 def test_exception_matches_osv_alias(tmp_path):
@@ -300,6 +322,14 @@ def test_invalid_threshold_exits_2(tmp_path):
     src = write(tmp_path, "npm.json", npm_report())
     exc = write(tmp_path, "exc.json", [])
     env = {"AUDIT_TODAY": TODAY, "AUDIT_RUNTIME_FAIL_LEVEL": "severe"}
+    assert ap.main(["--source", f"frontend:runtime:npm:0:{src}", "--exceptions", exc], env=env) == 2
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "ninety", "1.5", ""])
+def test_invalid_exception_max_days_exits_2(tmp_path, value):
+    src = write(tmp_path, "npm.json", npm_report())
+    exc = write(tmp_path, "exc.json", [])
+    env = {"AUDIT_TODAY": TODAY, "AUDIT_EXCEPTION_MAX_DAYS": value}
     assert ap.main(["--source", f"frontend:runtime:npm:0:{src}", "--exceptions", exc], env=env) == 2
 
 

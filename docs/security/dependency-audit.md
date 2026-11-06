@@ -67,9 +67,9 @@ Thresholds are configurable. The defaults are shown:
 |---|---|---|
 | `AUDIT_RUNTIME_FAIL_LEVEL` | `high` | lowest runtime severity that fails (`low`, `moderate`, `high`, `critical`, `none`) |
 | `AUDIT_TOOLING_FAIL_LEVEL` | `critical` | the same for tooling |
-| `AUDIT_UNKNOWN_SEVERITY` | `high` | severity assumed when an advisory has none. This fails closed: an unscored advisory is treated as high, not ignored |
+| `AUDIT_UNKNOWN_SEVERITY` | `high` | severity assumed when an advisory has none. With the default thresholds, an unscored **runtime** advisory fails the run. In **tooling** it is only reported, because tooling fails on critical only. It is never silently dropped |
 | `AUDIT_EXCEPTIONS_FILE` | `security/audit-exceptions.json` | exceptions file |
-| `AUDIT_EXCEPTION_MAX_DAYS` | `90` | longest allowed exception lifetime, counted from today |
+| `AUDIT_EXCEPTION_MAX_DAYS` | `90` | longest allowed exception lifetime, counted from today. Must be a positive integer, otherwise exit 2 |
 | `AUDIT_OUTPUT_DIR` | temporary directory | keep the raw scanner JSON |
 
 Changing a threshold in CI is a policy change and needs review like any other code
@@ -91,7 +91,10 @@ How failures are detected:
 
 - `npm audit` exits 1 both when it finds vulnerabilities and when the request fails.
   So the script checks the JSON: an `error` key, or missing `metadata.vulnerabilities`,
-  means failure.
+  means failure. It is also a failure if npm exits 1, or `metadata.vulnerabilities.total`
+  is above 0, but no advisory can be extracted (for example, only string `via`
+  entries). npm runs with `--audit-level=info`, so a local `.npmrc` cannot change its
+  exit code.
 - osv-scanner prints a valid, **empty** `{"results": []}` when `api.osv.dev` is
   unreachable, and signals the failure only with exit code 127. Only exit codes 0
   (clean) and 1 (vulnerabilities) are accepted. Results that contradict the exit code
@@ -114,7 +117,7 @@ fixed yet, add an entry to `security/audit-exceptions.json` (a JSON array):
     "reason": "Why it is not exploitable here / why it cannot be fixed yet (be specific: code path, config).",
     "mitigation": "What reduces the risk meanwhile, and the follow-up issue that removes this entry.",
     "owner": "person or team accountable for the follow-up",
-    "expires": "2027-01-31"
+    "expires": "YYYY-MM-DD (<= 90 days out)"
   }
 ]
 ```
@@ -123,10 +126,15 @@ Rules, enforced by the script unless marked as review-only:
 
 - **Narrow.** An exception suppresses only the finding with that exact advisory `id`
   (GHSA, CVE or PYSEC; any alias of the finding matches), that `package`, and that
-  `scope`. A runtime exception does not cover the same advisory in tooling, and vice
-  versa. There are no wildcards or package-wide suppressions.
+  `scope`, **and** only if the exception's `severity` equals the finding's severity.
+  A `low` exception never hides a `high`; if an advisory is re-scored, the exception
+  stops applying and is reported with a `note:`. A runtime exception does not cover
+  the same advisory in tooling, and vice versa. There are no wildcards or
+  package-wide suppressions.
 - **Complete.** All eight fields are required and must be non-empty. `scope` must be
-  `runtime` or `tooling`, and `expires` must be in `YYYY-MM-DD` format.
+  `runtime` or `tooling`, `severity` must be one of `low`, `moderate`, `high`,
+  `critical` or `unknown`, and `expires` must be a real date in `YYYY-MM-DD` format
+  (the example above shows a placeholder).
 - **Time-bounded.** `expires` may be at most 90 days out. On and after the day following
   `expires`, the exception stops suppressing and the run fails with `exception EXPIRED`.
   The run fails even if the finding has gone, which forces the stale entry to be
