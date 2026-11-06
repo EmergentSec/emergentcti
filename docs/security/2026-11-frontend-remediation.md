@@ -42,17 +42,27 @@ All **runtime high** findings were resolved. Remaining items are moderate (runti
 | `source-map-js` | tooling | high | GHSA-68fv-2mgg-jv7q | 1.2.1 → **1.2.2** | source-map-js ≥1.2.2 | Build tooling only. |
 | `baseline-browser-mapping` | tooling | moderate | GHSA-w5vr-8v7q-w6rv | 2.8.19 → **2.11.35** | ≥2.11.0 | Dev transitive; fixed via `npm audit fix`. |
 
-### `package.json` overrides
+### No `package.json` overrides
 
-```json
-"overrides": {
-  "vitest": {
-    "vite": "$vite"
-  }
-}
-```
+An earlier revision of this branch added `"overrides": { "vitest": { "vite": "$vite" } }`
+to keep Vitest on the project's Vite 5. That was removed on 2026-11-06 because it
+did nothing useful and was itself an inconsistency:
 
-**Justification:** `npm audit fix` introduced a nested `vitest → vite@8` peer resolution that broke `npm ci` under npm 10 (Node 20 Alpine Docker builder) and would have been an undeclared major Vite bump. The override pins Vitest’s nested Vite to the project’s direct `vite@5.4.21` devDependency.
+- Vitest 4 declares `vite: ^6.0.0 || ^7.0.0 || ^8.0.0` as a dependency, so Vite 5
+  cannot satisfy it. `main` already resolved a nested
+  `node_modules/vitest/node_modules/vite` (8.0.16) before this issue. This branch
+  moves it to 8.3.6 as part of the vitest 4.1.8 → 4.1.12 patch.
+- The override was never reflected in the lockfile. `npm install --package-lock-only`
+  produces a byte-identical lockfile with or without it.
+- `npm ls` reported the nested `vite@8.3.6` as `invalid` against `^5.4.21`.
+
+Removing it changes only `package.json`. The lockfile is unchanged. The nested
+Vite 8 is used only by the Vitest test runner. It never reaches the production
+bundle, which the top-level `vite@5.4.21` builds.
+
+`npm ls --all` still reports `invalid: esbuild@0.21.5`, because the nested Vite 8
+lists esbuild `^0.27 || ^0.28` as an optional peer. That warning is identical on
+`main` and is not part of this remediation.
 
 ### `npm audit fix` (non-force)
 
