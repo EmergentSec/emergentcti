@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     AUDIT_RETENTION_DAYS: int = Field(default=365, ge=30, le=3650)
     DEFAULT_EXPORT_FORMAT: str = "text"
     REPORT_MAX_UPLOAD_BYTES: int = Field(default=20 * 1024 * 1024, ge=1)
+    # Writable directory for threat-intel config, feed state and fetched reports.
+    # Relative paths resolve against the working directory; the image sets an absolute path.
+    THREAT_INTEL_DATA_DIR: str = "data/threat_intel"
 
     # ── CORS ─────────────────────────────────────────────────────────────
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8080"]

@@ -77,6 +77,12 @@ export function ThreatIntelPanel() {
           </Button>
         </div>
 
+        {fetchFeeds.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            {aiRequestErrorMessage(fetchFeeds.error, "Couldn't fetch threat feeds.")}
+          </p>
+        )}
+
         {lastFetch && (
           <div className="space-y-3">
             <p className="text-sm text-foreground">

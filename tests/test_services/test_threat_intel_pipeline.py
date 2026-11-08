@@ -85,3 +85,49 @@ def test_fetch_feeds_with_empty_sources(tmp_path: Path, monkeypatch: pytest.Monk
     result = pipeline.fetch_feeds(config_path=str(config_path), data_dir=str(tmp_path / "data"))
     assert result.total_items == 0
     assert result.items == []
+
+
+def test_feed_aggregator_does_not_write_log_file_to_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The container runs as a non-root user in a root-owned workdir: no cwd writes."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"log_file": "feed.log", "log_level": "INFO", "rss_feeds": []}),
+        encoding="utf-8",
+    )
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+    FeedAggregator(str(config_path))
+    assert list(workdir.iterdir()) == []
+
+
+def test_default_data_dir_comes_from_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cti.core.config import get_settings
+
+    target = tmp_path / "ti-data"
+    monkeypatch.setenv("THREAT_INTEL_DATA_DIR", str(target))
+    get_settings.cache_clear()
+    try:
+        config, data = pipeline.resolve_paths()
+    finally:
+        get_settings.cache_clear()
+    assert data == target
+    assert config == target / "config.json"
+    assert config.is_file()
+
+
+def test_unwritable_data_dir_raises_threat_intel_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def deny(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied", "data")
+
+    monkeypatch.setattr(Path, "mkdir", deny)
+    with pytest.raises(pipeline.ThreatIntelError) as excinfo:
+        pipeline.resolve_paths(data_dir=str(tmp_path / "nope"))
+    assert excinfo.value.status_code == 500
+    assert "THREAT_INTEL_DATA_DIR" in excinfo.value.message

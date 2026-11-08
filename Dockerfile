@@ -28,6 +28,10 @@ COPY --from=builder /app/alembic.ini /app/alembic.ini
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+# Writable state lives under /app/data (a named volume in docker-compose);
+# the rest of /app stays root-owned and read-only to the cti user.
+ENV THREAT_INTEL_DATA_DIR=/app/data/threat_intel
+RUN mkdir -p /app/data/threat_intel && chown -R cti:cti /app/data
 
 USER cti
 EXPOSE 8000

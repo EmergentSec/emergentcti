@@ -1,5 +1,4 @@
 {
-    "log_file": "feed_aggregator.threat_intel.log",
     "log_level": "INFO",
     "state_file": "feed_state.threat_intel.json",
     "rss_feeds": [

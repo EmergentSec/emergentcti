@@ -114,3 +114,17 @@ async def test_generate_report_requires_roles(client: AsyncClient) -> None:
     )
     assert response.status_code == 409
     assert response.json()["category"] == "not_configured"
+
+
+async def test_fetch_reports_unwritable_data_dir(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pathlib import Path
+
+    def deny(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied", "data")
+
+    monkeypatch.setattr(Path, "mkdir", deny)
+    response = await client.post(f"{TI_BASE}/fetch")
+    assert response.status_code == 500
+    assert "THREAT_INTEL_DATA_DIR" in response.json()["detail"]

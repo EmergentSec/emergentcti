@@ -46,20 +46,16 @@ class FeedAggregator:
         return config
     
     def setup_logging(self):
-        """Configure logging"""
-        log_file = self.config.get("log_file", "feed_aggregator.log")
-        log_level = self.config.get("log_level", "INFO")
-        
-        logging.basicConfig(
-            level=getattr(logging, log_level),
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler()
-            ]
-        )
+        """Use the application's logging; never write log files.
+
+        The API container runs as a non-root user in a read-only working
+        directory, so records go to the app's handlers (stdout) instead.
+        """
         self.logger = logging.getLogger(__name__)
-    
+        level = getattr(logging, str(self.config.get("log_level", "INFO")).upper(), None)
+        if isinstance(level, int):
+            self.logger.setLevel(level)
+
     def _load_state(self) -> dict[str, Any]:
         """Load previous state to track seen items"""
         if self.state_file.exists():
@@ -543,6 +539,9 @@ class FeedAggregator:
 def main():
     """Main entry point"""
     import argparse
+
+    # Standalone CLI only: the API process owns logging configuration.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     
     parser = argparse.ArgumentParser(description="Security Feed Aggregator")
     parser.add_argument(

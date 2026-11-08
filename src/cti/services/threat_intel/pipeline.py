@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from cti.core.config import get_settings
 from cti.models.ai_usage import AiAction
 from cti.models.report import ContentFormat, ReportOrigin
 from cti.schemas.ai import AiModelRole
@@ -33,7 +34,6 @@ logger = logging.getLogger(__name__)
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 _SKILLS_DIR = _PACKAGE_DIR / "skills"
-_DEFAULT_DATA_DIR = Path("data/threat_intel")
 _FOOTER_RE = re.compile(
     r"\nMISTAKES:.*?\nFRICTION:.*?\nWISHES:.*?\s*\Z",
     re.DOTALL | re.IGNORECASE,
@@ -96,8 +96,15 @@ def resolve_paths(
     config_path: str | None = None,
     data_dir: str | None = None,
 ) -> tuple[Path, Path]:
-    data = Path(data_dir) if data_dir else _DEFAULT_DATA_DIR
-    data.mkdir(parents=True, exist_ok=True)
+    data = Path(data_dir) if data_dir else Path(get_settings().THREAT_INTEL_DATA_DIR)
+    try:
+        data.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ThreatIntelError(
+            500,
+            f"Threat-intel data directory {data} is not writable ({exc.strerror}). "
+            "Set THREAT_INTEL_DATA_DIR to a directory the server can write.",
+        ) from exc
     config = Path(config_path) if config_path else data / "config.json"
     if not config.is_file():
         example = _PACKAGE_DIR / "config.example.json"
@@ -118,25 +125,32 @@ def fetch_feeds(
     data_dir: str | None = None,
 ) -> FeedFetchResult:
     config, data = resolve_paths(config_path=config_path, data_dir=data_dir)
-    # Keep state next to the config by default.
-    aggregator = FeedAggregator(str(config))
-    # Prefer writing state under the data dir when the config uses a relative path.
-    state_name = Path(aggregator.state_file).name
-    aggregator.state_file = data / state_name
-    aggregator.state = aggregator._load_state()  # noqa: SLF001 — rebind after path change
+    try:
+        # Keep state next to the config by default.
+        aggregator = FeedAggregator(str(config))
+        # Prefer writing state under the data dir when the config uses a relative path.
+        state_name = Path(aggregator.state_file).name
+        aggregator.state_file = data / state_name
+        aggregator.state = aggregator._load_state()  # noqa: SLF001 — rebind after path change
 
-    report = aggregator.aggregate()
-    # Drop bulky raw blobs before returning to the API.
-    items: list[dict[str, Any]] = []
-    for item in report.get("items", []):
-        cleaned = {k: v for k, v in item.items() if k != "raw"}
-        items.append(cleaned)
+        report = aggregator.aggregate()
+        # Drop bulky raw blobs before returning to the API.
+        items: list[dict[str, Any]] = []
+        for item in report.get("items", []):
+            cleaned = {k: v for k, v in item.items() if k != "raw"}
+            items.append(cleaned)
 
-    json_out = data / f"feed_report_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.json"
-    aggregator.save_json_report(
-        {**report, "items": items},
-        str(json_out),
-    )
+        json_out = data / f"feed_report_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.json"
+        aggregator.save_json_report(
+            {**report, "items": items},
+            str(json_out),
+        )
+    except OSError as exc:
+        raise ThreatIntelError(
+            500,
+            f"Threat-intel fetch failed with an I/O error ({exc.strerror or exc}). "
+            f"Check that THREAT_INTEL_DATA_DIR ({data}) is writable.",
+        ) from exc
     return FeedFetchResult(
         timestamp=str(report.get("timestamp", "")),
         total_items=int(report.get("total_items", 0)),
