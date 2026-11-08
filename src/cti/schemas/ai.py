@@ -69,9 +69,22 @@ class AiDefault(BaseModel):
     is_custom: bool
 
 
+class AiModelRole(enum.StrEnum):
+    RESEARCH = "research"
+    WRITER = "writer"
+
+
+class AiModelRoles(BaseModel):
+    """Per-purpose model slots for the threat-intel pipeline."""
+
+    research: AiDefault | None
+    writer: AiDefault | None
+
+
 class AiSettings(BaseModel):
     providers: list[AiProviderStatus]
     default: AiDefault | None
+    roles: AiModelRoles
 
 
 class AiModelList(BaseModel):
@@ -149,6 +162,10 @@ class AiDefaultUpdate(BaseModel):
     @classmethod
     def validate_model(cls, value: str) -> str:
         return _validate_model_id(value)
+
+
+class AiRoleUpdate(AiDefaultUpdate):
+    """Same shape as the default update; the role is selected by the path."""
 
 
 class AiInferenceTestRequest(BaseModel):

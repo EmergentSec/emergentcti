@@ -34,7 +34,9 @@ export type AiUnpricedModelPolicy = 'block' | 'permit'
 export type AiInferencePolicyDecision = 'allowed' | 'blocked_unpriced' | 'over_budget'
 export type AiUsageRecordStatus = 'reserved' | 'succeeded' | 'failed' | 'cancelled'
 export type AiUsageBillable = 'no' | 'yes' | 'unknown'
-export type AiAction = 'inference_test'
+export type AiAction = 'inference_test' | 'threat_research' | 'report_write'
+
+export type AiModelRole = 'research' | 'writer'
 
 export interface AiModel {
   /** Exact provider model ID. */
@@ -69,10 +71,17 @@ export interface AiDefault {
   is_custom: boolean
 }
 
+export interface AiModelRoles {
+  research: AiDefault | null
+  writer: AiDefault | null
+}
+
 export interface AiSettings {
   /** Always all four providers, configured or not, in fixed order. */
   providers: AiProviderStatus[]
   default: AiDefault | null
+  /** Research (gather) and writer (report) model slots for the threat-intel pipeline. */
+  roles: AiModelRoles
 }
 
 export interface AiModelList {

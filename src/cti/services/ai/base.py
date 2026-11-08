@@ -9,6 +9,8 @@ import httpx
 from cti.schemas.ai import AiError, AiErrorCategory, AiModel
 
 REQUEST_TIMEOUT_SECONDS = 10.0
+#: Longer timeout for research / report-writing completions.
+COMPLETION_TIMEOUT_SECONDS = 180.0
 INFERENCE_PROMPT = "Reply with the single word: OK"
 #: Max output tokens sent by a direct ``inference_test`` call. The gateway always
 #: passes the usage policy's ``max_output_tokens`` instead.
@@ -112,10 +114,15 @@ class AiAdapterError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class AdapterUsage:
-    """Provider-reported token usage. ``None`` means the provider did not say."""
+    """Provider-reported token usage. ``None`` means the provider did not say.
+
+    ``text`` is the completion body when the adapter extracted one. Inference
+    tests may leave it ``None``; the gateway never persists it.
+    """
 
     input_tokens: int | None
     output_tokens: int | None
+    text: str | None = None
 
 
 def _token_count(value: object) -> int | None:
@@ -179,9 +186,10 @@ class AiProviderAdapter(ABC):
         headers: dict[str, str],
         params: dict[str, object] | None = None,
         json: dict[str, object] | None = None,
+        timeout: float = REQUEST_TIMEOUT_SECONDS,
     ) -> httpx.Response:
         try:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.request(
                     method,
                     url,
@@ -217,10 +225,12 @@ class AiProviderAdapter(ABC):
         model: str,
         prompt: str,
         max_output_tokens: int,
+        *,
+        timeout: float = COMPLETION_TIMEOUT_SECONDS,
     ) -> AdapterUsage:
         """Send one user message with ``max_output_tokens`` as the provider's
         max-tokens parameter (:attr:`_MAX_TOKENS_FIELD`), and return the
-        provider-reported usage.
+        provider-reported usage (and completion text when available).
 
         Only :mod:`cti.services.ai.gateway` may call this for accounted actions.
         """
@@ -232,7 +242,13 @@ class AiProviderAdapter(ABC):
         max_output_tokens: int = DEFAULT_INFERENCE_MAX_OUTPUT_TOKENS,
     ) -> AdapterUsage:
         """Send the fixed, explicitly confirmed inference prompt."""
-        return await self.complete(api_key, model, INFERENCE_PROMPT, max_output_tokens)
+        return await self.complete(
+            api_key,
+            model,
+            INFERENCE_PROMPT,
+            max_output_tokens,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
 
     async def _post_message(
         self,
@@ -244,6 +260,8 @@ class AiProviderAdapter(ABC):
         max_output_tokens: int,
         input_field: str,
         output_field: str,
+        timeout: float = COMPLETION_TIMEOUT_SECONDS,
+        extract_text: bool = True,
     ) -> AdapterUsage:
         response = await self._request(
             "POST",
@@ -254,13 +272,47 @@ class AiProviderAdapter(ABC):
                 self._MAX_TOKENS_FIELD: max_output_tokens,
                 "messages": [{"role": "user", "content": prompt}],
             },
+            timeout=timeout,
         )
         payload = parse_json(response)
         if not isinstance(payload, dict):
             raise AiAdapterError(
                 make_ai_error(AiErrorCategory.PROVIDER_ERROR), status_code=response.status_code
             )
-        return parse_usage(payload, input_field, output_field)
+        usage = parse_usage(payload, input_field, output_field)
+        if not extract_text:
+            return usage
+        return AdapterUsage(
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            text=extract_completion_text(payload),
+        )
+
+
+def extract_completion_text(payload: dict[str, object]) -> str | None:
+    """Pull assistant text from OpenAI-style or Anthropic Messages payloads."""
+    choices = payload.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0]
+        if isinstance(first, dict):
+            message = first.get("message")
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                return message["content"]
+            if isinstance(first.get("text"), str):
+                return first["text"]
+    content = payload.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+            elif isinstance(block, str):
+                parts.append(block)
+        if parts:
+            return "".join(parts)
+    return None
 
 
 def sorted_models(models: list[AiModel]) -> list[AiModel]:

@@ -30,7 +30,10 @@ from cti.schemas.ai import (
     AiModelPricingList,
     AiModelPricingOut,
     AiModelPricingUpdate,
+    AiModelRole,
+    AiModelRoles,
     AiProviderStatus,
+    AiRoleUpdate,
     AiSettings,
     AiUsageBudget,
     AiUsageByDay,
@@ -149,16 +152,37 @@ def _cached_models(config: AiProviderConfig) -> list[AiModel] | None:
         return None
 
 
-async def _flush_with_orphan_cleanup(db: AsyncSession) -> None:
-    settings = await db.get(AiSettingsRecord, 1)
-    if (
-        settings is not None
-        and settings.default_provider is None
-        and settings.default_model is not None
-    ):
+def _clear_orphaned_pairs(settings: AiSettingsRecord) -> None:
+    if settings.default_provider is None and settings.default_model is not None:
         settings.default_model = None
         settings.default_model_is_custom = False
+    if settings.research_provider is None and settings.research_model is not None:
+        settings.research_model = None
+        settings.research_model_is_custom = False
+    if settings.writer_provider is None and settings.writer_model is not None:
+        settings.writer_model = None
+        settings.writer_model_is_custom = False
+
+
+async def _flush_with_orphan_cleanup(db: AsyncSession) -> None:
+    settings = await db.get(AiSettingsRecord, 1)
+    if settings is not None:
+        _clear_orphaned_pairs(settings)
     await db.flush()
+
+
+def _slot_as_default(
+    provider: AiProvider | str | None,
+    model: str | None,
+    is_custom: bool,
+) -> AiDefault | None:
+    if provider is None or model is None:
+        return None
+    return AiDefault(
+        provider=AiProvider(provider),
+        model=model,
+        is_custom=is_custom,
+    )
 
 
 async def get_settings(db: AsyncSession) -> AiSettings:
@@ -168,19 +192,29 @@ async def get_settings(db: AsyncSession) -> AiSettings:
     }
     settings = await db.get(AiSettingsRecord, 1)
     default = None
-    if (
-        settings is not None
-        and settings.default_provider is not None
-        and settings.default_model is not None
-    ):
-        default = AiDefault(
-            provider=AiProvider(settings.default_provider),
-            model=settings.default_model,
-            is_custom=settings.default_model_is_custom,
+    roles = AiModelRoles(research=None, writer=None)
+    if settings is not None:
+        default = _slot_as_default(
+            settings.default_provider,
+            settings.default_model,
+            settings.default_model_is_custom,
+        )
+        roles = AiModelRoles(
+            research=_slot_as_default(
+                settings.research_provider,
+                settings.research_model,
+                settings.research_model_is_custom,
+            ),
+            writer=_slot_as_default(
+                settings.writer_provider,
+                settings.writer_model,
+                settings.writer_model_is_custom,
+            ),
         )
     return AiSettings(
         providers=[_provider_status(provider, configured.get(provider)) for provider in AiProvider],
         default=default,
+        roles=roles,
     )
 
 
@@ -214,10 +248,19 @@ async def save_provider_key(
 async def delete_provider(db: AsyncSession, provider: AiProvider) -> None:
     config = await _require_provider_config(db, provider, status_code=404)
     settings = await db.get(AiSettingsRecord, 1)
-    if settings is not None and settings.default_provider == provider:
-        settings.default_provider = None
-        settings.default_model = None
-        settings.default_model_is_custom = False
+    if settings is not None:
+        if settings.default_provider == provider:
+            settings.default_provider = None
+            settings.default_model = None
+            settings.default_model_is_custom = False
+        if settings.research_provider == provider:
+            settings.research_provider = None
+            settings.research_model = None
+            settings.research_model_is_custom = False
+        if settings.writer_provider == provider:
+            settings.writer_provider = None
+            settings.writer_model = None
+            settings.writer_model_is_custom = False
     await db.delete(config)
     await _flush_with_orphan_cleanup(db)
 
@@ -308,10 +351,10 @@ async def list_models(
     )
 
 
-async def set_default(
+async def _validate_model_choice(
     db: AsyncSession,
     update: AiDefaultUpdate,
-) -> AiDefault:
+) -> AiProviderConfig:
     config = await _require_provider_config(db, update.provider)
     if not update.is_custom:
         candidates = _cached_models(config)
@@ -328,11 +371,23 @@ async def set_default(
                     ),
                 ),
             )
+    return config
 
+
+async def _ensure_settings(db: AsyncSession) -> AiSettingsRecord:
     settings = await db.get(AiSettingsRecord, 1)
     if settings is None:
         settings = AiSettingsRecord(id=1)
         db.add(settings)
+    return settings
+
+
+async def set_default(
+    db: AsyncSession,
+    update: AiDefaultUpdate,
+) -> AiDefault:
+    await _validate_model_choice(db, update)
+    settings = await _ensure_settings(db)
     settings.default_provider = update.provider
     settings.default_model = update.model
     settings.default_model_is_custom = update.is_custom
@@ -352,6 +407,65 @@ async def clear_default(db: AsyncSession) -> None:
     settings.default_model = None
     settings.default_model_is_custom = False
     await _flush_with_orphan_cleanup(db)
+
+
+async def set_role(
+    db: AsyncSession,
+    role: AiModelRole,
+    update: AiRoleUpdate,
+) -> AiDefault:
+    await _validate_model_choice(db, update)
+    settings = await _ensure_settings(db)
+    if role == AiModelRole.RESEARCH:
+        settings.research_provider = update.provider
+        settings.research_model = update.model
+        settings.research_model_is_custom = update.is_custom
+    else:
+        settings.writer_provider = update.provider
+        settings.writer_model = update.model
+        settings.writer_model_is_custom = update.is_custom
+    await _flush_with_orphan_cleanup(db)
+    return AiDefault(
+        provider=update.provider,
+        model=update.model,
+        is_custom=update.is_custom,
+    )
+
+
+async def clear_role(db: AsyncSession, role: AiModelRole) -> None:
+    settings = await db.get(AiSettingsRecord, 1)
+    if settings is None:
+        return
+    if role == AiModelRole.RESEARCH:
+        settings.research_provider = None
+        settings.research_model = None
+        settings.research_model_is_custom = False
+    else:
+        settings.writer_provider = None
+        settings.writer_model = None
+        settings.writer_model_is_custom = False
+    await _flush_with_orphan_cleanup(db)
+
+
+async def get_role_selection(
+    db: AsyncSession,
+    role: AiModelRole,
+) -> AiDefault:
+    """Return the configured model for a pipeline role, or raise if unset."""
+    settings = await get_settings(db)
+    selection = settings.roles.research if role == AiModelRole.RESEARCH else settings.roles.writer
+    if selection is None:
+        raise AiSettingsServiceError(
+            409,
+            AiError(
+                category=AiErrorCategory.NOT_CONFIGURED,
+                message=(
+                    f"No {role.value} model is configured. "
+                    "Choose a research and writer model under AI settings."
+                ),
+            ),
+        )
+    return selection
 
 
 async def inference_test(

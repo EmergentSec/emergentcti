@@ -24,8 +24,10 @@ from cti.schemas.ai import (
     AiModelPricingList,
     AiModelPricingOut,
     AiModelPricingUpdate,
+    AiModelRole,
     AiProviderKeyUpdate,
     AiProviderStatus,
+    AiRoleUpdate,
     AiSettings,
     AiUsagePolicyOut,
     AiUsagePolicyUpdate,
@@ -144,6 +146,22 @@ async def _current_default(db: AsyncSession) -> dict[str, object]:
     return {
         "provider": provider.value if isinstance(provider, AiProvider) else provider,
         "model": settings.default_model,
+    }
+
+
+async def _current_role(db: AsyncSession, role: AiModelRole) -> dict[str, object]:
+    settings = await db.get(AiSettingsRecord, 1)
+    if settings is None:
+        return {"provider": None, "model": None}
+    if role == AiModelRole.RESEARCH:
+        provider = settings.research_provider
+        model = settings.research_model
+    else:
+        provider = settings.writer_provider
+        model = settings.writer_model
+    return {
+        "provider": provider.value if isinstance(provider, AiProvider) else provider,
+        "model": model,
     }
 
 
@@ -360,6 +378,70 @@ async def clear_default(
         resource_type="ai_default",
         resource_id="default",
         summary={"before": before, "after": {"provider": None, "model": None}},
+    )
+    await db.commit()
+    return Response(status_code=204)
+
+
+@router.put("/roles/{role}", response_model=AiDefault)
+async def set_role(
+    role: AiModelRole,
+    data: AiRoleUpdate,
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(audit.audited_admin("ai_role.set", "ai_role")),
+) -> AiDefault | JSONResponse:
+    actor = audit.actor_from_auth(_auth)
+    before = await _current_role(db, role)
+    try:
+        result = await ai_settings_service.set_role(db, role, data)
+    except ai_settings_service.AiSettingsServiceError as exc:
+        await _record_failure(
+            db,
+            actor,
+            "ai_role.set",
+            "ai_role",
+            resource_id=role.value,
+            status=exc.status_code,
+            error_code=exc.error.category.value,
+            extra={"provider": data.provider.value, "model": data.model, "role": role.value},
+        )
+        return _error_response(exc)
+    audit.record(
+        db,
+        actor=actor,
+        action="ai_role.set",
+        resource_type="ai_role",
+        resource_id=role.value,
+        summary={
+            "before": before,
+            "after": {"provider": result.provider.value, "model": result.model},
+            "is_custom": result.is_custom,
+            "role": role.value,
+        },
+    )
+    await db.commit()
+    return result
+
+
+@router.delete("/roles/{role}", status_code=204)
+async def clear_role(
+    role: AiModelRole,
+    db: AsyncSession = Depends(get_db),
+    _auth: AuthSubject = Depends(audit.audited_admin("ai_role.clear", "ai_role")),
+) -> Response:
+    before = await _current_role(db, role)
+    await ai_settings_service.clear_role(db, role)
+    audit.record(
+        db,
+        actor=audit.actor_from_auth(_auth),
+        action="ai_role.clear",
+        resource_type="ai_role",
+        resource_id=role.value,
+        summary={
+            "before": before,
+            "after": {"provider": None, "model": None},
+            "role": role.value,
+        },
     )
     await db.commit()
     return Response(status_code=204)

@@ -56,6 +56,15 @@ class AiProviderConfig(TimestampMixin, Base):
     last_checked_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
+_PROVIDER_ENUM = Enum(
+    AiProvider,
+    values_callable=lambda values: [value.value for value in values],
+    native_enum=False,
+    create_constraint=False,
+    length=32,
+)
+
+
 class AiSettingsRecord(Base):
     __tablename__ = "ai_settings"
     __table_args__ = (
@@ -64,22 +73,40 @@ class AiSettingsRecord(Base):
             "default_provider IS NULL OR default_model IS NOT NULL",
             name="ck_ai_settings_default_pair",
         ),
+        CheckConstraint(
+            "research_provider IS NULL OR research_model IS NOT NULL",
+            name="ck_ai_settings_research_pair",
+        ),
+        CheckConstraint(
+            "writer_provider IS NULL OR writer_model IS NOT NULL",
+            name="ck_ai_settings_writer_pair",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, default=1)
     default_provider: Mapped[AiProvider | None] = mapped_column(
-        Enum(
-            AiProvider,
-            values_callable=lambda values: [value.value for value in values],
-            native_enum=False,
-            create_constraint=False,
-            length=32,
-        ),
+        _PROVIDER_ENUM,
         ForeignKey("ai_providers.provider", ondelete="SET NULL"),
         default=None,
     )
     default_model: Mapped[str | None] = mapped_column(String(255), default=None)
     default_model_is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Research ("dumb") model: gather sources and facts for threat intel.
+    research_provider: Mapped[AiProvider | None] = mapped_column(
+        _PROVIDER_ENUM,
+        ForeignKey("ai_providers.provider", ondelete="SET NULL"),
+        default=None,
+    )
+    research_model: Mapped[str | None] = mapped_column(String(255), default=None)
+    research_model_is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Writer ("smart") model: turn research into house-format reports.
+    writer_provider: Mapped[AiProvider | None] = mapped_column(
+        _PROVIDER_ENUM,
+        ForeignKey("ai_providers.provider", ondelete="SET NULL"),
+        default=None,
+    )
+    writer_model: Mapped[str | None] = mapped_column(String(255), default=None)
+    writer_model_is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         server_default=func.now(),
         onupdate=func.now(),

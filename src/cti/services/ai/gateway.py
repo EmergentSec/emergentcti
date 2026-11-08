@@ -58,6 +58,7 @@ from cti.models.ai_usage import (
 from cti.models.audit import ActorType
 from cti.schemas.ai import AiErrorCategory
 from cti.services.ai.base import (
+    COMPLETION_TIMEOUT_SECONDS,
     INFERENCE_PROMPT,
     REQUEST_TIMEOUT_SECONDS,
     AdapterUsage,
@@ -145,7 +146,10 @@ class Pricing:
 @dataclass(frozen=True, slots=True)
 class InferenceOutcome:
     """The result of one gateway call. ``record_id`` is None only when nothing
-    was sent (the reservation was released before dispatch)."""
+    was sent (the reservation was released before dispatch).
+
+    ``text`` is in-memory only: usage records never store prompts or responses.
+    """
 
     ok: bool
     error: AiError | None
@@ -156,6 +160,7 @@ class InferenceOutcome:
     usage_source: UsageSource = UsageSource.UNKNOWN
     cost_usd: Decimal | None = None
     cost_source: CostSource = CostSource.UNKNOWN
+    text: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,8 +376,9 @@ def require_approval(
     prompt: str,
     approved: ApprovedOutbound | None,
 ) -> None:
-    """``inference_test`` sends only the fixed prompt; anything else needs an
-    :class:`ApprovedOutbound` for exactly this provider, model and content."""
+    """``inference_test`` sends only the fixed prompt; content-bearing actions
+    need an :class:`ApprovedOutbound` for exactly this provider, model and
+    content (including skill-built research / report prompts)."""
     if action == AiAction.INFERENCE_TEST:
         if prompt != INFERENCE_PROMPT:
             raise GatewayRejectionError(403, AiErrorCategory.SHARING_NOT_APPROVED)
@@ -651,8 +657,17 @@ async def run_inference(
                 api_key, model, max_output_tokens=admitted.max_output_tokens
             )
         else:
+            timeout = (
+                COMPLETION_TIMEOUT_SECONDS
+                if action in {AiAction.THREAT_RESEARCH, AiAction.REPORT_WRITE}
+                else REQUEST_TIMEOUT_SECONDS
+            )
             raw_usage = await provider_adapter.complete(
-                api_key, model, prompt, admitted.max_output_tokens
+                api_key,
+                model,
+                prompt,
+                admitted.max_output_tokens,
+                timeout=timeout,
             )
     except AiAdapterError as exc:
         latency_ms = round((perf_counter() - started) * 1000)
@@ -686,4 +701,5 @@ async def run_inference(
         usage_source=UsageSource.PROVIDER_REPORTED if reported else UsageSource.UNKNOWN,
         cost_usd=cost,
         cost_source=CostSource.ESTIMATED if cost is not None else CostSource.UNKNOWN,
+        text=usage.text,
     )

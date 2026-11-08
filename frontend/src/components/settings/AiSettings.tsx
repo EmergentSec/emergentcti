@@ -15,19 +15,28 @@ import {
   useAiSettings,
   useCheckAiConnection,
   useClearAiDefault,
+  useClearAiRole,
   useRefreshAiModels,
   useRemoveAiProvider,
   useSaveAiKey,
   useSetAiDefault,
+  useSetAiRole,
 } from '@/hooks/useAiSettings'
 import { aiRequestErrorMessage, describeAiCategory } from '@/lib/aiErrors'
 import { displayTokenCount, displayUsdEstimate, inferenceTestBlockReason } from '@/lib/aiDisplay'
 import { formatRelativeTime } from '@/lib/utils'
-import type { AiProvider, AiProviderStatus, AiSettings as AiSettingsData } from '@/types/ai'
+import type {
+  AiDefault,
+  AiModelRole,
+  AiProvider,
+  AiProviderStatus,
+  AiSettings as AiSettingsData,
+} from '@/types/ai'
 import { AiGuardrailsForm } from './AiGuardrails'
 import { AiPricingTable } from './AiPricing'
 import { AiUsagePanel } from './AiUsage'
 import { ModelPicker, ModelSourceLabel } from './ModelPicker'
+import { ThreatIntelPanel } from './ThreatIntelPanel'
 
 export function AiSettings() {
   const { data, isLoading, error } = useAiSettings()
@@ -62,7 +71,20 @@ export function AiSettings() {
               <ProviderCard key={status.provider} status={status} />
             ))}
           </div>
+          <RoleModelSection
+            settings={data}
+            role="research"
+            title="Research model"
+            description="Faster / cheaper model that gathers sources and facts for threat intel deep-dives."
+          />
+          <RoleModelSection
+            settings={data}
+            role="writer"
+            title="Writer model"
+            description="Stronger model that turns research into house-format threat reports."
+          />
           <DefaultModelSection settings={data} />
+          <ThreatIntelPanel />
         </>
       )}
     </div>
@@ -78,7 +100,8 @@ function Disclosure() {
         <p className="text-muted-foreground">
           Each provider bills your account for usage and handles data under its own policies. Saving a key,
           checking a connection, or listing models never sends indicators, reports, or other data from this
-          instance. Nothing is sent to a provider until a future feature asks you to.
+          instance. Fetching threat feeds stays local; research and report writing send only the prompts you
+          explicitly start to the configured providers.
         </p>
       </div>
     </div>
@@ -309,6 +332,180 @@ function ProviderCard({ status }: { status: AiProviderStatus }) {
   )
 }
 
+function RoleModelSection({
+  settings,
+  role,
+  title,
+  description,
+}: {
+  settings: AiSettingsData
+  role: AiModelRole
+  title: string
+  description: string
+}) {
+  const { toast } = useToast()
+  const configured = settings.providers.filter((p) => p.configured)
+  const current = settings.roles?.[role] ?? null
+  const nameOf = (p: AiProvider) => settings.providers.find((s) => s.provider === p)?.display_name ?? p
+
+  const [draftProvider, setDraftProvider] = useState<AiProvider | null>(
+    current?.provider ?? configured[0]?.provider ?? null,
+  )
+  const [draftModel, setDraftModel] = useState(current?.model ?? '')
+  const [draftCustom, setDraftCustom] = useState(current?.is_custom ?? false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const setRole = useSetAiRole()
+  const clearRole = useClearAiRole()
+  const roleBusy = setRole.isPending || clearRole.isPending
+  const configuredKey = configured.map((p) => p.provider).join(',')
+  const titleId = `ai-role-${role}-title`
+
+  const prevRole = useRef(current)
+  useEffect(() => {
+    const previous = prevRole.current
+    prevRole.current = current
+    if (current) {
+      setDraftProvider(current.provider)
+      setDraftModel(current.model)
+      setDraftCustom(current.is_custom)
+    } else if (previous) {
+      setDraftModel('')
+      setDraftCustom(false)
+    }
+  }, [current?.provider, current?.model, current?.is_custom])
+
+  useEffect(() => {
+    const available = configuredKey ? (configuredKey.split(',') as AiProvider[]) : []
+    if (draftProvider && available.includes(draftProvider)) return
+    const next = current?.provider ?? available[0] ?? null
+    setDraftProvider(next)
+    setDraftModel(current && current.provider === next ? current.model : '')
+    setDraftCustom(current && current.provider === next ? current.is_custom : false)
+  }, [configuredKey])
+
+  const models = useAiModels(draftProvider, !!draftProvider)
+  const loadError = models.isError ? aiRequestErrorMessage(models.error, "Couldn't load the model list.") : null
+
+  const selectProvider = (provider: AiProvider) => {
+    setDraftProvider(provider)
+    const same = current?.provider === provider
+    setDraftModel(same ? current!.model : '')
+    setDraftCustom(same ? current!.is_custom : false)
+    setSaveError(null)
+  }
+
+  const unchanged =
+    !!current &&
+    current.provider === draftProvider &&
+    current.model === draftModel &&
+    current.is_custom === draftCustom
+  const hasModel = draftModel.trim() !== ''
+
+  const handleSave = () => {
+    if (!draftProvider || !hasModel || roleBusy) return
+    setSaveError(null)
+    const payload: AiDefault = {
+      provider: draftProvider,
+      model: draftModel,
+      is_custom: draftCustom,
+    }
+    setRole.mutate(
+      { role, payload },
+      {
+        onSuccess: () => toast(`${title} saved`, 'success'),
+        onError: (err) => setSaveError(aiRequestErrorMessage(err, `Couldn't save the ${role} model.`)),
+      },
+    )
+  }
+
+  const handleClear = () => {
+    if (roleBusy) return
+    clearRole.mutate(role, {
+      onSuccess: () => {
+        setDraftModel('')
+        setDraftCustom(false)
+        toast(`${title} cleared`, 'success')
+      },
+      onError: (err) => toast(aiRequestErrorMessage(err, `Couldn't clear the ${role} model.`), 'error'),
+    })
+  }
+
+  return (
+    <Card>
+      <section aria-labelledby={titleId} className="space-y-4 p-5">
+        <div>
+          <h3 id={titleId} className="text-base font-semibold text-foreground">
+            {title}
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        </div>
+
+        <div className="rounded-lg border border-border bg-surface2 px-4 py-3 text-sm">
+          {current ? (
+            <p className="flex flex-wrap items-center gap-2 text-foreground">
+              <span className="text-muted-foreground">Current:</span>
+              <span className="font-medium">{nameOf(current.provider)}</span>
+              <code className="break-all font-mono text-xs">{current.model}</code>
+              {current.is_custom && <Badge variant="secondary">Custom ID</Badge>}
+            </p>
+          ) : (
+            <p className="text-muted-foreground">
+              <span className="font-medium text-foreground">Not set.</span> The threat-intel pipeline needs
+              this role before it can generate reports.
+            </p>
+          )}
+        </div>
+
+        {configured.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Save a provider key above to choose a model.</p>
+        ) : (
+          <>
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
+              <Select
+                id={`ai-role-${role}-provider`}
+                label="Provider"
+                value={draftProvider ?? ''}
+                onChange={(e) => selectProvider(e.target.value as AiProvider)}
+                options={configured.map((p) => ({ value: p.provider, label: p.display_name }))}
+              />
+              <ModelPicker
+                list={models.data}
+                isLoading={models.isLoading}
+                loadError={loadError}
+                value={draftModel}
+                isCustom={draftCustom}
+                onChange={(model, isCustom) => {
+                  setDraftModel(model)
+                  setDraftCustom(isCustom)
+                  setSaveError(null)
+                }}
+              />
+            </div>
+
+            {saveError && (
+              <p role="alert" className="text-sm text-destructive">
+                {saveError}
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={handleSave} disabled={!hasModel || unchanged || roleBusy}>
+                {setRole.isPending ? 'Saving…' : `Save ${role} model`}
+              </Button>
+              {current && (
+                <Button variant="outline" onClick={handleClear} disabled={roleBusy}>
+                  Clear
+                </Button>
+              )}
+            </div>
+          </>
+        )}
+      </section>
+    </Card>
+  )
+}
+
 function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
   const { toast } = useToast()
   const configured = settings.providers.filter((p) => p.configured)
@@ -445,7 +642,8 @@ function DefaultModelSection({ settings }: { settings: AiSettingsData }) {
             Default model
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            The provider and model future AI features will use for this instance.
+            Used for connection tests and as a general fallback. Threat-intel deep-dives use the
+            research and writer models above.
           </p>
         </div>
 

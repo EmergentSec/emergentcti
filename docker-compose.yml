@@ -78,6 +78,8 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://localhost:8080"]}
+    volumes:
+      - app_data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,3 +121,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  app_data:

@@ -62,6 +62,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.getAiSettings.mockResolvedValue({
     providers: [status('anthropic', true), status('openai', false), status('openrouter', false), status('xai', false)],
+    roles: { research: null, writer: null },
     default: { provider: 'anthropic', model: MODEL, is_custom: false },
   })
   api.getAiModels.mockResolvedValue({

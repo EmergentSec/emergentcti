@@ -36,6 +36,8 @@ class AiAction(enum.StrEnum):
     """Actions that are accounted. Model listing and credential checks never are."""
 
     INFERENCE_TEST = "inference_test"
+    THREAT_RESEARCH = "threat_research"
+    REPORT_WRITE = "report_write"
 
 
 class UsageStatus(enum.StrEnum):
