@@ -49,6 +49,8 @@ class AnthropicAdapter(AiProviderAdapter):
         model: str,
         prompt: str,
         max_output_tokens: int,
+        *,
+        timeout: float = 180.0,
     ) -> AdapterUsage:
         return await self._post_message(
             f"{self._BASE_URL}/messages",
@@ -58,4 +60,5 @@ class AnthropicAdapter(AiProviderAdapter):
             max_output_tokens=max_output_tokens,
             input_field="input_tokens",
             output_field="output_tokens",
+            timeout=timeout,
         )

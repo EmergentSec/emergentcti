@@ -66,6 +66,8 @@ class OpenRouterAdapter(AiProviderAdapter):
         model: str,
         prompt: str,
         max_output_tokens: int,
+        *,
+        timeout: float = 180.0,
     ) -> AdapterUsage:
         return await self._post_message(
             f"{self._BASE_URL}/chat/completions",
@@ -75,4 +77,5 @@ class OpenRouterAdapter(AiProviderAdapter):
             max_output_tokens=max_output_tokens,
             input_field="prompt_tokens",
             output_field="completion_tokens",
+            timeout=timeout,
         )

@@ -71,6 +71,7 @@ function settings(overrides: Partial<AiSettingsData> = {}): AiSettingsData {
       provider('xai', 'xAI (Grok)'),
     ],
     default: null,
+    roles: { research: null, writer: null },
     ...overrides,
   }
 }
@@ -134,7 +135,9 @@ describe('AiSettings', () => {
   it('discloses that providers are external paid services and nothing is sent automatically', async () => {
     renderPage()
     expect(screen.getByText('AI providers are external, paid services')).toBeTruthy()
-    expect(screen.getByText(/Nothing is sent to a provider until a future feature asks you to/)).toBeTruthy()
+    expect(
+      screen.getByText(/research and report writing send only the prompts you\s+explicitly start/i),
+    ).toBeTruthy()
     await screen.findByRole('region', { name: 'Anthropic' })
   })
 

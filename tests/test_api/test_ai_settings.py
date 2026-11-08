@@ -93,6 +93,7 @@ async def test_settings_always_lists_all_providers(client: AsyncClient) -> None:
     ]
     assert all(not item["configured"] for item in response.json()["providers"])
     assert response.json()["default"] is None
+    assert response.json()["roles"] == {"research": None, "writer": None}
 
 
 async def test_key_is_encrypted_and_save_makes_no_network_call(

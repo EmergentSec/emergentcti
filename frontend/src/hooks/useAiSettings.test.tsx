@@ -41,7 +41,7 @@ function modelList(provider: AiModelList['provider']): AiModelList {
 /** Real QueryClient seeded with settings and two providers' model lists. */
 function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  client.setQueryData(aiSettingsKey, { providers: [], default: null })
+  client.setQueryData(aiSettingsKey, { providers: [], default: null, roles: { research: null, writer: null } })
   client.setQueryData(aiModelsKey('openai'), modelList('openai'))
   client.setQueryData(aiModelsKey('anthropic'), modelList('anthropic'))
   const invalidate = vi.spyOn(client, 'invalidateQueries')
@@ -56,7 +56,7 @@ const invalidated = (client: QueryClient, key: readonly unknown[]) => client.get
 
 beforeEach(() => {
   vi.clearAllMocks()
-  api.getAiSettings.mockResolvedValue({ providers: [], default: null })
+  api.getAiSettings.mockResolvedValue({ providers: [], default: null, roles: { research: null, writer: null } })
 })
 
 afterEach(cleanup)

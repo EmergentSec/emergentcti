@@ -15,6 +15,7 @@ from cti.api.v1.reports import router as reports_router
 from cti.api.v1.settings import router as settings_router
 from cti.api.v1.stats import router as stats_router
 from cti.api.v1.tags import router as tags_router
+from cti.api.v1.threat_intel import router as threat_intel_router
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -28,6 +29,7 @@ api_router.include_router(allowlist_router, prefix="/allowlist", tags=["allowlis
 api_router.include_router(settings_router, prefix="/settings", tags=["settings"])
 api_router.include_router(ai_settings_router, prefix="/settings/ai", tags=["settings", "ai"])
 api_router.include_router(ai_outbound_router, prefix="/ai/outbound", tags=["ai"])
+api_router.include_router(threat_intel_router, prefix="/threat-intel", tags=["threat-intel"])
 api_router.include_router(stats_router, prefix="/stats", tags=["stats"])
 api_router.include_router(tags_router, prefix="/tags", tags=["tags"])
 api_router.include_router(audit_router, prefix="/audit", tags=["audit"])

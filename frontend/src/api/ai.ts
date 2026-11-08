@@ -6,6 +6,7 @@ import type {
   AiInferenceTestPreview,
   AiModelList,
   AiModelPricingRow,
+  AiModelRole,
   AiPricingList,
   AiProvider,
   AiProviderStatus,
@@ -123,4 +124,13 @@ export async function putAiDefault(payload: AiDefault): Promise<AiDefault> {
 
 export async function deleteAiDefault(): Promise<void> {
   await api.delete(`${BASE}/default`)
+}
+
+export async function putAiRole(role: AiModelRole, payload: AiDefault): Promise<AiDefault> {
+  const { data } = await api.put<AiDefault>(`${BASE}/roles/${role}`, payload)
+  return data
+}
+
+export async function deleteAiRole(role: AiModelRole): Promise<void> {
+  await api.delete(`${BASE}/roles/${role}`)
 }

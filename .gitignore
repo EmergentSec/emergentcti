@@ -20,3 +20,8 @@ CLAUDE.md
 
 # subagent-driven-development scratch
 .superpowers/
+
+# Threat-intel pipeline local state/reports
+data/threat_intel/
+*.threat_intel.log
+feed_state.threat_intel.json

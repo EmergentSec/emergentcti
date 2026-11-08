@@ -3,13 +3,15 @@ import {
   checkAiProvider,
   deleteAiDefault,
   deleteAiProvider,
+  deleteAiRole,
   getAiModels,
   getAiSettings,
   putAiDefault,
   putAiProviderKey,
+  putAiRole,
   runAiInferenceTest,
 } from '@/api/ai'
-import type { AiDefault, AiProvider } from '@/types/ai'
+import type { AiDefault, AiModelRole, AiProvider } from '@/types/ai'
 import { invalidateAiSpendQueries } from './useAiUsage'
 
 export const aiSettingsKey = ['ai-settings'] as const
@@ -110,6 +112,27 @@ export function useClearAiDefault() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => deleteAiDefault(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: aiSettingsKey })
+    },
+  })
+}
+
+export function useSetAiRole() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ role, payload }: { role: AiModelRole; payload: AiDefault }) =>
+      putAiRole(role, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: aiSettingsKey })
+    },
+  })
+}
+
+export function useClearAiRole() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (role: AiModelRole) => deleteAiRole(role),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: aiSettingsKey })
     },
